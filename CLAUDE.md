@@ -276,15 +276,28 @@ DAPI_API_URL      base URL of the public API service (public-api/v1), local or h
 ```
 
 `DAPI_API_URL` is the origin only; the contract's paths already carry `/v1`.
-Skills must fail loudly and early when these are missing, not fall back to a
-default host. Use a key with only the scopes the run needs: PRICING for
+These live in `store/.env` (gitignored) together with `ANTHROPIC_API_KEY`,
+which makes every headless run bill to the API instead of a subscription.
+`run_intake.py` and the test harness source that file. Skills must fail
+loudly and early when a variable they need is missing, not fall back to a
+default host.
+
+Measured cost of the `analyze` stage on two small meshes, 2026-09-03:
+
+| Path | Wall time | Cost | Notes |
+|---|---|---|---|
+| director and lead as model agents (`/dapilot:run-intake`) | 5.4 min | 0.48 to 0.72 USD | one real analysis; the rest is routing turns |
+| `run_intake.py`, workers only | 55 s | 0.21 USD | two real analyses in parallel, about 0.10 each, 8 to 10 turns per worker |
+
+The remaining cost is turns per worker, not routing. The next lever is one
+wrapper script per stage so a worker needs about three turns instead of ten. Use a key with only the scopes the run needs: PRICING for
 intake, ORDER for order triage, a separate print-farm key for fulfilment.
 
 ```bash
-# an intake run over a folder (the director; spawns the lead, which spawns workers)
-export DAPILOT_PYTHON=$PWD/.venv/bin/python
+# an intake run over a folder, headless: director and lead are code, only workers spend tokens
+.venv/bin/python plugins/dapilot/scripts/run_intake.py <folder> [--run my-run] [--dry-run]
+# the same loop from an interactive session, with model agents as director and lead
 claude --plugin-dir plugins/dapilot            # then: /dapilot:run-intake fixtures
-# headless: claude -p --plugin-dir plugins/dapilot "/dapilot:run-intake fixtures my-run"
 
 # the ledger by hand
 .venv/bin/python plugins/dapilot/scripts/ledger.py status --run my-run

@@ -1,10 +1,13 @@
 #!/bin/bash
 # Autonomous test for Phase 0. Two layers:
 #   level 0 (default)  no model: validator, ledger round trip, dapi.py evals, analyze script. Seconds.
-#   --live             also runs the real director headlessly via `claude -p` and asserts on the ledger. Minutes, costs tokens.
+#   --live             also runs run_intake.py on two fresh meshes (workers are real claude -p sessions) and asserts on the ledger. About a minute, about 0.20 USD.
+#   --live-agents      the expensive variant: the director skill via claude -p, with model agents as director and lead. Minutes, about 0.50 USD.
 # Exit 0 only if every assertion passes. Run from the repo root.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# store/.env carries ANTHROPIC_API_KEY (bills claude -p to the API), DAPI_* and DAPILOT_PYTHON.
+if [ -f store/.env ]; then set -a; . store/.env; set +a; fi
 PY=${DAPILOT_PYTHON:-$PWD/.venv/bin/python}
 S=plugins/dapilot/scripts; L=$S/ledger.py; V=$S/validate_result.py; SPEC=plugins/dapilot/skills/dapi-request/eval/openapi.json
 export DAPILOT_PROJECT_DIR=$PWD DAPILOT_PYTHON=$PY
@@ -46,15 +49,53 @@ check "ledger report writes report.md" "$PY $L report --run $RUN && [ -f runs/$R
 rm -rf "runs/$RUN" "$TMPW"; for h in $NEW_ITEMS; do rm -rf "work/$h"; done
 
 if [ "${1:-}" = "--live" ]; then
-  echo "== level 1: live director via claude -p (spawns lead and workers) =="
-  RUN=live-$(date -u +%Y%m%dT%H%M%S); OUT=$(mktemp)
-  claude -p --plugin-dir plugins/dapilot --dangerously-skip-permissions --output-format json \
-    "/dapilot:run-intake fixtures $RUN" > "$OUT" 2>/dev/null || true
-  check "claude -p returned without error" "[ \$(j \"d.get('is_error')\" < $OUT) = False ]"
+  echo "== level 1: run_intake.py with real workers =="
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "billing: ANTHROPIC_API_KEY set (API)"; else echo "billing: no ANTHROPIC_API_KEY, workers will use the logged-in subscription"; fi
+  RUN=live-$(date -u +%Y%m%dT%H%M%S); TMPW=$(mktemp -d); OUT=runs/$RUN.summary.json; mkdir -p runs
+  $PY - "$TMPW" "$$" <<'PYEOF'
+import sys, trimesh
+out, seed = sys.argv[1], int(sys.argv[2])
+trimesh.creation.box(extents=(10 + seed % 7, 5, 3)).export(f"{out}/a.stl")
+trimesh.creation.icosphere(subdivisions=1, radius=4 + (seed % 5)).export(f"{out}/b.stl")
+PYEOF
+  NEW_ITEMS=$(cd "$TMPW" && shasum -a 256 a.stl b.stl | cut -c1-64)
+  echo "run $RUN: launching run_intake.py on 2 fresh meshes (about a minute)"
+  $PY $S/run_intake.py "$TMPW" --run $RUN > "$OUT" 2> runs/$RUN.log || echo "run_intake.py exit code $?"
+  check "run_intake.py reports ok" "[ \$(j \"d.get('ok')\" < $OUT) = True ]"
   check "run state exists" "[ -f runs/$RUN/state.json ]"
   check "all enabled stages done" "[ \$($PY $L status --run $RUN | j \"d['counts']['failed']+d['counts']['blocked']+d['counts']['queued']+d['counts']['running']\") = 0 ]"
   check "report written" "[ -f runs/$RUN/report.md ]"
-  check "every work dir has analysis.json" "for d in work/*/; do [ -f \$d/analysis.json ] || exit 1; done"
+  check "every item in this run has analysis.json" "$PY -c \"import json,sys;s=json.load(open('runs/$RUN/state.json'));sys.exit(0 if all(__import__('os').path.exists(i['workdir']+'/analysis.json') for i in s['items'].values()) else 1)\""
+  check "cost recorded in ledger" "[ \$($PY $L status --run $RUN | j \"d['cost']['usd'] > 0\") = True ]"
+  echo "live run: $(j "'%s USD, %ss, %s workers' % (d.get('usd_workers'), d.get('seconds'), d.get('workers_dispatched'))" < "$OUT")"
+  rm -rf "$TMPW"; for h in $NEW_ITEMS; do rm -rf "work/$h"; done
+fi
+
+if [ "${1:-}" = "--live-agents" ]; then
+  echo "== level 1b: live director via claude -p (model agents as director and lead) =="
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "billing: ANTHROPIC_API_KEY set (API)"; else echo "billing: no ANTHROPIC_API_KEY, claude -p will use the logged-in subscription"; fi
+  RUN=live-$(date -u +%Y%m%dT%H%M%S); mkdir -p runs; OUT=runs/$RUN.claude.json; ERR=runs/$RUN.claude.err
+  # A 529 (API overloaded) or 5xx before the first turn is not a plugin failure. Retry the
+  # launch up to 3 times with a pause; the ledger makes a resumed run idempotent anyway.
+  echo "run $RUN: launching the director. This takes minutes and prints nothing until it ends."
+  echo "  watch from another terminal:  $PY $L status --run $RUN"
+  echo "  raw output lands in:          $OUT"
+  for attempt in 1 2 3; do
+    claude -p --plugin-dir plugins/dapilot --dangerously-skip-permissions --output-format json \
+      "/dapilot:run-intake fixtures $RUN" > "$OUT" 2> "$ERR" || echo "claude -p exit code $? (attempt $attempt)"
+    STATUS=$($PY -c "import json;d=json.load(open('$OUT'));print(d.get('api_error_status') or '')" 2>/dev/null || echo parse)
+    if [ -z "$STATUS" ]; then break; fi
+    echo "attempt $attempt: API error $STATUS before any work (zero tokens billed); waiting 90s and relaunching"
+    sleep 90
+  done
+  check "claude -p returned without error" "[ \$(j \"d.get('is_error')\" < $OUT) = False ]"
+  if ! $PY -c "import json,sys;d=json.load(open('$OUT'));sys.exit(0 if d.get('is_error') is False else 1)" 2>/dev/null; then
+    echo "--- claude -p said (first 40 lines of $OUT and $ERR) ---"; head -c 3000 "$OUT"; echo; head -40 "$ERR"; echo "--- end ---"
+  fi
+  check "run state exists" "[ -f runs/$RUN/state.json ]"
+  check "all enabled stages done" "[ \$($PY $L status --run $RUN | j \"d['counts']['failed']+d['counts']['blocked']+d['counts']['queued']+d['counts']['running']\") = 0 ]"
+  check "report written" "[ -f runs/$RUN/report.md ]"
+  check "every item in this run has analysis.json" "$PY -c \"import json,sys;s=json.load(open('runs/$RUN/state.json'));sys.exit(0 if all(__import__('os').path.exists(i['workdir']+'/analysis.json') for i in s['items'].values()) else 1)\""
   echo "live run cost (claude -p total_cost_usd): $(j "d.get('total_cost_usd')" < "$OUT"), duration s: $(j "round(d.get('duration_ms',0)/1000)" < "$OUT")"
 fi
 

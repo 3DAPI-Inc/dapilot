@@ -259,18 +259,19 @@ def cmd_record(a) -> int:
         rec["status"] = "queued" if rec["attempt"] < state["budget"]["max_attempts"] else "failed"
         if rec["status"] == "failed":
             rec["reason"] = res["reason"]
-    if a.tokens:
+    if a.tokens or a.usd is not None:
         cfg = load_config()
         price = cfg.get("pricing_usd_per_1k_tokens", {}).get(a.model or "inherit", 0.0)
-        usd = a.tokens / 1000 * price
+        usd = a.usd if a.usd is not None else (a.tokens or 0) / 1000 * price
         c = state["cost"]
-        c["tokens"] += a.tokens
+        c["tokens"] += a.tokens or 0
         c["usd"] = round(c["usd"] + usd, 4)
         by = c["by_agent"].setdefault(res["agent"], {"tokens": 0, "usd": 0.0, "results": 0})
         by["tokens"] += a.tokens
         by["usd"] = round(by["usd"] + usd, 4)
         by["results"] += 1
-        rec["tokens"] = a.tokens
+        rec["tokens"] = a.tokens or 0
+        rec["usd"] = round(usd, 4)
     save_state(state)
     return out({"ok": True, "item": res["item"], "stage": res["stage"], "status": rec["status"], "remaining": remaining(state)})
 
@@ -338,7 +339,8 @@ def main() -> int:
     s.add_argument("--department", default="catalogue"); s.add_argument("--stages"); s.set_defaults(fn=cmd_init)
     s = sub.add_parser("next"); s.add_argument("--run", required=True); s.add_argument("--max", type=int); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("record"); s.add_argument("--run", required=True); s.add_argument("--result", required=True)
-    s.add_argument("--tokens", type=int); s.add_argument("--model"); s.set_defaults(fn=cmd_record)
+    s.add_argument("--tokens", type=int); s.add_argument("--usd", type=float, help="exact cost if the runtime reports it; overrides the token price estimate")
+    s.add_argument("--model"); s.set_defaults(fn=cmd_record)
     s = sub.add_parser("status"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_status)
     s = sub.add_parser("report"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_report)
     a = ap.parse_args()

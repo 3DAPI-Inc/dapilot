@@ -27,8 +27,32 @@ claude --plugin-dir /path/to/plugins/dapilot
 /dapilot:dapi-request        # skills are namespaced by plugin name
 ```
 
+## Running a pipeline
+
+```bash
+python scripts/run_intake.py <folder>          # headless; routing is code, workers are claude -p --agent
+python scripts/run_intake.py <folder> --dry-run
+```
+
+`store/.env` (see `store/.env.example` in the host project) supplies
+`ANTHROPIC_API_KEY`, `DAPI_*` and `DAPILOT_PYTHON`.
+
 ## Skills
 
-| Skill | Does |
+General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `work-ledger`.
+
+| Job skill | Does |
 |---|---|
 | `dapi-request` | Builds, validates and sends a request to any public API route from the live OpenAPI contract. Every other skill goes through it. |
+| `analyze-model` | First intake stage: geometry facts for one model file via the bundled mesh script. |
+| `run-intake` | Director skill for an interactive session; the headless equivalent is `scripts/run_intake.py`. |
+
+## Scripts
+
+| Script | Does |
+|---|---|
+| `dapi.py` | spec-driven API client: `spec`, `ops`, `describe`, `validate`, `call`, `upload` |
+| `ledger.py` | run state: `init`, `next`, `record`, `status`, `report`; the only writer of `runs/<id>/state.json` |
+| `validate_result.py` | the result-line contract every level checks on the level below |
+| `run_intake.py` | deterministic director and lead: launches one worker per brief |
+| `analyze_mesh.py`, `load_3mf.py`, `render_turntable.py`, `make_fixtures.py` | geometry and rendering |
