@@ -162,6 +162,8 @@ def main() -> int:
     ap.add_argument("--budget-per-worker", type=float)
     ap.add_argument("--stages")
     ap.add_argument("--dry-run", action="store_true", help="init and show the first pass of worker commands; launch nothing")
+    ap.add_argument("--billing", choices=["auto", "api", "subscription"], default=os.environ.get("DAPILOT_BILLING", "auto"),
+                    help="api: require ANTHROPIC_API_KEY; subscription: hide the key from workers so they use the logged-in account; auto: whatever is set")
     a = ap.parse_args()
 
     root = project_root()
@@ -174,7 +176,11 @@ def main() -> int:
         print(json.dumps({"ok": False, "reason": f"unknown department {a.department}"})); return 2
     if not shutil.which("claude"):
         print(json.dumps({"ok": False, "reason": "claude CLI not on PATH"})); return 2
-    billing = "API key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription (no ANTHROPIC_API_KEY)"
+    if a.billing == "subscription":
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+    if a.billing == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
+        print(json.dumps({"ok": False, "reason": "--billing api but ANTHROPIC_API_KEY is not set"})); return 2
+    billing = "API key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription (logged-in account)"
     a.max_workers = a.max_workers or dept.get("max_workers") or cfg.get("max_workers_per_lead", 3)
     a.budget_per_worker = a.budget_per_worker or cfg.get("budget", {}).get("usd_per_item", 0.5)
     ceiling = cfg.get("budget", {}).get("usd_per_run")
