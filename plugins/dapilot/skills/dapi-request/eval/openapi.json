@@ -1,0 +1,5685 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "description": "Returns server status, API key identity, and current rate-limit counters for the authenticated key. Call this to confirm connectivity and check how many requests remain before the limit resets.",
+        "operationId": "getMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "API key is valid and the server is reachable.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Total requests allowed per 60-second window.",
+                "schema": {
+                  "type": "integer",
+                  "example": 500
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current window.",
+                "schema": {
+                  "type": "integer",
+                  "example": 498
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix timestamp (seconds) when the current window expires and the counter resets.",
+                "schema": {
+                  "type": "integer",
+                  "example": 1742731200
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing, invalid, or inactive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "API key health check",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/v1/quotes/upload_file": {
+      "post": {
+        "description": "Generates a pre-signed S3 URL that lets you upload an `.stl` file directly to storage, bypassing the API server entirely. Call this first - you need the returned `s3_key` to submit a quote.\n\n## Upload Steps\n\n1. Call this endpoint to receive an `upload_url` and `s3_key`.\n2. `PUT` your STL file to `upload_url` with header `Content-Type: application/octet-stream`. **Maximum file size: 250 MB.**\n3. Pass the `s3_key` to `POST /quotes` to start the pricing process.\n\nThe upload URL expires after 1 hour. After expiry you must call this endpoint again.\n\n## Daily Quote Limit\n\nA global daily limit on quote submissions is enforced to prevent abuse. Integration accounts are exempt from it. This endpoint is where the limit is checked and counted, since the quote record is created here. When a limit is active, successful responses include an `X-Daily-Quotes-Remaining` header with the number of quotes that can still be submitted today. Submitting once the limit is exhausted returns `429 Too Many Requests`. The limit resets at midnight.",
+        "operationId": "uploadQuoteFile",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadFileRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pre-signed URL ready. Upload your STL file to `upload_url` before it expires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadFileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use quote endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Daily quote limit reached - try again tomorrow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get a pre-signed upload URL",
+        "tags": [
+          "Quotes"
+        ]
+      }
+    },
+    "/v1/quotes": {
+      "post": {
+        "description": "Queues an uploaded STL file for automated price estimation. You must first obtain an `s3_key` by uploading the file via `POST /quotes/upload_file`.\n\nThe response includes a `publicId` you can use to poll `GET /quotes/:publicId` until `status` reaches `DONE` or `ERROR`. Alternatively, configure a webhook URL in the dashboard to receive a notification when processing completes.\n\n## Webhook Notifications\n\nWhen processing finishes, we send an HTTP `POST` to your configured webhook URL. Any `webhook_metadata` you attached to this request is echoed back unchanged in the payload.\n\n### HMAC Signature Verification\n\nEvery webhook delivery includes two headers so you can verify authenticity:\n\n- **`X-Dapi-Webhook-Signature`**: `sha256=<hex-digest>`\n- **`X-Dapi-Webhook-Timestamp`**: Unix timestamp (seconds) when the payload was signed\n\n**Verification steps:**\n\n1. Read the raw request body as a UTF-8 string.\n2. Concatenate: `{X-Dapi-Webhook-Timestamp}.{raw_body}`\n3. Compute HMAC-SHA256 of that string using your webhook secret as the key.\n4. Compare the hex digest with the value after `sha256=` in the signature header (use constant-time comparison to prevent timing attacks).\n5. Reject the payload if the timestamp is older than 5 minutes (replay protection).\n\n### Webhook Payload Shape\n\n```json\n{\n  \"event\": \"quote.completed\",\n  \"quote\": {\n    \"public_id\": \"dapi_a3f9b2c1e4\",\n    \"status\": \"DONE\",\n    \"result\": 12.34,\n    \"error_message\": null\n  },\n  \"webhook_metadata\": { \"order_id\": \"ORD-123\", \"notify\": true },\n  \"timestamp\": \"2026-03-25T12:05:00.000Z\"\n}\n```\n\n### Expected Response\n\nReturn any `2xx` status code to acknowledge receipt. We retry on non-2xx responses.",
+        "operationId": "createQuote",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateQuoteRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Quote accepted and queued for processing. Poll with the returned `publicId` to retrieve the result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `s3_key` is invalid, not found, or has already been submitted for another quote.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use quote endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Submit an STL file for pricing",
+        "tags": [
+          "Quotes"
+        ]
+      },
+      "get": {
+        "description": "Returns a paginated list of your quotes, sorted by creation date (newest first). Each entry shows the current processing status and, once complete, the estimated per-unit price. Use the `publicId` field to fetch full details via `GET /quotes/:publicId`.",
+        "operationId": "listQuotes",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index. Defaults to `1`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Number of quotes per page. Maximum is `100`. Defaults to `20`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of quotes for the authenticated account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListQuotesResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use quote endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List your quotes",
+        "tags": [
+          "Quotes"
+        ]
+      }
+    },
+    "/v1/quotes/status_check": {
+      "get": {
+        "description": "Verifies that your API key has permission to use quote endpoints. Call this before integrating the quote workflow if you want to confirm access is granted without side effects.",
+        "operationId": "getQuoteStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The key has permission to submit and retrieve quotes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteStatusCheckResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use quote endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Check quote access",
+        "tags": [
+          "Quotes"
+        ]
+      }
+    },
+    "/v1/quotes/{publicId}": {
+      "get": {
+        "description": "Returns the quote matching the given `publicId`. While `status` is `PROCESSING`, poll this endpoint periodically until it transitions to `DONE` or `ERROR`. When `status` is `DONE`, read **`result`** for the estimated per-unit price in USD. If a webhook URL is configured in your dashboard, you will be notified automatically when processing completes - no polling required.",
+        "operationId": "getQuoteByPublicId",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "description": "The `publicId` returned when the quote was submitted.",
+            "schema": {
+              "example": "dapi_a3f9b2c1e4",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested quote object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotePublicResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request could not be parsed or validated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use quote endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No quote with this `publicId` exists for your account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one quote",
+        "tags": [
+          "Quotes"
+        ]
+      }
+    },
+    "/v1/designer/orders": {
+      "get": {
+        "description": "Returns a paginated list of your orders, sorted by creation date (newest first). Each entry includes the current lifecycle status, shipping address, item breakdown, and tracking details when available. Use the `order_id` field to fetch full details via `GET /orders/:orderId`.",
+        "operationId": "listOrders",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of orders for the authenticated account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOrdersResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List your orders",
+        "tags": [
+          "Designer Orders"
+        ]
+      },
+      "post": {
+        "description": "Places a new order by combining one or more completed quotes. Each item references a quote by its `publicId` and specifies the filament and quantity to produce.\n\n**Prerequisites:**\n- All referenced quotes must have `status` equal to `DONE`.\n- All filament codes must be valid - retrieve available codes from `GET /orders/filaments`.\n- At least one item is required.\n- Each item lists its filaments in `filaments`, one code per colour slot in slot order; a single-colour design sends a one-element array.\n\n**Multi-colour items:** `filaments` lists one code per colour slot in the design's own extruder order, so `[\"PLA-GREEN\",\"PLA-RED\"]` and `[\"PLA-RED\",\"PLA-GREEN\"]` order different products. Each distinct combination becomes its own SKU; repeating the same quote with the same combination reuses it.\n\nThe order is created with status `pending`. Use `POST /orders/:orderId/pay` to pay for it and move it into production.",
+        "operationId": "createOrder",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order created with status `pending`. Pay with `POST /orders/:orderId/pay` to proceed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrderResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request body failed validation, a filament code is unrecognised, or a referenced quote does not have `status` `DONE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "One or more referenced quote `publicId` values were not found for your account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Create an order from completed quotes",
+        "tags": [
+          "Designer Orders"
+        ]
+      }
+    },
+    "/v1/designer/orders/filaments": {
+      "get": {
+        "description": "Returns all filament options currently available for ordering. Use the `code` value (e.g. `PLA-GREEN`) in the `filaments` array of each item when creating an order via `POST /orders`.",
+        "operationId": "listFilaments",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "All filaments available for use in orders.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListFilamentsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List available filaments",
+        "tags": [
+          "Designer Orders"
+        ]
+      }
+    },
+    "/v1/designer/orders/shipping/rates": {
+      "get": {
+        "description": "Returns every shipping zone, the countries it covers as ISO 3166-1 alpha-2 codes, and the price of the first item in each weight tier plus each additional item.\n\n**How a parcel is priced:**\n- The tier comes from the HEAVIEST single item, not the summed weight of the order. Two small items ship as one Small plus one additional item, not as a Medium.\n- Items under `extra_small_max_grams` are exempt from `additional_item_price`.\n- A destination no zone lists falls to the zone with `catch_all` set.\n- An order that cannot be rated at all is charged `flat_rate`.\n\nUse `POST /orders/shipping/estimate` to price a specific order rather than deriving it.",
+        "operationId": "getShippingRates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The active rate card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippingRatesResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get the shipping rate card",
+        "tags": [
+          "Designer Orders"
+        ]
+      }
+    },
+    "/v1/designer/orders/shipping/estimate": {
+      "post": {
+        "description": "Prices shipping for a set of quotes and a destination, without placing an order. Runs the same weigh -> tier -> price steps order creation does, against the same rate card, so the number returned is the number the order will be charged.\n\nFilaments are not accepted: colour does not change what a parcel weighs.\n\nA destination that cannot be rated against the card is still priced - `shipping` is always what the order will be charged - but comes back with `zone` and `tier` null.",
+        "operationId": "estimateShipping",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateShippingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The shipping cost this order would be charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateShippingResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request body failed validation, or a quote has not finished slicing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "One or more quotes do not exist for your account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Estimate shipping for an order",
+        "tags": [
+          "Designer Orders"
+        ]
+      }
+    },
+    "/v1/designer/orders/{orderId}": {
+      "get": {
+        "description": "Returns the order matching the given `orderId`. Includes current status, recipient details, item breakdown, and tracking information once the order ships.\n\n## Webhook Notifications\n\nWhen an order status changes to `paid`, `in_production`, `shipping`, or `completed`, we send an HTTP `POST` to your configured webhook URL (set via the dashboard). Each notification is signed - verify the `X-Dapi-Webhook-Signature` header using your webhook secret.\n\n### Webhook Payload Shape\n\n```json\n{\n  \"event\": \"order.in_production\",\n  \"order\": {\n    \"order_id\": \"AP7K2M9X\",\n    \"status\": \"in_production\",\n    \"tracking_number\": null,\n    \"courier\": null\n  },\n  \"timestamp\": \"2026-03-25T12:05:00.000Z\"\n}\n```\n\n### Expected Response\n\nReturn any `2xx` status code to acknowledge receipt. We retry on non-2xx responses.",
+        "operationId": "getOrderById",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "description": "The unique order identifier returned when the order was created.",
+            "schema": {
+              "example": "AP7K2M9X",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested order object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPublicResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No order with this `orderId` exists for your account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one order",
+        "tags": [
+          "Designer Orders"
+        ]
+      }
+    },
+    "/v1/print-farm/orders": {
+      "get": {
+        "description": "Returns a paginated list of orders allocated to your print farm, sorted by creation date (newest first). Results can be narrowed with the `status`, `email`, `phone`, `designerName`, and `courier` filters. Requires an API key with the `READ_ORDERS` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmOrders",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by order status. Accepts a comma-separated list to match any of several statuses.",
+            "schema": {
+              "example": "allocated,printing",
+              "type": "string"
+            }
+          },
+          {
+            "name": "email",
+            "required": false,
+            "in": "query",
+            "description": "Filter by customer email (case-insensitive partial match).",
+            "schema": {
+              "example": "jane@example.com",
+              "type": "string"
+            }
+          },
+          {
+            "name": "phone",
+            "required": false,
+            "in": "query",
+            "description": "Filter by customer phone number (case-insensitive partial match).",
+            "schema": {
+              "example": "555 123",
+              "type": "string"
+            }
+          },
+          {
+            "name": "designerName",
+            "required": false,
+            "in": "query",
+            "description": "Filter by designer name (case-insensitive partial match).",
+            "schema": {
+              "example": "John Smith",
+              "type": "string"
+            }
+          },
+          {
+            "name": "courier",
+            "required": false,
+            "in": "query",
+            "description": "Filter by shipping carrier (case-insensitive partial match).",
+            "schema": {
+              "example": "ups",
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_after",
+            "required": false,
+            "in": "query",
+            "description": "Return only orders created on or after this ISO 8601 timestamp.",
+            "schema": {
+              "example": "2025-01-01T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "required": false,
+            "in": "query",
+            "description": "Return only orders created on or before this ISO 8601 timestamp.",
+            "schema": {
+              "example": "2025-12-31T23:59:59.999Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "allocated_after",
+            "required": false,
+            "in": "query",
+            "description": "Return only orders allocated on or after this ISO 8601 timestamp.",
+            "schema": {
+              "example": "2025-01-01T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "allocated_before",
+            "required": false,
+            "in": "query",
+            "description": "Return only orders allocated on or before this ISO 8601 timestamp.",
+            "schema": {
+              "example": "2025-12-31T23:59:59.999Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "expand",
+            "required": false,
+            "in": "query",
+            "description": "Comma-separated list of related resources to inline in the response. Allowed paths: `items.sku`, `items.sku.designs`, `items.sku.extras`, `items.sku.materials`. Requesting a child path automatically enables its parent.",
+            "schema": {
+              "example": "items.sku,items.sku.designs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of orders allocated to the authenticated print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmOrdersResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List orders allocated to your print farm",
+        "tags": [
+          "Print Farm Orders"
+        ]
+      }
+    },
+    "/v1/print-farm/orders/{orderId}": {
+      "get": {
+        "description": "Returns the order matching the given `orderId`, scoped to your print farm. Requires an API key with the `READ_ORDERS` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmOrder",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "description": "The unique order identifier.",
+            "schema": {
+              "example": "AP7K2M9X",
+              "type": "string"
+            }
+          },
+          {
+            "name": "expand",
+            "required": false,
+            "in": "query",
+            "description": "Comma-separated list of related resources to inline in the response. Allowed paths: `items.sku`, `items.sku.designs`, `items.sku.extras`, `items.sku.materials`. Requesting a child path automatically enables its parent.",
+            "schema": {
+              "example": "items.sku,items.sku.designs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmOrderResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No order with this `orderId` is allocated to your print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one order allocated to your print farm",
+        "tags": [
+          "Print Farm Orders"
+        ]
+      }
+    },
+    "/v1/print-farm/orders/{orderId}/status": {
+      "patch": {
+        "description": "Moves an order belonging to your print farm to a new status. The print-farm transition matrix is intentionally tighter than the admin surface - only specific transitions are accepted, and any other change returns `400`.\n\nCurrently supported:\n- `paid → in_production`\n- `in_production → shipping` - requires `tracking_number` and `courier`. Pass `courier` as a code from `GET /print-farm/courier-options` (e.g. `ups`). For carriers not in the catalog, use `courier: \"other\"` together with `courier_name`; the order will be flagged for manual ShipStation sync.\n- `shipping → returned` and `completed → returned` - no body fields beyond `status`. Triggers an internal admin notification; the customer is NOT emailed and no webhook is delivered.\n\nSame-status requests are a no-op. Side effects (designer webhook delivery, customer status email, ShipStation mark-shipped on `shipping`, admin manual-sync alert when applicable, returned-order admin notification) fire after the DB update and never fail the request - check your webhook + email logs to verify. Requires an API key with the `WRITE_ORDERS` (or `FULL`) permission scope.",
+        "operationId": "updatePrintFarmOrderStatus",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "description": "The unique order identifier.",
+            "schema": {
+              "example": "AP7K2M9X",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Status transition request body.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePrintFarmOrderStatusBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated (or unchanged if the request was a no-op).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatePrintFarmOrderStatusResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body validation failed, or the requested transition is not allowed from the order's current status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No order with this `orderId` is allocated to your print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Transition an order to a new status",
+        "tags": [
+          "Print Farm Orders"
+        ]
+      }
+    },
+    "/v1/print-farm/skus": {
+      "get": {
+        "description": "Returns a paginated list of SKUs visible to your print farm. A SKU is visible if it appears in an order allocated to your farm, or if its `stock_list` references a stock you hold inventory for. Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmSkus",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by SKU id. Accepts a comma-separated list of UUIDs to match any.",
+            "schema": {
+              "example": "sku_aB3xKp9wFqZ7vM2nLpHt12cN8jR3sLkPm",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by SKU status. Accepts a comma-separated list (active, inactive, deleted).",
+            "schema": {
+              "example": "active",
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "required": false,
+            "in": "query",
+            "description": "Filter by SKU code (case-insensitive partial match).",
+            "schema": {
+              "example": "PLA-RED",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of SKUs visible to the authenticated print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmSkusResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List SKUs visible to your print farm",
+        "tags": [
+          "Print Farm SKUs"
+        ]
+      }
+    },
+    "/v1/print-farm/skus/{id}": {
+      "get": {
+        "description": "Returns the SKU matching the given `id`, only if it is visible to your print farm (via an allocated order or held stock). Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmSku",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public SKU identifier (`sku_…`) returned by the list endpoint.",
+            "schema": {
+              "example": "sku_aB3xKp9wFqZ7vM2nLpHt12cN8jR3sLkPm",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested SKU.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmSkuResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No SKU with this `id` is visible to your print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one SKU visible to your print farm",
+        "tags": [
+          "Print Farm SKUs"
+        ]
+      }
+    },
+    "/v1/print-farm/designs": {
+      "get": {
+        "description": "Returns a paginated list of approved designs reachable from your farm. A design is visible iff it is referenced by a SKU that appears in one of your allocated orders, or in a SKU whose stock is held at one of your farms. Each entry includes a short-lived presigned URL for downloading the design file. Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmDesigns",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by design id. Accepts a comma-separated list of UUIDs.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "name",
+            "required": false,
+            "in": "query",
+            "description": "Filter by design name (case-insensitive partial match).",
+            "schema": {
+              "example": "dragon",
+              "type": "string"
+            }
+          },
+          {
+            "name": "ams_required",
+            "required": false,
+            "in": "query",
+            "description": "Filter to designs that require (true) or do not require (false) an AMS.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "assembly",
+            "required": false,
+            "in": "query",
+            "description": "Filter to designs that require (true) or do not require (false) assembly.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "required_filament",
+            "required": false,
+            "in": "query",
+            "description": "Filter to designs that require (true) or do not require (false) a specific filament.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of approved designs visible to the authenticated farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmDesignsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List approved designs visible to your farm",
+        "tags": [
+          "Print Farm Designs"
+        ]
+      }
+    },
+    "/v1/print-farm/designs/{id}": {
+      "get": {
+        "description": "Returns the approved design matching the given `id`, scoped to designs reachable from your farm via the SKU graph (orders ∪ stock_levels), with a short-lived presigned URL for downloading the design file. Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmDesign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public design identifier (`dsg_…`) returned by the list endpoint.",
+            "schema": {
+              "example": "dsg_kP4xT8aBnLf2sH9eY3jZ5dM7cR1vQbWtJ",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested design.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmDesignResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No approved design with this `id` is visible to your farm (it may exist in the catalog but isn't reachable via any of your orders or stock_levels).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one approved design visible to your farm",
+        "tags": [
+          "Print Farm Designs"
+        ]
+      }
+    },
+    "/v1/print-farm/extras": {
+      "get": {
+        "description": "Returns a paginated list of approved extras reachable from your farm. An extra is visible iff it is referenced in `extra_list` of a SKU that appears in one of your allocated orders, or in a SKU whose stock is held at one of your farms. Extras outside that chain are not returned. Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmExtras",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by extra id. Accepts a comma-separated list of UUIDs.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "name",
+            "required": false,
+            "in": "query",
+            "description": "Filter by extra name (case-insensitive partial match).",
+            "schema": {
+              "example": "spring",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of approved extras visible to the authenticated farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmExtrasResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List approved extras visible to your farm",
+        "tags": [
+          "Print Farm Extras"
+        ]
+      }
+    },
+    "/v1/print-farm/extras/{id}": {
+      "get": {
+        "description": "Returns the approved extra matching the given `id`, scoped to extras reachable from your farm via the SKU graph (orders ∪ stock_levels). Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmExtra",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public extra identifier (`xtr_…`) returned by the list endpoint.",
+            "schema": {
+              "example": "xtr_mW2yH7cVjPq8rT5dN3kFx9eL4bA1uZcRh",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested extra.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmExtraResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No approved extra with this `id` is visible to your farm (it may exist in the catalog but isn't reachable via any of your orders or stock_levels).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one approved extra visible to your farm",
+        "tags": [
+          "Print Farm Extras"
+        ]
+      }
+    },
+    "/v1/print-farm/materials": {
+      "get": {
+        "description": "Returns a paginated list of materials reachable from your farm, sorted by name. A material is visible iff it is referenced as a `default`-type entry in `skus.design_list[].materials[]` of a SKU that appears in one of your allocated orders, or in a SKU whose stock is held at one of your farms. Materials outside that chain are not returned. Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmMaterials",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by material id. Accepts a comma-separated list of UUIDs.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "required": false,
+            "in": "query",
+            "description": "Filter by material name (case-insensitive partial match).",
+            "schema": {
+              "example": "PLA",
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "description": "Filter by material type (case-insensitive partial match).",
+            "schema": {
+              "example": "PETG",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of materials visible to the authenticated farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmMaterialsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List materials visible to your farm",
+        "tags": [
+          "Print Farm Materials"
+        ]
+      }
+    },
+    "/v1/print-farm/materials/{id}": {
+      "get": {
+        "description": "Returns the material matching the given `id`, scoped to materials reachable from your farm via the SKU graph (orders ∪ stock_levels). Requires an API key with the `SKU` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmMaterial",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public material identifier (`mat_…`) returned by the list endpoint.",
+            "schema": {
+              "example": "mat_jR6tN9pXq4sL8mB3dK7vH2cF5wYzA1ePsK",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested material.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmMaterialResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No material with this `id` is visible to your farm (it may exist in the catalog but isn't referenced via any SKU reachable through your orders or stock_levels).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one material visible to your farm",
+        "tags": [
+          "Print Farm Materials"
+        ]
+      }
+    },
+    "/v1/print-farm/stock-levels": {
+      "get": {
+        "description": "Returns a paginated list of stock-level rows belonging to your print farm, sorted by creation date (newest first). Filter by `status`, `stock_id`, or `order_id`. Requires an API key with the `READ_STOCK` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmStockLevels",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by status. Accepts a comma-separated list (pending, in_production, completed, consumed).",
+            "schema": {
+              "example": "pending,in_production",
+              "type": "string"
+            }
+          },
+          {
+            "name": "stock_id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by parent stock public id (`stk_…`). Unknown or wrong-type values return an empty result rather than an error.",
+            "schema": {
+              "example": "stk_aB3xKp9wFqZ7vM2nLpHt12cN8jR3sLk",
+              "type": "string"
+            }
+          },
+          {
+            "name": "order_id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by order id (exact match).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of stock levels belonging to the authenticated print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmStockLevelsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List stock levels at your print farm",
+        "tags": [
+          "Print Farm Stock Levels"
+        ]
+      }
+    },
+    "/v1/print-farm/stock-levels/{id}": {
+      "get": {
+        "description": "Returns a single stock-level row by id, scoped to your print farm. Requires an API key with the `READ_STOCK` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmStockLevel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public stock-level identifier (`slv_…`) returned by the list endpoint.",
+            "schema": {
+              "example": "slv_hG5dC2vKrPm8nT3sJ6yF1xL9bQ4wA7uZdF",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested stock level.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmStockLevelResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No stock level with this `id` is allocated to your print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one stock level at your print farm",
+        "tags": [
+          "Print Farm Stock Levels"
+        ]
+      }
+    },
+    "/v1/print-farm/stock-levels/{id}/items-made": {
+      "patch": {
+        "description": "Increments `items_made` on a specific stock-level row by the given `quantity`. Transitions `pending → in_production` on the first non-zero increment, and `in_production → completed` when `items_made` reaches `stock_items_purchased` - completion also credits the farm wallet (one `payments` row, one `wallet.balance` bump) using `stock_level.manufacturer_price` as the payout amount.\n\nPass an `Idempotency-Key` header (any opaque string up to 255 chars) to make retries safe: a second request with the same key + body returns the cached response without re-executing. Same key with a different body returns `422`; an in-flight retry returns `409`.\n\nRequires an API key with the `WRITE_STOCK` (or `FULL`) permission scope.",
+        "operationId": "addPrintFarmStockLevelItemsMade",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public stock-level identifier (`slv_…`).",
+            "schema": {
+              "example": "slv_hG5dC2vKrPm8nT3sJ6yF1xL9bQ4wA7uZdF",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque caller-generated key (UUID recommended). When present, identical requests with the same key + body return the cached prior response without re-executing. Up to 255 characters.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Quantity to add to `items_made` for this stock level.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddStockLevelItemsMadeBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated stock-level row.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmStockLevelResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body validation failed, or the requested `quantity` would push `items_made` past `stock_items_purchased`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No stock level with this `id` is allocated to your print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The stock level is `consumed`, was modified concurrently, or another request with the same `Idempotency-Key` is already in flight.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`Idempotency-Key` reuse with a different request body, or the key exceeded the maximum length (255 chars).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Add items printed to a stock level",
+        "tags": [
+          "Print Farm Stock Levels"
+        ]
+      }
+    },
+    "/v1/print-farm/stocks": {
+      "get": {
+        "description": "Returns a paginated list of stocks that have at least one `stock_level` row at one of your farms, sorted by creation date (newest first). Filter by `id`, `name`, or `approval_status`. Requires an API key with the `READ_STOCK` (or `FULL`) permission scope.",
+        "operationId": "listPrintFarmStocks",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "1-based page index.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "description": "Page size (max 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "id",
+            "required": false,
+            "in": "query",
+            "description": "Filter by stock id. Accepts a comma-separated list of UUIDs.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "name",
+            "required": false,
+            "in": "query",
+            "description": "Filter by stock name (case-insensitive partial match).",
+            "schema": {
+              "example": "Dragon",
+              "type": "string"
+            }
+          },
+          {
+            "name": "approval_status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by approval status. Accepts a comma-separated list (e.g. `approved,pending`).",
+            "schema": {
+              "example": "approved",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of stocks visible to the authenticated print farm.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmStocksResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`page` or `page_size` is outside the allowed range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List stocks visible to your print farm",
+        "tags": [
+          "Print Farm Stocks"
+        ]
+      }
+    },
+    "/v1/print-farm/stocks/{id}": {
+      "get": {
+        "description": "Returns a single stock by id, scoped to stocks that have a `stock_level` row at one of your farms. Requires an API key with the `READ_STOCK` (or `FULL`) permission scope.",
+        "operationId": "getPrintFarmStock",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The public stock identifier (`stk_…`) returned by the list endpoint.",
+            "schema": {
+              "example": "stk_fL3sB8eYzKnQ7mX2dC9vR4tH6jW1uPbAcN",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested stock.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintFarmStockResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No stock with this `id` has any stock_level at your print farms.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get one stock visible to your print farm",
+        "tags": [
+          "Print Farm Stocks"
+        ]
+      }
+    },
+    "/v1/print-farm/courier-options": {
+      "get": {
+        "description": "Returns every available courier option (code + name) for use when updating an order to `shipping`. The list is the same for every caller. Always includes an `other` entry as a fallback for couriers not in the catalog.",
+        "operationId": "listPrintFarmCourierOptions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The list of available courier options.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPrintFarmCourierOptionsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have the required permission scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List available courier options",
+        "tags": [
+          "Print Farm Courier Options"
+        ]
+      }
+    },
+    "/v1/orders/{orderId}/pay": {
+      "post": {
+        "description": "Pay for a pending order. Three payment methods are available:\n\n- **`wallet`**: Debit the order amount directly from your wallet balance. Fails if the balance is insufficient.\n- **`wallet_auto`**: If wallet balance is insufficient, automatically top up from your saved card to the configured auto-topup amount, then debit.\n- **`wallet_difference`**: If wallet balance is insufficient, automatically top up only the deficit from your saved card, then debit.\n\nBoth `wallet_auto` and `wallet_difference` require a saved card on your wallet.\n\nThis endpoint is idempotent - calling it on an already-paid order returns `409 Conflict`.",
+        "operationId": "payOrder",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "description": "The unique order identifier returned when the order was created.",
+            "schema": {
+              "example": "AP-A1B2C3",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayOrderRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment successful. Order status is now `paid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayOrderResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Wallet balance is insufficient and no auto-topup is configured, or no saved card is on file for the selected payment method.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Card charge failed. The payment could not be confirmed - verify your saved card details or add a new card via the dashboard.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key does not have permission to use order endpoints, or this order belongs to a different account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No order with this `orderId` exists for your account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The order has already been paid. No further action is needed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded - wait until the window resets before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected error occurred on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Pay for an order using wallet balance",
+        "tags": [
+          "Designer Orders"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "dapi Public API v1",
+    "description": "",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "api_key": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    },
+    "schemas": {
+      "ApiKeyStatusDto": {
+        "type": "object",
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "example": true,
+            "description": "Confirms the API key was found. A key may exist but still be inactive - check `active` to determine if requests will be accepted."
+          },
+          "active": {
+            "type": "boolean",
+            "example": true,
+            "description": "Indicates the key is currently enabled. Requests from an inactive key are rejected with `401`."
+          },
+          "name": {
+            "type": "string",
+            "example": "My production key",
+            "description": "Label you assigned to this key in the dashboard, for your own reference."
+          }
+        },
+        "required": [
+          "exists",
+          "active",
+          "name"
+        ]
+      },
+      "RateLimitStatusDto": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "example": 500,
+            "description": "Total requests allowed per 60-second window for this key."
+          },
+          "remaining": {
+            "type": "number",
+            "example": 498,
+            "description": "Requests still available before the limit is enforced. Drops to `0` when exhausted; resets when the window expires."
+          },
+          "reset_at": {
+            "type": "string",
+            "example": "2026-03-23T12:00:00.000Z",
+            "description": "ISO 8601 timestamp at which the current window expires and the counter resets to the full limit.",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "limit",
+          "remaining",
+          "reset_at"
+        ]
+      },
+      "MeStatusResponse": {
+        "type": "object",
+        "properties": {
+          "server_running": {
+            "type": "boolean",
+            "example": true,
+            "description": "Always `true` when you receive a `200` - confirms the server is reachable."
+          },
+          "api_key": {
+            "description": "Identity and activation status of the key used to authenticate this request.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ApiKeyStatusDto"
+              }
+            ]
+          },
+          "rate_limit": {
+            "description": "Current rate-limit counters for this key. Use `remaining` and `reset_at` to throttle your integration proactively.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateLimitStatusDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "server_running",
+          "api_key",
+          "rate_limit"
+        ]
+      },
+      "ApiErrorResponse": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "number",
+            "example": 401,
+            "description": "HTTP status code"
+          },
+          "error": {
+            "type": "string",
+            "example": "Unauthorized",
+            "description": "Short error label matching the HTTP status"
+          },
+          "message": {
+            "type": "string",
+            "example": "Invalid or inactive API key.",
+            "description": "Human-readable description of what went wrong"
+          }
+        },
+        "required": [
+          "statusCode",
+          "error",
+          "message"
+        ]
+      },
+      "WebhookQuotePayloadDto": {
+        "type": "object",
+        "properties": {
+          "public_id": {
+            "type": "string",
+            "example": "dapi_a3f9b2c1e4",
+            "description": "Identifier of the quote that triggered this event."
+          },
+          "status": {
+            "type": "string",
+            "example": "DONE",
+            "enum": [
+              "DONE",
+              "ERROR"
+            ],
+            "description": "Terminal status of the quote. `DONE` means a price is available; `ERROR` means the file could not be priced."
+          },
+          "result": {
+            "type": "object",
+            "example": 12.34,
+            "nullable": true,
+            "description": "Estimated price per unit in USD. Populated when `status` is `DONE`, otherwise `null`."
+          },
+          "error_message": {
+            "type": "object",
+            "example": null,
+            "nullable": true,
+            "description": "Reason the quote failed. Populated when `status` is `ERROR`, otherwise `null`."
+          }
+        },
+        "required": [
+          "public_id",
+          "status"
+        ]
+      },
+      "WebhookPayloadExampleDto": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "example": "quote.completed",
+            "enum": [
+              "quote.completed",
+              "quote.failed"
+            ],
+            "description": "Identifies what happened. `quote.completed` means the file was priced successfully; `quote.failed` means it could not be processed."
+          },
+          "quote": {
+            "description": "Quote details at the time of the event.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookQuotePayloadDto"
+              }
+            ]
+          },
+          "webhook_metadata": {
+            "type": "object",
+            "example": {
+              "order_id": "ORD-123",
+              "notify_slack": true
+            },
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "Metadata you attached when creating the quote, echoed back unchanged."
+          },
+          "timestamp": {
+            "type": "string",
+            "example": "2026-03-25T12:05:00.000Z",
+            "description": "ISO 8601 timestamp of when this payload was generated and the webhook was dispatched."
+          }
+        },
+        "required": [
+          "event",
+          "quote",
+          "timestamp"
+        ]
+      },
+      "UploadFileRequestDto": {
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "Name of the file you are about to upload, used only to keep its extension.\n\nThe slicer picks its model loader from the file extension, so a `.3mf` stored under an `.stl` name cannot be read and the quote fails with \"The input model file to the slicer can not be parsed\". Pass the real name and the extension is preserved.\n\nSupported: `.stl`, `.3mf`, `.obj`, `.step`, `.stp`. Anything else is rejected. Omit this field and the upload is treated as `.stl`, which is what callers got before this field existed.",
+            "example": "bracket-v2.3mf",
+            "maxLength": 255
+          }
+        }
+      },
+      "UploadFileResponse": {
+        "type": "object",
+        "properties": {
+          "publicId": {
+            "type": "string",
+            "description": "Identifier for this quote - use it to track the quote after submitting.",
+            "example": "dapi_a3f9b2c1e4"
+          },
+          "upload_url": {
+            "type": "string",
+            "description": "Pre-signed S3 URL. Send a `PUT` request with the raw STL file as the body and `Content-Type: application/octet-stream`. Max file size: 250 MB.",
+            "example": "https://s3.eu-central-1.amazonaws.com/..."
+          },
+          "s3_key": {
+            "type": "string",
+            "description": "The S3 key for your uploaded file. Pass this to `POST /quotes` to start the quoting process.",
+            "example": "public-api/quotes/abc-123/input/1711000000000-upload.stl"
+          },
+          "expires_in": {
+            "type": "number",
+            "description": "Number of seconds until the upload URL expires.",
+            "example": 3600
+          }
+        },
+        "required": [
+          "publicId",
+          "upload_url",
+          "s3_key",
+          "expires_in"
+        ]
+      },
+      "CreateQuoteRequestDto": {
+        "type": "object",
+        "properties": {
+          "s3_key": {
+            "type": "string",
+            "description": "The S3 key returned from `POST /quotes/upload_file`.",
+            "example": "public-api/quotes/abc-123/input/1711000000000-upload.stl"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional name or label for this quote (e.g. part name).",
+            "example": "helmet-v3",
+            "maxLength": 100
+          },
+          "webhook_metadata": {
+            "type": "object",
+            "description": "Optional flat key-value metadata object that will be echoed back in webhook payloads. Values must be strings (max 64 characters), numbers, or booleans. Maximum 20 keys.",
+            "example": {
+              "order_id": "ORD-123",
+              "notify_slack": true,
+              "priority": 1
+            }
+          }
+        },
+        "required": [
+          "s3_key"
+        ]
+      },
+      "CreateQuoteResponse": {
+        "type": "object",
+        "properties": {
+          "publicId": {
+            "type": "string",
+            "description": "Use this id with `GET /quotes/:publicId` to see when your quote is ready and to read prices.",
+            "example": "dapi_a3f9b2c1e4"
+          },
+          "status": {
+            "type": "string",
+            "description": "`PROCESSING` - we accepted your request and are working on it. `ERROR` - we could not start the quote; try again or contact support.",
+            "enum": [
+              "PROCESSING",
+              "ERROR"
+            ],
+            "example": "PROCESSING"
+          }
+        },
+        "required": [
+          "publicId",
+          "status"
+        ]
+      },
+      "QuotePublicResponseDto": {
+        "type": "object",
+        "properties": {
+          "publicId": {
+            "type": "string",
+            "description": "Identifier for this quote. Use it to poll for results, reference the quote when creating an order, or contact support.",
+            "example": "dapi_a3f9b2c1e4"
+          },
+          "name": {
+            "type": "object",
+            "description": "Optional label you assigned at creation. Purely informational - not used in processing.",
+            "example": "bracket-v2",
+            "nullable": true
+          },
+          "webhook_metadata": {
+            "type": "object",
+            "description": "Arbitrary key-value data you attached at creation. Echoed back unchanged in all API responses and webhook payloads.",
+            "example": {
+              "order_id": "ORD-123",
+              "notify_slack": true
+            },
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Current processing state. Poll until `DONE` to read the price, or handle `ERROR` if the file could not be priced.",
+            "enum": [
+              "FILE_UPLOADED",
+              "PROCESSING",
+              "DONE",
+              "CANCELLED",
+              "ERROR"
+            ],
+            "example": "PROCESSING"
+          },
+          "result": {
+            "type": "object",
+            "description": "Estimated price per unit in USD, rounded to two decimal places. Populated only when `status` is `DONE`.",
+            "example": 12.34,
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "description": "Short explanation of what went wrong. Populated only when `status` is `ERROR`.",
+            "example": "We could not complete the quote for this file."
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "ISO 8601 timestamp of when this quote was submitted.",
+            "example": "2026-03-24T12:00:00.000Z"
+          },
+          "finishedAt": {
+            "type": "object",
+            "description": "ISO 8601 timestamp of when processing completed, regardless of outcome. `null` while still `PROCESSING`.",
+            "example": "2026-03-24T12:05:00.000Z",
+            "nullable": true
+          }
+        },
+        "required": [
+          "publicId",
+          "status",
+          "createdAt"
+        ]
+      },
+      "ListQuotesResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Quotes on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuotePublicResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of quotes across all pages. Use this to determine whether more pages exist.",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "QuoteStatusCheckResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": true,
+            "description": "Always `true` when you receive a `200` - confirms the key has access to quote endpoints."
+          },
+          "status": {
+            "type": "string",
+            "example": "pricing_access_granted",
+            "description": "Access status for pricing endpoints. `pricing_access_granted` means you may submit and retrieve quotes.",
+            "enum": [
+              "pricing_access_granted"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "status"
+        ]
+      },
+      "OrderCustomerDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "John Doe",
+            "description": "Full name of the recipient."
+          },
+          "email": {
+            "type": "object",
+            "example": "john@example.com",
+            "description": "Email address of the recipient. Used for shipping notifications when provided.",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "example": "123 Main St",
+            "description": "Street address for delivery."
+          },
+          "city": {
+            "type": "object",
+            "example": "San Francisco",
+            "description": "City for the delivery destination.",
+            "nullable": true
+          },
+          "country": {
+            "type": "object",
+            "example": "US",
+            "description": "2-letter ISO 3166-1 alpha-2 country code for the delivery destination.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "name",
+          "address"
+        ]
+      },
+      "OrderItemPublicDto": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "example": "dapi_a3f9b2c1e4",
+            "description": "The `publicId` of the quote this line item was derived from."
+          },
+          "filaments": {
+            "example": [
+              "PLA-GREEN",
+              "PLA-RED"
+            ],
+            "description": "Filament codes used for this item, one per colour slot, in slot order - the same order given when the order was placed. Single-colour items return a one-element array. See `GET /orders/filaments` for all codes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "individual_price": {
+            "type": "number",
+            "example": 12.34,
+            "description": "Price per unit in USD, taken from the quote result."
+          },
+          "quantity": {
+            "type": "number",
+            "example": 5,
+            "description": "Number of units ordered for this line item."
+          },
+          "total": {
+            "type": "number",
+            "example": 61.7,
+            "description": "Line-item subtotal in USD (`individual_price` × `quantity`)."
+          }
+        },
+        "required": [
+          "quoteId",
+          "filaments",
+          "individual_price",
+          "quantity",
+          "total"
+        ]
+      },
+      "OrderPublicResponseDto": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Unique identifier for this order.",
+            "example": "AP7K2M9X"
+          },
+          "status": {
+            "type": "string",
+            "description": "Current lifecycle stage of the order. Progresses from `pending` → `paid` → `in_production` → `shipping` → `completed`. May also be `rejected` or `returned`.",
+            "example": "pending",
+            "enum": [
+              "pending",
+              "paid",
+              "in_production",
+              "shipping",
+              "completed",
+              "rejected",
+              "returned"
+            ]
+          },
+          "delivery": {
+            "type": "number",
+            "description": "Flat delivery fee in USD, added on top of the item subtotals.",
+            "example": 10
+          },
+          "order_total": {
+            "type": "number",
+            "description": "Grand total in USD, including all line items and the delivery fee.",
+            "example": 133.4
+          },
+          "customer": {
+            "description": "Recipient contact and shipping address details.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrderCustomerDto"
+              }
+            ]
+          },
+          "items": {
+            "description": "Line items that make up this order, each derived from a completed quote.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItemPublicDto"
+            }
+          },
+          "tracking_number": {
+            "type": "object",
+            "description": "Carrier tracking number. Populated once the order moves to `shipping` status.",
+            "example": "1Z999AA10123456784",
+            "nullable": true
+          },
+          "courier": {
+            "type": "object",
+            "description": "Name of the shipping carrier (e.g. `ups`, `dhl`). Populated alongside `tracking_number`.",
+            "example": "ups",
+            "nullable": true
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "ISO 8601 timestamp of when this order was placed.",
+            "example": "2026-03-24T12:00:00.000Z"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "ISO 8601 timestamp of the most recent change to this order (status update, tracking added, etc.).",
+            "example": "2026-03-24T12:05:00.000Z"
+          }
+        },
+        "required": [
+          "order_id",
+          "status",
+          "delivery",
+          "order_total",
+          "customer",
+          "items",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "ListOrdersResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Orders on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderPublicResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of orders across all pages. Use this to determine whether more pages exist.",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "FilamentResponseDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PLA-GREEN",
+            "description": "Unique filament identifier to use in the `filament` field when creating an order. Format: `{MATERIAL}-{COLOR}` in uppercase with hyphens (e.g. `PLA-GREEN`, `PETG-BLACK`)."
+          },
+          "name": {
+            "type": "string",
+            "example": "PLA Green",
+            "description": "Human-readable display name of the filament, suitable for use in a UI."
+          },
+          "color": {
+            "type": "object",
+            "example": "green",
+            "description": "Color of the filament in lowercase English. `null` when the filament is multi-color or the color is unspecified.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "color"
+        ]
+      },
+      "ListFilamentsResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "All filaments currently available for ordering.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilamentResponseDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ShippingZoneResponseDto": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "example": "EU",
+            "description": "Zone identifier."
+          },
+          "label": {
+            "type": "string",
+            "example": "European Union",
+            "description": "Human-readable zone name."
+          },
+          "countries": {
+            "example": [
+              "AT",
+              "BE",
+              "DE",
+              "FR"
+            ],
+            "description": "ISO 3166-1 alpha-2 codes covered by this zone. Empty when `catch_all` is true.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unmapped_countries": {
+            "example": [],
+            "description": "Country names on the zone that do not map to an ISO code. Normally empty; a destination listed here still matches at order time but cannot be expressed as a code.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "catch_all": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether this is the fallback zone, used for any destination no other zone lists."
+          },
+          "small_first_price": {
+            "type": "number",
+            "example": 4.5,
+            "description": "First item, Small tier."
+          },
+          "medium_first_price": {
+            "type": "number",
+            "example": 7.9,
+            "description": "First item, Medium tier."
+          },
+          "large_first_price": {
+            "type": "number",
+            "example": 14,
+            "description": "First item, Large tier."
+          },
+          "additional_item_price": {
+            "type": "number",
+            "example": 1,
+            "description": "Charged for every billable item after the first. Extra-small items are exempt."
+          }
+        },
+        "required": [
+          "zone",
+          "label",
+          "countries",
+          "unmapped_countries",
+          "catch_all",
+          "small_first_price",
+          "medium_first_price",
+          "large_first_price",
+          "additional_item_price"
+        ]
+      },
+      "ShippingTierResponseDto": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "example": "small",
+            "enum": [
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "max_grams": {
+            "type": "object",
+            "example": 600,
+            "description": "Upper bound in grams, inclusive. `null` on the largest tier.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "tier",
+          "max_grams"
+        ]
+      },
+      "ShippingRatesResponseDto": {
+        "type": "object",
+        "properties": {
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingZoneResponseDto"
+            }
+          },
+          "tiers": {
+            "description": "Weight bands a parcel is priced at. The tier is set by the HEAVIEST single item, not by the summed weight of the order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShippingTierResponseDto"
+            }
+          },
+          "extra_small_max_grams": {
+            "type": "number",
+            "example": 100,
+            "description": "Items under this weight are exempt from `additional_item_price`."
+          },
+          "flat_rate": {
+            "type": "number",
+            "example": 10,
+            "description": "Charged when an order cannot be rated - an unweighed design, or a destination no zone covers."
+          }
+        },
+        "required": [
+          "zones",
+          "tiers",
+          "extra_small_max_grams",
+          "flat_rate"
+        ]
+      },
+      "EstimateShippingItemDto": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "example": "dapi_a3f9b2c1e4",
+            "description": "The `publicId` of a completed quote (`status` must be `DONE`)."
+          },
+          "quantity": {
+            "type": "number",
+            "example": 5,
+            "description": "Units of this quote.",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "quoteId",
+          "quantity"
+        ]
+      },
+      "EstimateShippingRequestDto": {
+        "type": "object",
+        "properties": {
+          "country": {
+            "type": "string",
+            "example": "DE",
+            "description": "2-letter ISO 3166-1 alpha-2 destination code, uppercase.",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "items": {
+            "description": "Items to ship. Filaments are not needed: colour does not change what a parcel weighs.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EstimateShippingItemDto"
+            }
+          }
+        },
+        "required": [
+          "country",
+          "items"
+        ]
+      },
+      "EstimateShippingResponseDto": {
+        "type": "object",
+        "properties": {
+          "country": {
+            "type": "string",
+            "example": "DE"
+          },
+          "zone": {
+            "type": "object",
+            "example": "EU",
+            "nullable": true,
+            "description": "Null when the flat rate applied."
+          },
+          "zone_label": {
+            "type": "object",
+            "example": "European Union",
+            "nullable": true
+          },
+          "tier": {
+            "type": "object",
+            "example": "small",
+            "nullable": true,
+            "description": "Tier the parcel was priced at - the heaviest single item."
+          },
+          "item_count": {
+            "type": "number",
+            "example": 5,
+            "description": "Units in the order."
+          },
+          "billable_item_count": {
+            "type": "number",
+            "example": 0,
+            "description": "Units charged `additional_item_price` (after the first). Excludes extra-small items, so this can be 0."
+          },
+          "extra_small_items": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether any item was light enough to be exempt from the per-item charge."
+          },
+          "shipping": {
+            "type": "number",
+            "example": 4.5,
+            "description": "Shipping cost in USD. This is what the order will be charged. `zone` and `tier` are null when the destination could not be rated against the card."
+          }
+        },
+        "required": [
+          "country",
+          "zone",
+          "zone_label",
+          "tier",
+          "item_count",
+          "billable_item_count",
+          "extra_small_items",
+          "shipping"
+        ]
+      },
+      "CustomerDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "John Doe",
+            "description": "Full name of the recipient."
+          },
+          "email": {
+            "type": "string",
+            "example": "john@example.com",
+            "description": "Email address used for shipping and order notifications."
+          },
+          "address": {
+            "type": "string",
+            "example": "123 Main St",
+            "description": "Street address for delivery, including apartment or suite number if applicable."
+          },
+          "city": {
+            "type": "string",
+            "example": "New York",
+            "description": "City for the delivery destination."
+          },
+          "state": {
+            "type": "string",
+            "example": "NY",
+            "description": "State or province for the delivery destination."
+          },
+          "postalCode": {
+            "type": "string",
+            "example": "10001",
+            "description": "Postal or ZIP code for the delivery address."
+          },
+          "country": {
+            "type": "string",
+            "example": "US",
+            "description": "2-letter ISO 3166-1 alpha-2 country code. Must be uppercase (e.g. `US`, `DE`, `GB`).",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "phone_number": {
+            "type": "string",
+            "example": "+12125551234",
+            "description": "Phone number including country prefix (e.g. `+12125551234`). Must be valid for the provided country."
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "address",
+          "city",
+          "state",
+          "postalCode",
+          "country",
+          "phone_number"
+        ]
+      },
+      "OrderItemDto": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "example": "dapi_a3f9b2c1e4",
+            "description": "The `publicId` of a completed quote (`status` must be `DONE`). Each quote may appear at most once per order."
+          },
+          "filaments": {
+            "example": [
+              "PLA-GREEN",
+              "PLA-RED"
+            ],
+            "description": "Filament codes for this item, one per colour slot, **in slot order**. Slot order is the design's own extruder order, so `[\"PLA-GREEN\",\"PLA-RED\"]` and `[\"PLA-RED\",\"PLA-GREEN\"]` are different products. Give a single-element array for a single-colour design. Retrieve valid codes from `GET /orders/filaments`.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "quantity": {
+            "type": "number",
+            "example": 5,
+            "description": "Number of units to produce for this item. Minimum is `1`.",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "quoteId",
+          "filaments",
+          "quantity"
+        ]
+      },
+      "CreateOrderRequestDto": {
+        "type": "object",
+        "properties": {
+          "customer": {
+            "description": "Recipient contact and shipping address. All nested fields are required.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CustomerDto"
+              }
+            ]
+          },
+          "items": {
+            "description": "One or more items to include in the order. Each item references a completed quote and specifies a filament and quantity. At least one item is required.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItemDto"
+            }
+          },
+          "customer_notes": {
+            "type": "string",
+            "example": "Please leave at the door.",
+            "description": "Optional notes for the order (e.g. delivery instructions)."
+          },
+          "checkout_link": {
+            "type": "boolean",
+            "example": false,
+            "description": "When `true`, a hosted Stripe Checkout URL is generated and returned in the response as `checkout_link`. The customer can open this URL in a browser to pay for the order. The order status will automatically advance to `paid` once payment is completed via Stripe. Requires `checkout_success_url` and `checkout_cancel_url`.",
+            "default": false
+          },
+          "checkout_success_url": {
+            "type": "string",
+            "example": "https://yourstore.com/orders/success?ref={CHECKOUT_SESSION_ID}",
+            "description": "URL to redirect the customer to after a successful Stripe Checkout payment. Required when `checkout_link` is `true`. You may include `{CHECKOUT_SESSION_ID}` as a placeholder - Stripe will substitute it with the actual session ID."
+          },
+          "checkout_cancel_url": {
+            "type": "string",
+            "example": "https://yourstore.com/orders/cancelled",
+            "description": "URL to redirect the customer to if they cancel the Stripe Checkout flow. Required when `checkout_link` is `true`."
+          }
+        },
+        "required": [
+          "customer",
+          "items"
+        ]
+      },
+      "OrderItemResponseDto": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "example": "dapi_a3f9b2c1e4",
+            "description": "The `publicId` of the quote this line item was created from."
+          },
+          "individual_price": {
+            "type": "number",
+            "example": 12.34,
+            "description": "Price per unit in USD, taken from the quote result."
+          },
+          "quantity": {
+            "type": "number",
+            "example": 5,
+            "description": "Number of units ordered for this line item."
+          },
+          "total": {
+            "type": "number",
+            "example": 61.7,
+            "description": "Line-item subtotal in USD (`individual_price` × `quantity`)."
+          }
+        },
+        "required": [
+          "quoteId",
+          "individual_price",
+          "quantity",
+          "total"
+        ]
+      },
+      "CreateOrderResponseDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "example": "AP7K2M9X",
+            "description": "Unique identifier for the newly created order. Use this with `POST /orders/:orderId/pay` to pay for the order."
+          },
+          "status": {
+            "type": "string",
+            "example": "pending",
+            "description": "Initial status of the order. Always `pending` on creation - pay with `POST /orders/:orderId/pay` to advance it into production."
+          },
+          "delivery": {
+            "type": "number",
+            "example": 10,
+            "description": "Flat delivery fee in USD."
+          },
+          "order_total": {
+            "type": "number",
+            "example": 133.4,
+            "description": "Grand total in USD, including all line items and the delivery fee."
+          },
+          "items": {
+            "description": "Line items included in this order with their final pricing.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItemResponseDto"
+            }
+          },
+          "checkout_link": {
+            "type": "string",
+            "example": "https://checkout.stripe.com/c/pay/cs_test_...",
+            "description": "Hosted Stripe Checkout URL. Only present when `checkout_link: true` was passed in the request. Redirect your customer to this URL to complete payment in the browser."
+          }
+        },
+        "required": [
+          "orderId",
+          "status",
+          "delivery",
+          "order_total",
+          "items"
+        ]
+      },
+      "PrintFarmOrderCustomerDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "John Doe",
+            "description": "Full name of the recipient."
+          },
+          "shipping_address": {
+            "type": "string",
+            "example": "123 Main St, Springfield",
+            "description": "Street address for delivery."
+          },
+          "notes": {
+            "type": "object",
+            "example": "Leave at the front door.",
+            "description": "Free-text notes left by the customer for this order.",
+            "nullable": true
+          },
+          "email": {
+            "type": "object",
+            "example": "john@example.com",
+            "description": "Email address of the recipient.",
+            "nullable": true
+          },
+          "phone": {
+            "type": "object",
+            "example": "+1 555 123 4567",
+            "description": "Contact phone number for the delivery.",
+            "nullable": true
+          },
+          "city": {
+            "type": "object",
+            "example": "Springfield",
+            "description": "City for the delivery destination.",
+            "nullable": true
+          },
+          "country": {
+            "type": "object",
+            "example": "United States",
+            "description": "Country for the delivery destination.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "name",
+          "shipping_address"
+        ]
+      },
+      "PrintFarmOrderExtrasDto": {
+        "type": "object",
+        "properties": {
+          "ams_required": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the order requires an Automatic Material System (AMS)."
+          },
+          "assembly": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the order requires assembly."
+          },
+          "extra_parts": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the order includes extra parts."
+          },
+          "custom_filament": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the order requires custom filament."
+          }
+        },
+        "required": [
+          "ams_required",
+          "assembly",
+          "extra_parts",
+          "custom_filament"
+        ]
+      },
+      "PrintFarmExpandedSkuDesignMaterialDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "default"
+          },
+          "material_id": {
+            "type": "object",
+            "example": "mat_jR6tN9pXq4sL8mB3dK7vH2cF5wYzA1ePsK",
+            "description": "Public material id (`mat_…`) when `type` is `default`. Null for custom.",
+            "nullable": true
+          },
+          "name": {
+            "type": "object",
+            "example": "Transparent Red PLA",
+            "nullable": true
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "PrintFarmExpandedSkuDesignDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 1
+          },
+          "design_id": {
+            "type": "string",
+            "example": "dsg_kP4xT8aBnLf2sH9eY3jZ5dM7cR1vQbWtJ",
+            "description": "Public identifier of the design (`dsg_…`)."
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedSkuDesignMaterialDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "design_id",
+          "materials"
+        ]
+      },
+      "PrintFarmExpandedSkuExtraRefDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "xtr_mW2yH7cVjPq8rT5dN3kFx9eL4bA1uZcRh",
+            "description": "Public identifier of the extra (`xtr_…`)."
+          },
+          "qty": {
+            "type": "number",
+            "example": 1
+          }
+        },
+        "required": [
+          "id",
+          "qty"
+        ]
+      },
+      "PrintFarmExpandedDesignFileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "dfl_pL3xB9sK6mT2nH7yC1jZ4dR8vQ5wA9uXkF",
+            "description": "Opaque public identifier of the file (`dfl_…`). Client-side tracking only."
+          },
+          "file_name": {
+            "type": "string",
+            "example": "dragon-body.3mf"
+          },
+          "file_type": {
+            "type": "string",
+            "example": "3mf"
+          },
+          "size": {
+            "type": "object",
+            "example": 1248320,
+            "nullable": true
+          },
+          "download_url": {
+            "type": "string",
+            "description": "Short-lived presigned download URL.",
+            "example": "https://s3.amazonaws.com/..."
+          },
+          "url_expires_at": {
+            "type": "string",
+            "description": "ISO 8601 timestamp at which the download URL stops working.",
+            "example": "2026-05-21T13:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "file_name",
+          "file_type",
+          "download_url",
+          "url_expires_at"
+        ]
+      },
+      "PrintFarmExpandedDesignDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "dsg_kP4xT8aBnLf2sH9eY3jZ5dM7cR1vQbWtJ",
+            "description": "Public identifier of the design (`dsg_…`)."
+          },
+          "name": {
+            "type": "string",
+            "example": "Dragon Body"
+          },
+          "description": {
+            "type": "object",
+            "nullable": true
+          },
+          "required_filament": {
+            "type": "boolean",
+            "example": false
+          },
+          "ams_required": {
+            "type": "boolean",
+            "example": false
+          },
+          "assembly": {
+            "type": "boolean",
+            "example": false
+          },
+          "farm_instructions": {
+            "type": "object",
+            "nullable": true
+          },
+          "design_files": {
+            "description": "Model files with presigned download URLs.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedDesignFileDto"
+            }
+          },
+          "extra_files": {
+            "description": "Auxiliary files (manuals, support material) with presigned download URLs.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedDesignFileDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "required_filament",
+          "ams_required",
+          "assembly",
+          "design_files",
+          "extra_files"
+        ]
+      },
+      "PrintFarmExpandedExtraDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "xtr_mW2yH7cVjPq8rT5dN3kFx9eL4bA1uZcRh",
+            "description": "Public identifier of the extra (`xtr_…`)."
+          },
+          "name": {
+            "type": "string",
+            "example": "M3 x 10mm screw",
+            "description": "Display name of the extra."
+          },
+          "purchase_links": {
+            "example": [
+              "https://www.example.com/m3-screws"
+            ],
+            "description": "Purchase links for this extra.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "object",
+            "example": "Stainless steel M3 x 10mm Phillips screws.",
+            "description": "Free-text description.",
+            "nullable": true
+          },
+          "price": {
+            "type": "object",
+            "example": "0.12",
+            "description": "Catalog list price.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "purchase_links"
+        ]
+      },
+      "PrintFarmExpandedMaterialDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "mat_jR6tN9pXq4sL8mB3dK7vH2cF5wYzA1ePsK",
+            "description": "Public identifier of the material (`mat_…`)."
+          },
+          "name": {
+            "type": "string",
+            "example": "Polymaker Polyterra Cotton White",
+            "description": "Display name of the material."
+          },
+          "type": {
+            "type": "string",
+            "example": "PLA",
+            "description": "Filament family (e.g. PLA, PETG, ABS)."
+          },
+          "color": {
+            "type": "object",
+            "example": "#FFFFFF",
+            "description": "Optional colour hint, free-text or hex.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ]
+      },
+      "PrintFarmExpandedSkuDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "sku_aB3xKp9wFqZ7vM2nLpHt12cN8jR3sLkPm",
+            "description": "Public identifier of the SKU (`sku_…`)."
+          },
+          "name": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "example": "active"
+          },
+          "code": {
+            "type": "string",
+            "example": "DRAGON-RED-PLA"
+          },
+          "description": {
+            "type": "object",
+            "nullable": true
+          },
+          "designs": {
+            "description": "Designs that make up this SKU.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedSkuDesignDto"
+            }
+          },
+          "extras": {
+            "description": "Extras attached to this SKU (ids only).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedSkuExtraRefDto"
+            }
+          },
+          "expanded_designs": {
+            "description": "Present when `expand=items.sku.designs` is requested. One entry per unique design referenced by this SKU.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedDesignDto"
+            }
+          },
+          "expanded_extras": {
+            "description": "Present when `expand=items.sku.extras` is requested. One entry per unique extra referenced by this SKU.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedExtraDto"
+            }
+          },
+          "expanded_materials": {
+            "description": "Present when `expand=items.sku.materials` is requested. One entry per unique catalog material referenced across this SKU's designs.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExpandedMaterialDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "code",
+          "designs",
+          "extras"
+        ]
+      },
+      "PrintFarmOrderItemDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "example": "sku_aB3xKp9wFqZ7vM2nLpHt12cN8jR3sLkPm",
+            "description": "Public identifier of the SKU (variant) for this line item (`sku_…`)."
+          },
+          "quantity": {
+            "type": "number",
+            "example": 2,
+            "description": "Number of units ordered for this SKU."
+          },
+          "sku": {
+            "description": "Present when `expand=items.sku` is requested. Inlines the SKU referenced by `skuId`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintFarmExpandedSkuDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "skuId",
+          "quantity"
+        ]
+      },
+      "PrintFarmOrderCustomLabelDto": {
+        "type": "object",
+        "properties": {
+          "productName": {
+            "type": "string",
+            "example": "Dragon Figurine",
+            "description": "Name of the product (listing) this custom label belongs to."
+          },
+          "url": {
+            "type": "string",
+            "example": "https://cdn.dapi.digital/labels/dragon-figurine.pdf",
+            "description": "Public URL of the custom label. May be an image or a PDF."
+          }
+        },
+        "required": [
+          "productName",
+          "url"
+        ]
+      },
+      "PrintFarmOrderResponseDto": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "example": "AP7K2M9X",
+            "description": "Unique identifier for this order."
+          },
+          "status": {
+            "type": "string",
+            "example": "allocated",
+            "description": "Current lifecycle stage of the order."
+          },
+          "designerName": {
+            "type": "string",
+            "example": "Jane Smith",
+            "description": "Name of the designer who created the ordered design."
+          },
+          "customer": {
+            "description": "Recipient contact and shipping address details.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintFarmOrderCustomerDto"
+              }
+            ]
+          },
+          "extras": {
+            "description": "Production requirements flagged for this order.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintFarmOrderExtrasDto"
+              }
+            ]
+          },
+          "tracking_number": {
+            "type": "object",
+            "example": "1Z999AA10123456784",
+            "description": "Carrier tracking number, once the order has shipped.",
+            "nullable": true
+          },
+          "courier": {
+            "type": "object",
+            "example": "ups",
+            "description": "Name of the shipping carrier, populated alongside the tracking number.",
+            "nullable": true
+          },
+          "external_order_id": {
+            "type": "object",
+            "example": "EXT-10492",
+            "description": "Identifier of the order in an external system, when imported.",
+            "nullable": true
+          },
+          "items": {
+            "description": "Line items that make up this order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmOrderItemDto"
+            }
+          },
+          "customLabels": {
+            "description": "Custom labels set by the seller, one entry per distinct product (listing) in this order that has a custom label. Print farms must print each label and include it with the corresponding product in the shipment. Empty when no product in the order has a custom label.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmOrderCustomLabelDto"
+            }
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2026-03-24T12:00:00.000Z",
+            "description": "ISO 8601 timestamp of when this order was created."
+          },
+          "allocated_at": {
+            "type": "object",
+            "example": "2026-03-25T08:30:00.000Z",
+            "description": "ISO 8601 timestamp of when this order was allocated to your print farm. The ship-by deadline is conventionally 5 days after this date. Null until the order is allocated.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "order_id",
+          "status",
+          "designerName",
+          "customer",
+          "extras",
+          "items",
+          "customLabels",
+          "created_at"
+        ]
+      },
+      "ListPrintFarmOrdersResponseDto": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "description": "Orders on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmOrderResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of orders across all pages (after filters are applied).",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "orders",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "UpdatePrintFarmOrderStatusBodyDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "New order status. `in_production` is allowed from `paid`; `shipping` is allowed from `in_production` (requires `tracking_number` + `courier`); `returned` is allowed from `shipping` or `completed` (no body fields required).",
+            "enum": [
+              "in_production",
+              "shipping",
+              "returned"
+            ],
+            "example": "shipping"
+          },
+          "tracking_number": {
+            "type": "string",
+            "description": "Shipping tracking number. Required when `status === \"shipping\"`. Persisted on the order and forwarded to the customer email + designer webhook.",
+            "example": "1Z999AA10123456784"
+          },
+          "courier": {
+            "type": "string",
+            "description": "Carrier code from `GET /print-farm/courier-options` (e.g. `ups`, `fedex`). Required when `status === \"shipping\"`. When `courier === \"other\"`, also provide `courier_name` and we will flag the order for manual sync (we cannot push it to ShipStation automatically).",
+            "example": "ups"
+          },
+          "courier_name": {
+            "type": "string",
+            "description": "Human-readable carrier name. Required when `courier === \"other\"`. Stored on the order as the courier value (since no machine code exists).",
+            "example": "Local Courier Ltd"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "UpdatePrintFarmOrderStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "in_production",
+            "description": "The newly persisted order status."
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PrintFarmSkuDesignMaterialDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "default",
+            "description": "Either `default` (references a catalog material) or `custom` (designer-named)."
+          },
+          "material_id": {
+            "type": "object",
+            "example": "mat_jR6tN9pXq4sL8mB3dK7vH2cF5wYzA1ePsK",
+            "description": "Public material identifier (`mat_…`) when `type` is `default`. Null for custom materials.",
+            "nullable": true
+          },
+          "name": {
+            "type": "object",
+            "example": "Transparent Red PLA",
+            "description": "Material name when `type` is `custom`.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "PrintFarmSkuDesignDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 1,
+            "description": "Number of copies of this design included in the SKU."
+          },
+          "design_id": {
+            "type": "string",
+            "example": "dsg_kP4xT8aBnLf2sH9eY3jZ5dM7cR1vQbWtJ",
+            "description": "Public identifier of the design (`dsg_…`)."
+          },
+          "materials": {
+            "description": "Materials specified for this design.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmSkuDesignMaterialDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "design_id",
+          "materials"
+        ]
+      },
+      "PrintFarmSkuStockDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "stk_fL3sB8eYzKnQ7mX2dC9vR4tH6jW1uPbAcN",
+            "description": "Public identifier of the stock this SKU is part of (`stk_…`)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether this SKU is currently enabled in the stock."
+          }
+        },
+        "required": [
+          "id",
+          "enabled"
+        ]
+      },
+      "PrintFarmSkuExtraDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "xtr_mW2yH7cVjPq8rT5dN3kFx9eL4bA1uZcRh",
+            "description": "Public identifier of the extra (`xtr_…`)."
+          },
+          "qty": {
+            "type": "number",
+            "example": 1,
+            "description": "Quantity of this extra included."
+          }
+        },
+        "required": [
+          "id",
+          "qty"
+        ]
+      },
+      "PrintFarmSkuResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "sku_aB3xKp9wFqZ7vM2nLpHt12cN8jR3sLkPm",
+            "description": "Opaque public identifier for this SKU (`sku_` prefix + 33 base62 chars). Use this value verbatim when referencing the SKU in other endpoints."
+          },
+          "name": {
+            "type": "object",
+            "example": "Dragon Figurine - Red PLA",
+            "description": "Human-readable name of the SKU.",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "example": "active",
+            "description": "Lifecycle status of the SKU.",
+            "enum": [
+              "active",
+              "inactive",
+              "deleted"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "example": "DRAGON-RED-PLA",
+            "description": "Designer-defined code, unique within the designer."
+          },
+          "description": {
+            "type": "object",
+            "example": "Red PLA dragon figurine, 100mm tall.",
+            "description": "Free-text description of the SKU.",
+            "nullable": true
+          },
+          "designs": {
+            "description": "Designs that make up this SKU.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmSkuDesignDto"
+            }
+          },
+          "stocks": {
+            "description": "Stocks this SKU participates in.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmSkuStockDto"
+            }
+          },
+          "extras": {
+            "description": "Extras attached to this SKU.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmSkuExtraDto"
+            }
+          },
+          "customLabelUrl": {
+            "type": "object",
+            "example": "https://cdn.dapi.digital/labels/dragon-figurine.pdf",
+            "description": "Public URL of the custom label set on the owning product (listing) for this SKU. May be an image or a PDF. Null when the product has no custom label.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "code",
+          "designs",
+          "stocks",
+          "extras"
+        ]
+      },
+      "ListPrintFarmSkusResponseDto": {
+        "type": "object",
+        "properties": {
+          "skus": {
+            "description": "SKUs on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmSkuResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of SKUs across all pages (after filters are applied).",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skus",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "PrintFarmDesignFileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "dfl_pL3xB9sK6mT2nH7yC1jZ4dR8vQ5wA9uXkF",
+            "description": "Opaque public identifier for the file (`dfl_` prefix + 33 base62 chars). No endpoint currently consumes this id - it is provided for client-side tracking."
+          },
+          "file_name": {
+            "type": "string",
+            "example": "dragon.3mf",
+            "description": "Original file name."
+          },
+          "file_type": {
+            "type": "string",
+            "example": "model/3mf",
+            "description": "MIME type of the file."
+          },
+          "size": {
+            "type": "object",
+            "example": 524288,
+            "description": "File size in bytes, if known.",
+            "nullable": true
+          },
+          "download_url": {
+            "type": "string",
+            "example": "https://s3.amazonaws.com/...?X-Amz-Signature=...",
+            "description": "Presigned GET URL for downloading the file."
+          },
+          "url_expires_at": {
+            "type": "string",
+            "example": "2025-05-20T15:30:00.000Z",
+            "description": "ISO 8601 timestamp at which `download_url` expires. Re-fetch the parent resource after this time to obtain a fresh URL."
+          }
+        },
+        "required": [
+          "id",
+          "file_name",
+          "file_type",
+          "download_url",
+          "url_expires_at"
+        ]
+      },
+      "PrintFarmDesignResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "dsg_kP4xT8aBnLf2sH9eY3jZ5dM7cR1vQbWtJ",
+            "description": "Opaque public identifier for this design (`dsg_` prefix + 33 base62 chars). Use this value verbatim when referencing the design in other endpoints."
+          },
+          "name": {
+            "type": "string",
+            "example": "Dragon Figurine",
+            "description": "Display name of the design."
+          },
+          "description": {
+            "type": "object",
+            "example": "Articulated dragon, 12cm tall.",
+            "description": "Free-text description of the design.",
+            "nullable": true
+          },
+          "color_number": {
+            "type": "object",
+            "example": 1,
+            "description": "Number of distinct colours the design uses.",
+            "nullable": true
+          },
+          "extra_parts": {
+            "type": "object",
+            "example": "Two M3 screws and one spring.",
+            "description": "Free-text description of any non-printed parts needed.",
+            "nullable": true
+          },
+          "extra_parts_config": {
+            "type": "object",
+            "description": "Structured configuration of the extra parts (e.g. quantities, images). Returned verbatim from storage.",
+            "nullable": true
+          },
+          "required_filament": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the design requires a specific filament (see `materials_config` for the allowed set)."
+          },
+          "ams_required": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the design requires an Automatic Material System (AMS)."
+          },
+          "assembly": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether the design requires post-print assembly."
+          },
+          "farm_instructions": {
+            "type": "object",
+            "example": "Print at 0.2mm layer height. Brim recommended.",
+            "description": "Print-farm-facing instructions for producing the design.",
+            "nullable": true
+          },
+          "materials_config": {
+            "type": "object",
+            "description": "Material configuration for the design. Shape: `{ mode, allowed_materials, saved_combinations? }`. Returned verbatim from storage.",
+            "example": {
+              "mode": "single",
+              "allowed_materials": [
+                {
+                  "name": "Polymaker Polyterra Cotton White",
+                  "type": "custom"
+                }
+              ]
+            },
+            "nullable": true
+          },
+          "hours_multiplier": {
+            "type": "object",
+            "example": "1.00",
+            "description": "Multiplier applied to baseline print time when estimating production hours, as a numeric string.",
+            "nullable": true
+          },
+          "grams_multiplier": {
+            "type": "object",
+            "example": "1.00",
+            "description": "Multiplier applied to baseline filament usage when estimating grams, as a numeric string.",
+            "nullable": true
+          },
+          "post_processing_multiplier": {
+            "type": "object",
+            "example": "1.00",
+            "description": "Multiplier applied to baseline post-processing time, as a numeric string.",
+            "nullable": true
+          },
+          "design_files": {
+            "description": "All model files for this design (STL/3MF/etc.), each with a short-lived presigned download URL. Sorted by upload date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmDesignFileDto"
+            }
+          },
+          "extra_files": {
+            "description": "Supporting files attached to this design (PDFs, manuals, spec sheets). Each entry includes a presigned download URL. Empty when no extras are uploaded.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmDesignFileDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "required_filament",
+          "ams_required",
+          "assembly",
+          "design_files",
+          "extra_files"
+        ]
+      },
+      "ListPrintFarmDesignsResponseDto": {
+        "type": "object",
+        "properties": {
+          "designs": {
+            "description": "Approved designs on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmDesignResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of approved designs across all pages.",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "designs",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "PrintFarmExtraResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "xtr_mW2yH7cVjPq8rT5dN3kFx9eL4bA1uZcRh",
+            "description": "Opaque public identifier for this extra (`xtr_` prefix + 33 base62 chars). Use this value verbatim when referencing the extra in other endpoints."
+          },
+          "name": {
+            "type": "string",
+            "example": "M3 screws (set of 4)",
+            "description": "Display name of the extra."
+          },
+          "purchase_links": {
+            "example": [
+              "https://example.com/m3-screws"
+            ],
+            "description": "List of URLs where the extra can be purchased.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "object",
+            "example": "Pack of four M3×10mm steel screws.",
+            "description": "Free-text description of the extra.",
+            "nullable": true
+          },
+          "price": {
+            "type": "object",
+            "example": "1.50",
+            "description": "Unit price in USD, as a string to preserve precision.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "purchase_links"
+        ]
+      },
+      "ListPrintFarmExtrasResponseDto": {
+        "type": "object",
+        "properties": {
+          "extras": {
+            "description": "Approved extras on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmExtraResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of approved extras across all pages.",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "extras",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "PrintFarmMaterialResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "mat_jR6tN9pXq4sL8mB3dK7vH2cF5wYzA1ePsK",
+            "description": "Opaque public identifier for this material (`mat_` prefix + 33 base62 chars). Use this value verbatim when referencing the material in other endpoints."
+          },
+          "name": {
+            "type": "string",
+            "example": "Polymaker Polyterra Cotton White",
+            "description": "Display name of the material."
+          },
+          "type": {
+            "type": "string",
+            "example": "PLA",
+            "description": "Filament family (e.g. PLA, PETG, ABS)."
+          },
+          "color": {
+            "type": "object",
+            "example": "#FFFFFF",
+            "description": "Optional colour hint, free-text or hex.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ]
+      },
+      "ListPrintFarmMaterialsResponseDto": {
+        "type": "object",
+        "properties": {
+          "materials": {
+            "description": "Materials on this page, sorted by name (ascending).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmMaterialResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of materials across all pages (after filters are applied).",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "materials",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "PrintFarmStockLevelResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "slv_hG5dC2vKrPm8nT3sJ6yF1xL9bQ4wA7uZdF",
+            "description": "Opaque public identifier for this stock-level row (`slv_` prefix + 33 base62 chars). Use this value verbatim when referencing the row in other endpoints."
+          },
+          "stock_id": {
+            "type": "string",
+            "example": "stk_fL3sB8eYzKnQ7mX2dC9vR4tH6jW1uPbAcN",
+            "description": "Public identifier of the parent stock (`stk_…`)."
+          },
+          "stock_items_left": {
+            "type": "number",
+            "example": 11,
+            "description": "Number of products remaining in this stock level."
+          },
+          "quantity": {
+            "type": "number",
+            "example": 4,
+            "description": "Number of stocks bought (`quantity_purchased`). E.g. 4 means 4 stock-level rows were created."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2026-03-24T12:00:00.000Z",
+            "description": "ISO 8601 timestamp of when this stock level was created."
+          },
+          "status": {
+            "type": "string",
+            "example": "pending",
+            "description": "Lifecycle status of the stock level.",
+            "enum": [
+              "pending",
+              "in_production",
+              "completed",
+              "consumed"
+            ]
+          },
+          "stock_items_purchased": {
+            "type": "number",
+            "example": 48,
+            "description": "Total number of products bought across this stock level. If `quantity = 4` and each stock holds 12 items, `stock_items_purchased = 48`."
+          },
+          "order_id": {
+            "type": "object",
+            "example": "ORD-001",
+            "description": "Identifier of the order this stock level was created for. Null for proactive stock.",
+            "nullable": true
+          },
+          "items_made": {
+            "type": "number",
+            "example": 0,
+            "description": "Number of products produced so far."
+          },
+          "items_consumed": {
+            "type": "number",
+            "example": 0,
+            "description": "Number of products consumed/shipped so far."
+          }
+        },
+        "required": [
+          "id",
+          "stock_id",
+          "stock_items_left",
+          "quantity",
+          "created_at",
+          "status",
+          "stock_items_purchased",
+          "items_made",
+          "items_consumed"
+        ]
+      },
+      "ListPrintFarmStockLevelsResponseDto": {
+        "type": "object",
+        "properties": {
+          "stock_levels": {
+            "description": "Stock levels on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmStockLevelResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of stock levels across all pages (after filters are applied).",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "stock_levels",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "AddStockLevelItemsMadeBodyDto": {
+        "type": "object",
+        "properties": {
+          "quantity": {
+            "type": "number",
+            "description": "Number of items to add to this stock level's `items_made` count. Must be ≥ 1 and must not push the total above `stock_items_purchased`.",
+            "example": 1,
+            "minimum": 1,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "quantity"
+        ]
+      },
+      "PrintFarmStockDesignRefDto": {
+        "type": "object",
+        "properties": {
+          "design_id": {
+            "type": "string",
+            "example": "dsg_kP4xT8aBnLf2sH9eY3jZ5dM7cR1vQbWtJ",
+            "description": "Public identifier of the design (`dsg_…`)."
+          },
+          "count": {
+            "type": "number",
+            "example": 1,
+            "description": "Number of copies of this design included per stock unit."
+          }
+        },
+        "required": [
+          "design_id",
+          "count"
+        ]
+      },
+      "PrintFarmStockRegionConfigDto": {
+        "type": "object",
+        "properties": {
+          "region_id": {
+            "type": "string",
+            "example": "reg_dF8kP3xL6sV2nH9mT5cR1jY4bQ7wA9uZeM",
+            "description": "Opaque public identifier of the print-farm region (`reg_…`). Encode-only - no endpoint currently consumes this id."
+          },
+          "price": {
+            "type": "object",
+            "example": "12.50",
+            "description": "Manufacturer price for this stock in the given region. Authoritative per-region manufacturer price (the top-level `manufacturer_price` is deprecated).",
+            "nullable": true
+          }
+        },
+        "required": [
+          "region_id"
+        ]
+      },
+      "PrintFarmStockResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "stk_fL3sB8eYzKnQ7mX2dC9vR4tH6jW1uPbAcN",
+            "description": "Opaque public identifier for this stock (`stk_` prefix + 33 base62 chars)."
+          },
+          "name": {
+            "type": "string",
+            "example": "Dragon Figurine Stock",
+            "description": "Display name of the stock."
+          },
+          "description": {
+            "type": "object",
+            "example": "Pre-printed dragon figurines, batch of 48.",
+            "description": "Free-text description of the stock.",
+            "nullable": true
+          },
+          "stock_items_number": {
+            "type": "number",
+            "example": 48,
+            "description": "Total number of stock items in this stock as defined by the designer."
+          },
+          "sales_price": {
+            "type": "object",
+            "example": "20.00",
+            "description": "Authoritative aggregate sales price for the stock (designer-set, admin-approved).",
+            "nullable": true
+          },
+          "approval_status": {
+            "type": "string",
+            "example": "approved",
+            "description": "Approval lifecycle status (e.g. pending, approved, rejected)."
+          },
+          "design_list": {
+            "description": "Designs included in this stock.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmStockDesignRefDto"
+            }
+          },
+          "region_config": {
+            "description": "Per-region configuration. Each entry exposes the manufacturer price for the region.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmStockRegionConfigDto"
+            }
+          },
+          "extra_parts_config": {
+            "type": "object",
+            "description": "Free-form extra parts configuration as stored on the stock."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2026-03-24T12:00:00.000Z",
+            "description": "ISO 8601 timestamp of when this stock was created."
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2026-04-02T15:30:00.000Z",
+            "description": "ISO 8601 timestamp of when this stock was last updated."
+          },
+          "approved_at": {
+            "type": "object",
+            "example": "2026-03-25T08:30:00.000Z",
+            "description": "ISO 8601 timestamp of when this stock was approved. Null when not yet approved.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "stock_items_number",
+          "approval_status",
+          "design_list",
+          "region_config",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "ListPrintFarmStocksResponseDto": {
+        "type": "object",
+        "properties": {
+          "stocks": {
+            "description": "Stocks on this page, sorted by creation date (newest first).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmStockResponseDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number returned, matching the `page` query parameter.",
+            "example": 1,
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "number",
+            "description": "Number of items per page, matching the `page_size` query parameter.",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "number",
+            "description": "Total number of stocks across all pages (after filters are applied).",
+            "example": 42,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "stocks",
+          "page",
+          "page_size",
+          "total"
+        ]
+      },
+      "PrintFarmCourierOptionResponseDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Short courier code. Pass this value back when updating an order to `shipping`.",
+            "example": "ups"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable courier name.",
+            "example": "UPS"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ]
+      },
+      "ListPrintFarmCourierOptionsResponseDto": {
+        "type": "object",
+        "properties": {
+          "courier_options": {
+            "description": "All courier options available across configured ShipStation integrations.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintFarmCourierOptionResponseDto"
+            }
+          }
+        },
+        "required": [
+          "courier_options"
+        ]
+      },
+      "PayOrderRequestDto": {
+        "type": "object",
+        "properties": {
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "wallet",
+              "wallet_auto",
+              "wallet_difference"
+            ],
+            "example": "wallet",
+            "description": "How to fund the payment.\n\n- `wallet` - deduct the full order amount from your wallet. Fails with `400` if the balance is insufficient.\n- `wallet_auto` - if your wallet balance is too low, top it up from your saved card to the configured auto-topup target, then deduct. Requires a saved card.\n- `wallet_difference` - if your wallet balance is too low, charge only the deficit to your saved card, then deduct. Requires a saved card."
+          }
+        },
+        "required": [
+          "paymentMethod"
+        ]
+      },
+      "PayOrderResponseDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "example": "AP-A1B2C3",
+            "description": "Identifier of the order that was paid."
+          },
+          "status": {
+            "type": "string",
+            "example": "paid",
+            "description": "Order status after successful payment. Always `paid` on a `200` response."
+          },
+          "topupAmountUsd": {
+            "type": "number",
+            "example": 50,
+            "description": "Amount in USD charged to your saved card as a wallet top-up. `0` when no top-up was needed because the wallet already had sufficient funds."
+          },
+          "walletDebitedUsd": {
+            "type": "number",
+            "example": 25.5,
+            "description": "Amount in USD deducted from your wallet to settle the order."
+          }
+        },
+        "required": [
+          "orderId",
+          "status",
+          "topupAmountUsd",
+          "walletDebitedUsd"
+        ]
+      }
+    }
+  }
+}

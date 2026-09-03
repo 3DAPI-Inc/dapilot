@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
+import Landing from './pages/Landing';
 import Upload from './pages/Upload';
 import Job from './pages/Job';
 import Review from './pages/Review';
@@ -7,7 +8,8 @@ import Catalog from './pages/Catalog';
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/upload" replace />} />
+      {/* "/" was a redirect to /upload while there was nothing to land on. */}
+      <Route path="/" element={<Landing />} />
       <Route path="/upload" element={<Upload />} />
       <Route path="/jobs/:jobId" element={<Job />} />
       <Route path="/jobs/:jobId/review" element={<Review />} />

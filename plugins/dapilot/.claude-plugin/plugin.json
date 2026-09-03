@@ -1,0 +1,7 @@
+{
+  "name": "dapilot",
+  "version": "0.1.0",
+  "description": "Skills that run a 3D print shop on the dapi platform through its public API.",
+  "author": { "name": "dapi", "email": "dev@dapi.digital" },
+  "keywords": ["dapi", "3d-printing", "print-on-demand", "openapi"]
+}
