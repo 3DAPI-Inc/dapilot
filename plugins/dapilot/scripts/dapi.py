@@ -92,7 +92,7 @@ def base_url() -> str:
     if not url:
         raise SystemExit(fail("DAPI_API_URL is not set", 2))
     if url.endswith("/v1"):
-        raise SystemExit(fail("DAPI_API_URL must be the origin without /v1; spec paths already include it", 2))
+        url = url[:-3]  # spec paths already carry /v1; accept either form
     return url
 
 

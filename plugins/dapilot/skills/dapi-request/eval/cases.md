@@ -61,7 +61,7 @@ DAPI_API_URL=http://127.0.0.1:8765 DAPI_API_KEY=test DAPILOT_CACHE_DIR=/tmp/c \
 DAPI_API_URL=http://127.0.0.1:8765 DAPI_API_KEY=test DAPILOT_CACHE_DIR=/tmp/c \
   $PY $S call getMe
 ```
-Expected: `spec` reports 30 operations and writes
+Expected: `spec` reports 35 operations and writes
 `/tmp/c/openapi.127.0.0.1_8765.json`; `call` returns `ok:true, status:200`,
 the mock saw `x-api-key: test` and user agent `dapilot-dapi-request/0.1.0`,
 `rate_limit` carries the `x-ratelimit-*` headers. A GET on an unknown quote

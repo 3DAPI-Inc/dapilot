@@ -45,6 +45,8 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 |---|---|
 | `dapi-request` | Builds, validates and sends a request to any public API route from the live OpenAPI contract. Every other skill goes through it. |
 | `analyze-model` | First intake stage: geometry facts for one model file via the bundled mesh script. |
+| `quote-model` | Prices one model through dapi's slicer; quotes named by sha256 so a file is never sliced twice. |
+| `render-model` | Studio product images: draft turntable, the model picks orientation and hero angle, four finals. Needs Blender. |
 | `run-intake` | Director skill for an interactive session; the headless equivalent is `scripts/run_intake.py`. |
 
 ## Scripts
@@ -55,4 +57,6 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `ledger.py` | run state: `init`, `next`, `record`, `status`, `report`; the only writer of `runs/<id>/state.json` |
 | `validate_result.py` | the result-line contract every level checks on the level below |
 | `run_intake.py` | deterministic director and lead: launches one worker per brief |
-| `analyze_mesh.py`, `load_3mf.py`, `render_turntable.py`, `make_fixtures.py` | geometry and rendering |
+| `quote.py` | upload, create, poll one quote; resumable; finds an existing quote by hash |
+| `render_model.py`, `render_scene.py` | studio render driver and the Blender-side scene |
+| `analyze_mesh.py`, `load_3mf.py`, `make_fixtures.py` | geometry |

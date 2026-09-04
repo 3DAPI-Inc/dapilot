@@ -32,8 +32,22 @@ Read before building anything:
   `catalogue-lead` agents, the `run-intake` director skill, and the
   deterministic core: `ledger.py` (the only writer of run state) and
   `validate_result.py` (what every level runs on the level below). Only the
-  `analyze` stage is enabled in `run-intake/reference/stages.json`. Next is
-  Phase 1: `quote-model`.
+  `analyze` and `quote` stages are enabled in `run-intake/reference/stages.json`.
+- **Phase 1 quoting is live against staging (2026-09-04).** `quote-model`
+  wraps `scripts/quote.py`: upload, create, poll, quotes named by sha256 so
+  a file is never sliced twice, resumable through `quote.pending.json`.
+  Measured: slicer 18 to 40 s per file, worker about 0.20 USD estimated at
+  14 turns.
+- **Phase 2 rendering is live (2026-09-04).** `render-model` drives
+  `scripts/render_model.py` and `render_scene.py`: a fixed studio scene
+  (bundled `studio.exr` environment, key, fill and rim area lights, a
+  cyclorama backdrop, 85 mm lens with depth of field, filament material with
+  optional layer lines, AgX), exact box framing by projecting the bounding
+  box through the camera, 3MF converted to PLY through our loader. The model
+  chooses only orientation and hero yaw from an 8-frame draft turntable.
+  Draft turntable about 15 to 30 s; one 1024 px final about 60 to 90 s on
+  the reference laptop. Next: `write-listing`, and the stage wrapper to cut
+  worker turns.
 - **The geometry scripts were lost and rebuilt on 2026-09-03.** An
   unverified move followed by a delete removed the untracked originals.
   `analyze_mesh.py` was restored verbatim from a transcript;
@@ -47,10 +61,10 @@ Read before building anything:
   minimum a listing needs.
 - **No orchestrator exists yet.** The interactive Claude Code session is the
   orchestrator for now.
-- **The frontend is a scaffold.** `frontend/src/api/jobs.ts` defines the stage
-  vocabulary (`intake analyze slice price render research copy publish`) and
-  talks to a job API on :3100 that does not exist. Treat the stage names as
-  canonical and the rest as a placeholder.
+- **The frontend uploads straight into the pipeline.** `frontend/src/api/jobs.ts`
+  defines the stage vocabulary (`intake analyze slice price render research
+  copy publish`); `server/app.py` on :3100 serves it. Upload, job list and
+  job page work; review, catalogue and approve are placeholders.
 
 ## Scope
 
@@ -211,11 +225,15 @@ plugins/
       dapi.py                     spec-driven client: spec, ops, describe, validate, call, upload
       ledger.py                   run state: init, next, record, status, report
       validate_result.py          the result-line contract check
-      analyze_mesh.py load_3mf.py render_turntable.py make_fixtures.py
+      analyze_mesh.py load_3mf.py make_fixtures.py quote.py
+      render_model.py render_scene.py   studio renders (driver, Blender-side scene)
+      render_turntable.py             older plain turntable, kept for reference
 docs/
   agents.md                       roles and orchestration rules
   skills.md                       skill authoring guideline
   store-plan.md                   the construction plan and build order
+server/
+  app.py                          FastAPI job API for the frontend (:3100)
 store/
   config.example.json             committed template
   config.json                     private: budgets, fan-out, model prices, departments (gitignored)
@@ -257,16 +275,24 @@ root pointing at `./plugins/dapilot`. Nothing about the skills changes.
 .venv/bin/python scripts/make_fixtures.py
 .venv/bin/python scripts/analyze_mesh.py fixtures/multi.stl
 
-# Blender is a separate binary, not a pip package here.
-BL=/Applications/Blender.app/Contents/MacOS/Blender
-$BL --background --python scripts/render_turntable.py -- <model> <outdir> [frames] [res] [samples]
+# Blender is a separate binary, not a pip package here. render_model.py finds it at the
+# default macOS path or via BLENDER in store/.env, converts 3mf to ply, and runs the scene.
+.venv/bin/python plugins/dapilot/scripts/render_model.py --workdir work/<hash> --mode draft --frames 8
+.venv/bin/python plugins/dapilot/scripts/render_model.py --workdir work/<hash> --mode final --angles "35,125,215,305" [--rotate 90,0,0] [--color '#3B7DD8'] [--layer-lines]
 
 cd frontend && npm run dev        # :8081, 8080 is dapi's
+.venv/bin/uvicorn server.app:app --port 3100 --reload   # the frontend's job API; holds the dapi key
 ```
 
-Render defaults are `36 512 48`. Measured on an i7-7700HQ: a 36-frame turntable
-at 512px/48 samples takes ~6 min, a 1024px/128-sample hero still ~39s, and a
-256px/16-sample draft under a second. Latency is the constraint, not cost.
+For now the frontend talks to dapi directly (see the temporary exception
+under Rules): upload_file, PUT to S3, create quote, poll, all from the
+browser, quotes named by the file's sha256 so nothing is sliced twice.
+`server/app.py` on :3100 is the alternative that keeps the key server side
+and also runs local analysis; it is not used by the UI at the moment.
+
+Measured on the reference laptop (4 cores): an 8-frame draft turntable at
+320 px/24 samples about 30 s, a 640 px/64-sample hero about 30 s, a 1024 px/
+128-sample hero about 60 to 90 s. Latency is the constraint, not cost.
 
 Environment every skill expects:
 
@@ -352,6 +378,16 @@ recoverable through connected-component analysis. Never ask a model to read an
 STL: a 200k-triangle file is ~15M tokens of float triples with zero semantic
 content. Convert to numbers and to renders, and reason over those.
 
+**Blender: update the view layer before reading `matrix_world`.** After
+setting `obj.location`, `matrix_world` is stale until the depsgraph runs.
+Computing the floor offset from it sank the shark into the backdrop and
+rendered a lone fin. `bpy.context.view_layer.update()` first.
+
+**Blender: turntable the product, not the camera.** Orbiting the camera
+around a fixed cyclorama puts it behind the wall at yaw 180 and renders grey.
+Rotating the product on a pivot keeps camera, lights and backdrop fixed, so
+every angle is lit identically and the backdrop is always behind the object.
+
 **Blender: scale before centering.** Scaling happens about the object's origin,
 which an STL puts wherever the exporter felt like. Centering first and scaling
 second shoves the model back off-centre by a model-dependent amount, so framing
@@ -383,6 +419,10 @@ parameter properties.
 - Do not use em dashes in text shown to users.
 - No credential ever reaches the browser. Not a dapi API key, not an Anthropic
   key. The browser gets a short-lived token and nothing else.
+  **Temporary exception, decided 2026-09-04:** the frontend calls the staging
+  public API directly with `VITE_DAPI_API_KEY` from `frontend/.env`
+  (`frontend/src/api/dapi.ts`). Staging key only, internal use only, never
+  committed. `server/app.py` is the key-holding path to return to.
 - Prefer deterministic code over a model call. Every stage that can be a script
   should be a script.
 - Renders, analysis and quotes are cacheable on the content hash of the model
