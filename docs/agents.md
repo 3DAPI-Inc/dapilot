@@ -75,10 +75,18 @@ form:
 | intake | (orchestrator) | a file | `source.<ext>`, `meta.json` | Auto |
 | analyze | `analyze-model` | `source.*` | `analysis.json` | Auto |
 | slice + price | `quote-model` | `source.*`, `analysis.json` | `quote.json` | Auto (API spend is free for us; still logged) |
-| render | `render-model` | `source.*`, `analysis.json` | `renders/` | Auto |
-| research | `research-comparables` | `analysis.json`, `renders/` | `comparables.json` | Auto |
-| copy | `write-listing` | `analysis.json`, `quote.json`, `renders/`, `comparables.json` | `listing.json` | Auto |
+| preview | `preview-model` | `source.*`, `analysis.json` | `renders/draft_00.png` | Auto |
+| research | `research-comparables` | `analysis.json`, `quote.json`, `renders/draft_00.png` | `comparables.json`, `viability.json` | Auto |
+| price | `propose-price` | `quote.json`, `comparables.json`, `viability.json`, drafts | `price.json` (only when sellable; else `price.rejected.json`) | Auto to write the proposal; the price itself is confirmed at publish |
+| render | `render-model` | `source.*`, `analysis.json`, drafts, `price.json` | `renders/hero.png`, `renders/turntable.mp4` | Auto |
+| copy | `write-listing` | `analysis.json`, `quote.json`, `comparables.json`, `price.json`, `renders/hero.png` | `listing.json` | Auto |
 | publish | `publish-listing` | `listing.json` | `publish.json` | Propose |
+
+Reordered 2026-09-09: the cheap draft turntable, research and the price
+proposal run before the final renders, so an item that cannot sell costs a
+slice and eight 320 px frames, never a hero render or a video. `price.json`
+exists only for a sellable item, which is what keeps render, copy and
+publish from ever running for the rest.
 
 The orchestrator runs a stage for an item when, and only when, every file in
 Requires exists and the file in Produces does not. It never reorders, skips,
@@ -171,8 +179,17 @@ files.
    removes it on exit. A worker that finds a live `.lock` with a different
    stage returns `ok: false, reason: "locked by <stage>"` and the
    orchestrator requeues it for the next pass. A `.lock` older than
-   `max_wall_minutes` is stale and may be removed by the orchestrator, with a
-   line in the report.
+   `max_worker_minutes` is stale: `ledger.py next` removes it with a note,
+   and `init --resume` sees through it.
+5a. A `running` stage stays `running` until its result is recorded or it
+   goes stale. Its output appearing on disk early is expected, not
+   completion; the ledger never flips a running stage to done from files.
+   Otherwise every record arrives at a done stage and is rejected.
+5b. The director kills a worker's whole process group at
+   `max_worker_minutes`, not only `claude -p`, and keeps every worker's raw
+   stdout and stderr under `runs/<id>/workers/`. A run is readable after the
+   fact from the ledger, the report and those files, which is what makes it
+   reproducible.
 6. Gated stages are never dispatched with `--confirm`. The worker writes the
    proposal and returns `needs_human`. The supervisor runs the confirm command
    from `report.md` by hand. The orchestrator then sees the Produces file and

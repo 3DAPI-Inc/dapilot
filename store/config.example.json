@@ -1,14 +1,52 @@
 {
-  "store": "example",
-  "max_workers_per_lead": 3,
-  "max_render_workers": 2,
-  "max_attempts": 2,
-  "max_wall_minutes": 60,
-  "budget": { "usd_per_run": 5.0, "usd_per_item": 0.5 },
-  "pricing_usd_per_1k_tokens": { "haiku": 0.002, "sonnet": 0.009, "opus": 0.03, "fable": 0.03, "inherit": 0.009 },
-  "departments": {
-    "catalogue": { "lead": "catalogue-lead", "worker": "catalogue-worker", "key_env": "DAPI_API_KEY", "max_workers": 3, "enabled": true },
-    "commerce":  { "lead": "commerce-lead",  "worker": "commerce-worker",  "key_env": "DAPI_API_KEY_COMMERCE", "max_workers": 2, "enabled": false },
-    "growth":    { "lead": "growth-lead",    "worker": "growth-worker",    "key_env": null, "max_workers": 2, "enabled": false }
+ "store": "example",
+ "max_workers_per_lead": 3,
+ "max_render_workers": 2,
+ "max_attempts": 2,
+ "max_wall_minutes": 60,
+ "budget": {
+  "usd_per_run": 5.0,
+  "usd_per_item": 0.5,
+  "usd_per_stage": {
+   "research": 1.0,
+   "price": 0.6,
+   "render": 0.6
   }
+ },
+ "pricing_usd_per_1k_tokens": {
+  "haiku": 0.002,
+  "sonnet": 0.009,
+  "opus": 0.03,
+  "fable": 0.03,
+  "inherit": 0.009
+ },
+ "departments": {
+  "catalogue": {
+   "lead": "catalogue-lead",
+   "worker": "catalogue-worker",
+   "key_env": "DAPI_API_KEY",
+   "max_workers": 3,
+   "enabled": true
+  },
+  "commerce": {
+   "lead": "commerce-lead",
+   "worker": "commerce-worker",
+   "key_env": "DAPI_API_KEY_COMMERCE",
+   "max_workers": 2,
+   "enabled": false
+  },
+  "growth": {
+   "lead": "growth-lead",
+   "worker": "growth-worker",
+   "key_env": null,
+   "max_workers": 2,
+   "enabled": false
+  }
+ },
+ "max_worker_minutes": 15,
+ "resume_on_start": false,
+ "turns_per_stage": {
+  "research": 30,
+  "price": 25
+ }
 }

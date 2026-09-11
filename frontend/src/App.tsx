@@ -5,6 +5,7 @@ import AgentRuns from './pages/AgentRuns';
 import Job from './pages/Job';
 import Review from './pages/Review';
 import Catalog from './pages/Catalog';
+import Studio from './pages/Studio';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       <Route path="/jobs/:jobId" element={<Job />} />
       <Route path="/jobs/:jobId/review" element={<Review />} />
       <Route path="/catalog" element={<Catalog />} />
+      <Route path="/studio" element={<Studio />} />
     </Routes>
   );
 }

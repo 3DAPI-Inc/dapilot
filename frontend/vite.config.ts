@@ -12,6 +12,10 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    // The studio page loads a model straight from work/<hash>/ through Vite's
+    // /@fs/ prefix, which is refused unless the repo root is allowed. Dev only:
+    // `vite build` never serves anything.
+    fs: { allow: [path.resolve(import.meta.dirname, '..')] },
   },
   plugins: [react(), tailwindcss()],
   // import.meta.dirname, not __dirname: Vite's native config loader rejects the latter.

@@ -1,0 +1,10 @@
+{
+  "price": 13.99,
+  "currency": "USD",
+  "candidate": "median",
+  "position": "mid",
+  "rationale": "The band is weighted and ours matches the median listing, but every comparable at or above p75 in the top 20 by market weight is PolyBrain, so p75 is that shop's price and test (c) fails. The shops near the median move volume too and ours is the same object with the same finish. The median is the price the rest of the market accepts; the premium belongs to an incumbent with thousands of sales, not to a new listing.",
+  "runner_up": {"candidate": "p75", "price": 19.99, "why_not": "p75 is held by one shop; (a) and (b) held but (c) did not"},
+  "floor": 8.99,
+  "verdict": "viable"
+}

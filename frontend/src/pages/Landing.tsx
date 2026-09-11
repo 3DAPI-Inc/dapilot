@@ -8,7 +8,7 @@ import { SiteHeader, headerLink } from '@/components/site/SiteHeader';
 
   The eight stage names are the canonical ones from api/jobs.ts.
 */
-const STAGES = 'intake · analyze · slice · price · render · research · copy · publish';
+const STAGES = 'intake · analyze · slice · preview · research · price · render · copy · publish';
 
 /** The real 3DAPI wordmark, set as a word. See `.logo-word` in index.css. */
 function LogoWord() {

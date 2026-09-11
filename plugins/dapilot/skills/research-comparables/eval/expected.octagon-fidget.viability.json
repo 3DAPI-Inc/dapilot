@@ -1,0 +1,92 @@
+{
+  "ok": true,
+  "product": "octagon passthrough spiral cone fidget, two nested twisted pieces",
+  "n_comparables": 6,
+  "market": {
+    "n": 6,
+    "min": 5.49,
+    "p25": 5.66,
+    "median": 6.49,
+    "p75": 9.25,
+    "max": 10.51,
+    "currency": "USD",
+    "per_gram": {
+      "n": 2,
+      "min": 0.02,
+      "p25": 0.02,
+      "median": 0.03,
+      "p75": 0.03,
+      "max": 0.03
+    },
+    "listings_with_weight": 2
+  },
+  "ours": {
+    "quote_unit_price_one_off": 5.71,
+    "quote_unit_price_full_plate": 5.71,
+    "max_per_plate": 1,
+    "model_g": 40.88209533691406,
+    "parcel_g": 70.9,
+    "per_gram_at_market_median": 0.159,
+    "shipping_usd": null,
+    "shipping_source": "unknown: no --shipping-usd and no table in the fee file",
+    "shipping_absorbed_by_seller": false
+  },
+  "policy": {
+    "file": "store/reference/pricing-policy.json",
+    "platform": "etsy",
+    "seller_region": "EU",
+    "listing_fee": 0.2,
+    "payment_fixed": 0.33,
+    "pct_of_price": 0.105,
+    "vat_rate": 0.21,
+    "vat_in_sale_price": true,
+    "vat_added_to_purchase": false,
+    "markup_pct": 50.0,
+    "rounding": "0.99"
+  },
+  "fees_file": "/Users/sofiamanu/Desktop/work/dapilot/plugins/dapilot/skills/research-comparables/reference/platform-fees.json",
+  "scenarios": [
+    {
+      "cost_basis": "one_off",
+      "quote_unit_price": 5.71,
+      "unit_cost": 5.71,
+      "units_per_plate": 1,
+      "break_even_price": 8.65,
+      "markup_price": 8.56,
+      "at": [
+        {
+          "label": "p25",
+          "price": 5.66,
+          "net_of_vat": 4.68,
+          "fees": 1.12,
+          "unit_cost": 5.71,
+          "margin": -2.16,
+          "margin_pct": -0.461,
+          "markup_on_cost_pct": -0.9
+        },
+        {
+          "label": "median",
+          "price": 6.49,
+          "net_of_vat": 5.36,
+          "fees": 1.21,
+          "unit_cost": 5.71,
+          "margin": -1.56,
+          "margin_pct": -0.29,
+          "markup_on_cost_pct": 13.7
+        },
+        {
+          "label": "p75",
+          "price": 9.25,
+          "net_of_vat": 7.64,
+          "fees": 1.5,
+          "unit_cost": 5.71,
+          "margin": 0.43,
+          "margin_pct": 0.057,
+          "markup_on_cost_pct": 62.0
+        }
+      ]
+    }
+  ],
+  "verdict": "not_viable",
+  "verdict_rule": "market median vs one-off break-even (not_viable below) and vs quote plus markup (thin below, viable at or above)"
+}

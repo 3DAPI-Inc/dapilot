@@ -1,14 +1,17 @@
 ---
 name: render-model
-description: Produces studio product images for one model, a hero and three supporting angles, by running the bundled Blender scene and choosing the angle and orientation that flatter the object. Use as the render stage after analysis.json exists. Not for thumbnails (3MF previews are free) and not for deciding colour policy.
+description: Produces studio product images for one model, a hero and three supporting angles, by running the bundled Blender scene and choosing the angle and orientation that flatter the object. Use as the render stage after price.json exists and the drafts from preview-model are in renders/. Not for drafts (preview-model), not for thumbnails (3MF previews are free) and not for deciding colour policy.
 allowed-tools: Read, Bash, Write
 ---
 
 # render-model
 
 ## When
-A brief with `stage: render`. The work dir has `source.<ext>` and
-`analysis.json`, and no `renders/hero.png`.
+A brief with `stage: render`. The work dir has `source.<ext>`,
+`analysis.json`, `renders/draft_00.png` to `draft_07.png` from the preview
+stage, and `price.json` from the price stage, and no `renders/hero.png`.
+Finals run only for items that have a sale price: an item research found
+unsellable never reaches this stage.
 
 ## Inputs
 - `source.<ext>`, `analysis.json` (bbox and body count, to sanity-check the drafts)
@@ -16,10 +19,10 @@ A brief with `stage: render`. The work dir has `source.<ext>` and
 
 ## Procedure
 1. If `renders/hero.png` exists, print a `cached:true` result and stop.
-2. Draft turntable, cheap: run
-   `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/render_model.py --workdir $WORKDIR --mode draft --frames 8`
-   (about 20 s). It writes `renders/draft_00.png` to `draft_07.png` at 45
-   degree steps of camera yaw, starting from the front.
+2. The drafts already exist: `renders/draft_00.png` to `draft_07.png` at 45
+   degree steps of camera yaw starting from the front, written by
+   preview-model. If any is missing, `ok:false` with reason "no drafts";
+   do not render them here.
 3. Look at the drafts with Read. Decide two things, and only these:
    - **Orientation.** Is the object standing the way a customer expects to
      see it? A figure lying on its back, a vase on its side, a plate on
@@ -42,8 +45,49 @@ A brief with `stage: render`. The work dir has `source.<ext>` and
 
 ## Outputs
 - `renders/hero.png` and `renders/angle_NNN.png`, 1024 px square, studio backdrop
+- `renders/turntable.mp4`: the product video, see below. Required for a
+  listing; not produced yet (2026-09-08)
 - `renders/choice.json`: `{"rotate": "x,y,z", "hero_yaw": N, "reason": "..."}`
 - `renders/render.json`: settings and timings, written by the script
+- `renders/video.json`: frames, fps, duration, encoder settings, written by
+  the video script once it exists
+
+## Video (required, not built yet)
+Every listing needs a short product video as well as the stills. It is the
+same turntable the stills come from, rendered as a full rotation and encoded
+by a script. Decided 2026-09-08. Etsy allows up to two videos per listing and
+does not require one, but a listing without video is at a disadvantage in
+search and the same clip is what social posting needs, so for this shop it is
+mandatory: `publish-listing` must refuse a listing that has no
+`renders/turntable.mp4`.
+
+Target, chosen to satisfy Etsy's listing video limits and to be reusable
+elsewhere:
+- one full 360 degree rotation of the product on its pivot, camera, lights
+  and backdrop fixed, same scene as the stills, same `--rotate` and `--color`
+- 10 seconds, 24 fps, silent (Etsy strips audio; never add any)
+- 1080 by 1080 px, H.264 MP4, yuv420p, under 100 MB (Etsy's limits: 5 to
+  15 s, min 500 px, aspect between 1:2 and 2:1, MP4 preferred)
+- starts on the hero yaw so the first frame matches `hero.png`
+
+How it will be produced, so the stage stays one script call plus one
+judgement:
+- `render_model.py --mode video` renders 120 frames at 3 degree steps at
+  720 px with a low sample count and denoise, then ffmpeg interpolates to 240
+  frames and encodes. ffmpeg is a plugin requirement, checked at startup like
+  Blender.
+- The model decides nothing new. Orientation and hero yaw come from
+  `choice.json`, written in step 3. The video runs after the stills, in the
+  same worker, only for items that already passed the hero check in step 5.
+- Cost is CPU time. Expect several times the four-frame final on the
+  reference laptop; measure before deciding whether video moves to a
+  scheduled pass after `publish` (plan principle 5) or stays in the stage.
+- Cached on the content hash like everything else. `stages.json` gains
+  `renders/turntable.mp4` under `produces` for the render stage the day the
+  script lands, not before, or the stage would never complete.
+
+Vertical cuts for TikTok are a crop of this clip, made by the posting script,
+not a second render.
 
 ## Gate
 Auto. CPU time only; no network, no spend.

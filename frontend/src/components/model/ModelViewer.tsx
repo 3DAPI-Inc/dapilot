@@ -78,7 +78,7 @@ export function ModelViewer({ file }: { file: File }) {
 
   return (
     <figure className="m-0">
-      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-mist bg-white">
+      <div className="relative aspect-[6/5] w-full overflow-hidden rounded-2xl border border-mist bg-white">
         {/* Kept mounted in every state so the context outlives the file. */}
         <div
           ref={mount}

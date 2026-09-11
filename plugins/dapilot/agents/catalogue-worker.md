@@ -2,7 +2,7 @@
 name: catalogue-worker
 description: Runs one catalogue stage on one model, as named in the brief. Dispatched by catalogue-lead, never by a person.
 tools: Read, Bash, Write
-skills: hierarchy, guardrails, output-format, work-ledger, analyze-model, quote-model, render-model, dapi-request
+skills: hierarchy, guardrails, output-format, work-ledger, analyze-model, quote-model, preview-model, research-comparables, propose-price, render-model, dapi-request
 model: sonnet
 maxTurns: 30
 ---

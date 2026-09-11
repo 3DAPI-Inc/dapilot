@@ -1,0 +1,334 @@
+{
+  "product": "synthetic: fidget comparables scaled x2.2 to make a sellable market",
+  "queries": [
+    "octagon fidget"
+  ],
+  "taxonomy_id": 1628,
+  "currency": "USD",
+  "source": "research/etsy.json",
+  "comparables": [
+    {
+      "listing_id": 1762197662,
+      "url": "https://www.etsy.com/listing/1762197662/vortex-rainbow-fidget-octagonal-toy-cone",
+      "title": "Vortex Rainbow Fidget Octagonal Toy Cone 3D Infinity Impossible Spiral Cone Display",
+      "price": 22.0,
+      "currency": "USD",
+      "price_source": "listing",
+      "price_is_base_variant": false,
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 1,
+      "shop": {
+        "name": "ErnicShop",
+        "review_count": 448,
+        "review_average": 4.72,
+        "sold": 2595,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget cone",
+        "vortex cone",
+        "impossible cone",
+        "vortex fidget",
+        "fidget toy",
+        "spiral fidget",
+        "spiral fidget toy",
+        "spiral cone toy",
+        "cone fidget",
+        "cone toy",
+        "impossible vortex",
+        "3d printed fidget",
+        "fidget cone vortex"
+      ],
+      "processing_days": [
+        3,
+        5
+      ],
+      "reason": "same object: passthrough spiral cone, PLA, single unit, shop sells thousands"
+    },
+    {
+      "listing_id": 1868521783,
+      "url": "https://www.etsy.com/listing/1868521783/vortex-illusion-fidget-toy-pyramid-cone",
+      "title": "Vortex Illusion Fidget Toy: Pyramid, Cone, Octagonal, 3D Printed",
+      "price": 15.38,
+      "currency": "USD",
+      "price_source": "variant_unsized",
+      "price_is_base_variant": true,
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 22,
+      "shop": {
+        "name": "3DMOLDFARMLLC",
+        "review_count": 265,
+        "review_average": 4.92,
+        "sold": 1280,
+        "country": "US"
+      },
+      "materials": [
+        "PLA",
+        "Plastic",
+        "3D printed"
+      ],
+      "tags": [
+        "Sensory toy",
+        "Spiral fidget toy",
+        "impossible fidget",
+        "3D printed desk toy",
+        "vortex pyramid",
+        "Impossible Pyramid",
+        "passthrough toy",
+        "Impossible Illusion",
+        "Impossible cone",
+        "Vortex thread fidget",
+        "Passthrough cone",
+        "vortex thread",
+        "birthday gift"
+      ],
+      "processing_days": [
+        3,
+        10
+      ],
+      "reason": "same object: vortex illusion cone, PLA; price is the smallest variant"
+    },
+    {
+      "listing_id": 4406204952,
+      "url": "https://www.etsy.com/listing/4406204952/spiral-christmas-tree-impossible",
+      "title": "Spiral Christmas Tree Impossible Passthrough Holiday Fidget Toy Gift for Desk or Stocking",
+      "price": 13.18,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "price_is_base_variant": false,
+      "dims_mm": [
+        177.8,
+        177.8,
+        177.8
+      ],
+      "size_ratio": 1.71,
+      "weight_g": 226.8,
+      "num_favorers": 1,
+      "shop": {
+        "name": "Nally3D",
+        "review_count": 837,
+        "review_average": 4.83,
+        "sold": 3386,
+        "country": "US"
+      },
+      "materials": [
+        "PLA Plastic",
+        "Plastic"
+      ],
+      "tags": [
+        "fidget toy",
+        "christmas decor",
+        "desk toy",
+        "optical illusion",
+        "geometric design",
+        "modern gift",
+        "christmas fidget",
+        "octagonal toy",
+        "festive decor",
+        "puzzle toy",
+        "unique gift idea",
+        "impossible toy",
+        "stocking stuffer"
+      ],
+      "processing_days": [
+        3,
+        5
+      ],
+      "reason": "same mechanism: impossible passthrough spiral, holiday shape, PLA, within size window"
+    },
+    {
+      "listing_id": 1890360765,
+      "url": "https://www.etsy.com/listing/1890360765/infinity-twist-das-unendliche-octagon",
+      "title": "Infinity Twist - das unendliche Octagon | Wobble Fidget | Octa Twist | Desktop Toy | Schreibtischspielzeug | faltbares Zappel Spielzeug",
+      "price": 23.12,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "price_is_base_variant": false,
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 65,
+      "shop": {
+        "name": "PolyBrain",
+        "review_count": 1271,
+        "review_average": 4.8,
+        "sold": 6513,
+        "country": "DE"
+      },
+      "materials": [
+        "PLA",
+        "Polylactid"
+      ],
+      "tags": [
+        "unendlich unendlichkeit",
+        "schreibtischspielzeug",
+        "sensorisches Spielzeug",
+        "zappeln spinner",
+        "unendlichkeitsw\u00fcrfel",
+        "endlose w\u00fcrfel Cube",
+        "fidget toy toys",
+        "schreibtisch spielzeug",
+        "verdrehter w\u00fcrfel",
+        "leises fidget",
+        "anpassbares spielzeug",
+        "wobble fidget",
+        "skills"
+      ],
+      "processing_days": [
+        3,
+        5
+      ],
+      "reason": "same aisle: octagon infinity twist, PLA; closest substitute buyers see for this query"
+    },
+    {
+      "listing_id": 4307614125,
+      "url": "https://www.etsy.com/listing/4307614125/fidget-octagon-sports-teams-college-nfl",
+      "title": "Fidget Octagon - Sports Teams, College, NFL, Holidays, etc. - Swirl and Stretch Satisfying Handheld Trinket",
+      "price": 12.08,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "price_is_base_variant": false,
+      "dims_mm": [
+        101.6,
+        101.6,
+        76.2
+      ],
+      "size_ratio": 0.98,
+      "weight_g": 226.8,
+      "num_favorers": 35,
+      "shop": {
+        "name": "HDR2studio",
+        "review_count": 4,
+        "review_average": 5,
+        "sold": 72,
+        "country": "US"
+      },
+      "materials": [
+        "plastic",
+        "soft rubbery plastic",
+        "PLA",
+        "PETG",
+        "TPU",
+        "ASA"
+      ],
+      "tags": [
+        "Fidget",
+        "satisfying",
+        "ADHD",
+        "Flexible",
+        "Swirl",
+        "Spin",
+        "handheld",
+        "Octagon",
+        "Hexagon"
+      ],
+      "processing_days": [
+        1,
+        6
+      ],
+      "reason": "same aisle: octagon swirl fidget, PLA, size ratio 0.98"
+    },
+    {
+      "listing_id": 4469079387,
+      "url": "https://www.etsy.com/listing/4469079387/geometrisches-fidget-hexagon-oktagon",
+      "title": "Geometrisches Fidget \u2013 Hexagon, Oktagon, Quadrat, Kreis \u2013 3D-gedrucktes Stressspielzeug, moderne Schreibtischdeko, Spiral",
+      "price": 12.21,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "price_is_base_variant": false,
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 1,
+      "shop": {
+        "name": "Rosdas",
+        "review_count": 2,
+        "review_average": 5,
+        "sold": 15,
+        "country": "DE"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "geometrisch",
+        "fidget",
+        "stressspielzeug",
+        "3d gedruckt",
+        "PLA",
+        "Schreibtischdeko",
+        "Technikgeschenk",
+        "minimalistisch",
+        "spiral",
+        "anti stress",
+        "konzentration",
+        "spielzeug",
+        "konzentrisch"
+      ],
+      "processing_days": [
+        1,
+        3
+      ],
+      "reason": "same aisle: octagon geometric fidget, PLA"
+    }
+  ],
+  "rejected": [
+    {
+      "listing_id": 4558853169,
+      "url": "https://www.etsy.com/listing/4558853169/octagon-fidget-spinner-5-3d-printed",
+      "reason": "different object: spinner with handle"
+    },
+    {
+      "listing_id": 4462744773,
+      "url": "https://www.etsy.com/listing/4462744773/3d-printed-passthrough-octagon-fidget",
+      "reason": "3 piece set, price not per unit"
+    },
+    {
+      "listing_id": 4549475857,
+      "url": "https://www.etsy.com/listing/4549475857/the-silent-strike-40mm-octagon-magnetic",
+      "reason": "magnetic haptic slider, different object and price class"
+    },
+    {
+      "listing_id": 4550321137,
+      "url": "https://www.etsy.com/listing/4550321137/blue-articulated-fidget-spinner-toy",
+      "reason": "articulated spinner pendant, different object"
+    },
+    {
+      "listing_id": 4526809637,
+      "url": "https://www.etsy.com/listing/4526809637/3d-printed-star-fidget-toy-octagonal",
+      "reason": "spinner, different mechanism"
+    },
+    {
+      "listing_id": 1836426612,
+      "url": "https://www.etsy.com/listing/1836426612/fidget-octagon-keychain",
+      "reason": "keychain, different object"
+    },
+    {
+      "listing_id": 1556801396,
+      "url": "https://www.etsy.com/listing/1556801396/octagon-top-collaboration-top-with-tashi",
+      "reason": "stainless steel top, different market"
+    },
+    {
+      "listing_id": 4486715039,
+      "url": "https://www.etsy.com/listing/4486715039/3d-printed-expandable-octagonal",
+      "reason": "expandable geometric toy, different mechanism, unstated size"
+    },
+    {
+      "listing_id": 4468637655,
+      "url": "https://www.etsy.com/listing/4468637655/3d-printed-octagon-infinity-cube-fidget",
+      "reason": "infinity cube, different object"
+    },
+    {
+      "listing_id": 1875598786,
+      "url": "https://www.etsy.com/listing/1875598786/leather-fidget-spinner-octagon-shaped",
+      "reason": "leather spinner, different market"
+    }
+  ]
+}

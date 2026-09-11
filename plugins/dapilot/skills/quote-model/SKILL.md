@@ -40,7 +40,10 @@ and `analysis.json`, and no `quote.json`.
 
 ## Outputs
 - `quote.json` only for a DONE quote: `publicId`, `name`, `store_id`,
-  `unit_price`, `batch`, timestamps, `raw` response.
+  `unit_price`, `metrics` (slicer measurements: `model_g`, `total_g`,
+  `print_time_s`, `prepare_time_s`, `filament_count`; `filament_count` is
+  null on quotes sliced before it was recorded), `batch`, timestamps, `raw`
+  response.
 - `quote.error.json` for ERROR or CANCELLED, same shape.
 - `quote.pending.json` while a quote is in flight; the script owns it.
 

@@ -1,0 +1,34 @@
+{
+  "comment": "Seller fee schedules per platform and seller region, verified 2026-09-09 against etsy.com/legal/fees (via voolist.com and craftybase.com breakdowns) and ebay.com/help/selling/fees-credits-invoices/selling-fees. Percentages apply to the gross the buyer pays (item plus shipping); the scripts apply them to the item price only, since shipping is charged to the buyer at cost. extra_pct is for Offsite Ads (Etsy: 15%, 12% above 10k USD a year, mandatory there) or a regulatory operating fee; 0 because neither is certain per sale. Copy to $DAPILOT_STORE_DIR/reference/platform-fees.json and edit; the plugin copy is the fallback.",
+  "currency": "USD",
+  "platforms": {
+    "etsy": {
+      "listing_fee": 0.20,
+      "transaction_pct": 0.065,
+      "extra_pct": 0.0,
+      "regions": {
+        "US": { "payment_pct": 0.03, "payment_fixed": 0.25 },
+        "EU": { "payment_pct": 0.04, "payment_fixed": 0.33, "payment_fixed_note": "0.30 EUR, at about 1.10 USD per EUR" },
+        "UK": { "payment_pct": 0.04, "payment_fixed": 0.26, "payment_fixed_note": "0.20 GBP" },
+        "CA": { "payment_pct": 0.03, "payment_fixed": 0.18, "payment_fixed_note": "0.25 CAD" }
+      }
+    },
+    "ebay": {
+      "listing_fee": 0.0,
+      "listing_fee_note": "first 250 listings a month free, then 0.35 USD",
+      "transaction_pct": 0.136,
+      "transaction_note": "final value fee, most categories, includes payment processing, on item plus shipping plus sales tax up to 7,500 USD",
+      "extra_pct": 0.0,
+      "regions": {
+        "US": { "payment_pct": 0.0, "payment_fixed": 0.40, "payment_fixed_note": "per-order fee: 0.30 up to 10 USD orders, 0.40 above" },
+        "EU": { "payment_pct": 0.0165, "payment_fixed": 0.40, "payment_pct_note": "international fee 1.65% when not using eBay International Shipping" }
+      }
+    }
+  },
+  "shipping": {
+    "comment": "Buyer pays shipping at cost unless seller_pays is true. packaging_g is added to model_g for the parcel. table_usd is optional [{max_g, usd}] brackets; empty means viability.json reports shipping as unknown. dapi's shipping rates by zone are the right source once an ORDER-scoped key exists.",
+    "packaging_g": 30,
+    "seller_pays": false,
+    "table_usd": []
+  }
+}

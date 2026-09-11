@@ -162,14 +162,14 @@ def main() -> int:
 
     elapsed = round(time.time() - t0, 1)
     record = {"publicId": public_id, "name": name, "store_id": store_id, "status": q.get("status"),
-              "unit_price": q.get("result"), "batch": q.get("batch"), "errorMessage": q.get("errorMessage"),
+              "unit_price": q.get("result"), "metrics": q.get("metrics"), "batch": q.get("batch"), "errorMessage": q.get("errorMessage"),
               "createdAt": q.get("createdAt"), "finishedAt": q.get("finishedAt"), "fetched_at": now(),
               "seconds_waited": elapsed, "raw": q}
     if q.get("status") == "DONE":
         (wd / "quote.json").write_text(json.dumps(record, indent=2))
         pending_path.unlink(missing_ok=True)
         return out({"ok": True, "status": "DONE", "publicId": public_id, "unit_price": q.get("result"),
-                    "batch": q.get("batch"), "seconds_waited": elapsed}, 0)
+                    "metrics": q.get("metrics"), "batch": q.get("batch"), "seconds_waited": elapsed}, 0)
     if q.get("status") in ("ERROR", "CANCELLED"):
         (wd / "quote.error.json").write_text(json.dumps(record, indent=2))
         pending_path.unlink(missing_ok=True)

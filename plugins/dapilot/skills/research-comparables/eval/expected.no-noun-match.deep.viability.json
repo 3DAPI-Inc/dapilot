@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "reason": "no comparables with a price",
+  "n_comparables": 0,
+  "mode": "rules",
+  "n_scored": 0,
+  "min_relevance": 0.6
+}

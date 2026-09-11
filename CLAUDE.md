@@ -19,6 +19,8 @@ Read before building anything:
 - `docs/agents.md`  the swarm hierarchy: roles, what each may and may not
   do, how work is handed over, and the rules that stop reruns and loops
 - `docs/skills.md`  how a skill is written, tested and judged
+- `docs/market-research.md`  how viability and price are decided, what the
+  first runs showed, and the deep-market design that comes next
 
 ## Where this stands (September 2026)
 
@@ -46,8 +48,64 @@ Read before building anything:
   box through the camera, 3MF converted to PLY through our loader. The model
   chooses only orientation and hero yaw from an 8-frame draft turntable.
   Draft turntable about 15 to 30 s; one 1024 px final about 60 to 90 s on
-  the reference laptop. Next: `write-listing`, and the stage wrapper to cut
-  worker turns.
+  the reference laptop. **A product video is a required output of the
+  render stage (decided 2026-09-08)**: one 360 degree turntable,
+  10 s, 24 fps, 1080 px square, silent H.264 MP4 under 100 MB, within Etsy's
+  listing video limits and reusable for social posting. Not built yet; the
+  spec is in `render-model/SKILL.md`. Next: the video pass in
+  `render_model.py`, `write-listing`, and the stage wrapper to cut worker
+  turns.
+- **Phase 4 research is live ahead of order (2026-09-09).** `research-comparables`
+  runs as an intake stage after quote and render: `etsy_search.py` fetches
+  and filters Etsy listings (physical, right size, variant closest to our
+  size via OAuth inventory), the model picks the true comparables, and
+  `market_stats.py` writes `viability.json`: market band, Etsy fees from
+  `reference/platform-fees.json` (override in `$DAPILOT_STORE_DIR/reference/`),
+  margin at p25, median and p75, break-even and target price, verdict.
+  Shipping is reported unknown until a weight table or dapi's shipping
+  estimate feeds it. First run, an octagon passthrough fidget: 6
+  comparables, median 6.49 USD against a 5.71 USD one-off cost, not viable.
+  Needs `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET`, `DAPILOT_STORE_DIR`; the
+  Etsy token lives at `$DAPILOT_STORE_DIR/etsy_token.json`, gitignored.
+- **The deep market read is live (2026-09-11).** Etsy caps search offsets
+  at 5 for our key, so `etsy_search.py` pages by price window (a geometric
+  USD ladder, one relevance page each) inside the taxonomy aisle, scores
+  every survivor for relevance and market weight, and `market_stats.py`
+  builds a weighted band from rules the model writes; `price_candidates.py`
+  adds a p75 candidate with a seller-concentration check. The taxonomy id
+  is required: without it the duck read returned 404 listings and a 43 USD
+  median for a 12 mm charm. Details and numbers in `docs/market-research.md`
+  section 7.
+- **Pricing policy decided 2026-09-09**, in `store/reference/pricing-policy.json`
+  (private). Cost basis is dapi's quote as charged, commission included and
+  never backed out: whoever produces on the platform pays it. Two candidates
+  go to the model in the price stage: quote plus 50% markup, and the market
+  median. Hard rule, enforced by `price_candidates.py --check` and never by
+  a prompt: the sale price is never below break-even (cost, platform fees,
+  VAT owed), for any author of `price.json`; a person may override to
+  another price with an `override` block, but not below the floor. The
+  policy assumes an EU seller with 21% VAT inside every sale, which is
+  conservative for US buyers; under it a 50% markup on the fidget clears
+  break-even by 0.25 USD, so the markup and the VAT assumption need a
+  second look before the price stage goes live. `cost_basis` in the policy
+  chooses the one-off quote or the full-plate unit from the batch curve;
+  decided 2026-09-11: `full_plate` with `stock_units: 100`, because the shop
+  buys in batches and sells from stock. On the eight-per-plate cat that is
+  a floor of 3.99 against 7.99, and `viability.json` carries a `stock`
+  block (plates, batch cost, payback units per band price).
+- **Quote metrics are per unit only after the API fix of 2026-09-09.** In
+  batch mode the API stored the last plate's totals (the 4-copy plate) as
+  the unit's grams and time. Fixed in `process-slicing-result.use-case.ts`
+  (unit metrics from the one-copy plate); quotes sliced before the redeploy
+  keep the wrong `model_g` and must be re-sliced. Batch quoting is a
+  per-account flag, `user_api_profiles.batch_quoting`, set in the database
+  only.
+- **Foreign 3mf projects fail on dapi.** Creality Print, Orca and Prusa
+  project files carry printer settings Bambu Studio rejects ("Invalid
+  parameter value(s)" or "Failed slicing the model"). `strip_3mf.py` keeps
+  the geometry and thumbnails only; the stripped file slices. Bambu Studio
+  projects need nothing. Not yet wired into the frontend upload or
+  `quote.py`.
 - **The geometry scripts were lost and rebuilt on 2026-09-03.** An
   unverified move followed by a delete removed the untracked originals.
   `analyze_mesh.py` was restored verbatim from a transcript;
@@ -61,10 +119,34 @@ Read before building anything:
   minimum a listing needs.
 - **No orchestrator exists yet.** The interactive Claude Code session is the
   orchestrator for now.
-- **The frontend uploads straight into the pipeline.** `frontend/src/api/jobs.ts`
-  defines the stage vocabulary (`intake analyze slice price render research
-  copy publish`); `server/app.py` on :3100 serves it. Upload, job list and
-  job page work; review, catalogue and approve are placeholders.
+- **Runs are supervised and resumable (2026-09-10).** One `run_intake.py`
+  director per upload; `runs/<id>/` keeps `state.json`, `report.md`,
+  `director.log` and every worker's raw output under `workers/`. Workers run
+  in their own process group and are killed at `max_worker_minutes` (15,
+  `store/config.json`); a `.lock` older than that is stale and removed with
+  a note. `GET /runs/unfinished` lists work dirs with a stage left and no
+  live worker; `POST /runs/resume`, `run_intake.py --resume`, the console's
+  Resume button, or `resume_on_start: true` in config start a director over
+  them. Two faults found on the first frontend runs and fixed: the ledger
+  flipped a running stage to done the moment its file appeared (so every
+  record was rejected and no cost kept), and a worker whose `claude -p`
+  stalled held its item for two hours because only the direct child was
+  killed on timeout. A third, found on the resume: the research worker ran
+  out of its 0.50 USD budget reading 65 KB of listing JSON, and its dead
+  lock parked the item. Now `etsy_search.py --out` writes a compact record
+  per listing (about 3x smaller) with the full projection in `*.full.json`,
+  `budget.usd_per_stage` in `store/config.json` sets research at 1.00 USD,
+  and the ledger drops a worker's lock when it records that worker's end.
+- **The frontend uploads through the server into the pipeline (2026-09-09).**
+  `POST /jobs` on `server/app.py` (:3100) strips foreign 3mf project settings,
+  files the model under `work/<sha256>/`, and starts one `run_intake.py`
+  director per upload; its workers are Claude agents. `GET /jobs/{id}` reads
+  the work dir back: quote, metrics, drafts, market band, verdict, price
+  candidates, the proposal or its rejection, the log. Stage and status are
+  derived from files against `stages.json`, never stored.
+  `frontend/src/api/jobs.ts` defines the stage vocabulary (`intake analyze
+  slice preview research price render copy publish`). The browser no longer
+  calls dapi. Review, catalogue and approve are placeholders.
 
 ## Scope
 
@@ -130,7 +212,7 @@ them.
 |---|---|---|
 | `POST /quotes/upload_file` | PRICING | presigned S3 URL; stl/3mf/obj/step/stp up to 250MB, client PUTs directly |
 | `POST /quotes` | PRICING | slice (Bambu Studio on ECS Fargate) and price one file |
-| `GET /quotes`, `GET /quotes/:publicId`, `GET /quotes/status_check` | PRICING | list, fetch, poll |
+| `GET /quotes`, `GET /quotes/:publicId`, `GET /quotes/status_check` | PRICING | list, fetch, poll. A DONE quote carries `metrics` (added 2026-09-08): `model_g`, `total_g`, `print_time_s`, `prepare_time_s`, `filament_count`, the slicer measurements the price was computed from. `model_g` is the shipping weight. |
 | `GET /designer/orders`, `GET /designer/orders/:orderId` | ORDER | orders customers placed for our designs |
 | `POST /designer/orders` | ORDER | create an order from completed quotes |
 | `GET /designer/orders/filaments` | ORDER | available filaments |
@@ -175,7 +257,9 @@ Rules that follow from the split:
   choice, failure triage, "is this order odd" are skills. If a model is
   choosing a price, something has gone wrong.
 - **The upload path is deterministic.** Intake stages run in a fixed order
-  with fixed inputs and outputs. The model's judgement is confined to the
+  with fixed inputs and outputs. Since 2026-09-09 the order is analyze,
+  quote, preview (drafts), research, price, render (finals and video), copy,
+  publish: nothing expensive runs for an item that cannot sell. The model's judgement is confined to the
   content of a stage (which category, which camera), never to which stage
   runs next or whether to run it again.
 - **If logic only exists inside a prompt, it cannot be tested and cannot be
@@ -196,7 +280,7 @@ skill names so that future work lands under agreed names.
 
 | Process | Trigger | Stages | Skills | API surface | Status |
 |---|---|---|---|---|---|
-| Intake | new model file | intake, analyze, slice, price, render, research, copy, publish | `dapi-request`, `analyze-model`, `quote-model`, `render-model`, `research-comparables`, `write-listing`, `publish-listing` | Designer: quotes; design creation route to be added | `dapi-request` done; analyze and render scripts exist; the rest not started |
+| Intake | new model file | intake, analyze, slice, preview, research, price, render, copy, publish | `dapi-request`, `analyze-model`, `quote-model`, `preview-model`, `research-comparables`, `propose-price`, `render-model`, `write-listing`, `publish-listing` | Designer: quotes; design creation route to be added | `dapi-request`, `analyze-model`, `quote-model`, `render-model` (stills), `preview-model`, `research-comparables`, `propose-price` done; `write-listing`, `publish-listing` not started |
 | Pricing review | quote returned, or admin approval pending | price | `review-price` | admin approval is in the platform UI, not the API | not started |
 | Catalogue health | schedule | research, copy | `audit-listing` | design read routes to be added on the Designer surface | not started |
 | Orders | new or changed order | (none yet) | `triage-order` | Designer: `/designer/orders` | not started |
@@ -217,6 +301,9 @@ plugins/
       hierarchy/ guardrails/ output-format/ work-ledger/   general skills, loaded into every agent
       dapi-request/               universal API client (job skill, shared by departments)
       analyze-model/              first intake stage
+      preview-model/              draft turntable, no judgement
+      research-comparables/       research stage; reference/platform-fees.json, search-guide.md
+      propose-price/              price stage; picks a candidate, the script checks it
       run-intake/                 director skill; reference/stages.json is the intake stage table
     agents/
       catalogue-lead.md           spawns catalogue-worker only
@@ -228,10 +315,14 @@ plugins/
       analyze_mesh.py load_3mf.py make_fixtures.py quote.py
       render_model.py render_scene.py   studio renders (driver, Blender-side scene)
       render_turntable.py             older plain turntable, kept for reference
+      strip_3mf.py                    foreign 3mf project -> geometry-only 3mf
+      etsy_search.py etsy_auth.py market_stats.py   research stage: Etsy search, OAuth, viability
+      pricing.py price_candidates.py  the sale-price formula and the two candidates; --check is the break-even hard floor
 docs/
   agents.md                       roles and orchestration rules
   skills.md                       skill authoring guideline
   store-plan.md                   the construction plan and build order
+  market-research.md              research stage, price chain, findings, deep-market design
 server/
   app.py                          FastAPI job API for the frontend (:3100)
 store/
@@ -284,11 +375,12 @@ cd frontend && npm run dev        # :8081, 8080 is dapi's
 .venv/bin/uvicorn server.app:app --port 3100 --reload   # the frontend's job API; holds the dapi key
 ```
 
-For now the frontend talks to dapi directly (see the temporary exception
-under Rules): upload_file, PUT to S3, create quote, poll, all from the
-browser, quotes named by the file's sha256 so nothing is sliced twice.
-`server/app.py` on :3100 is the alternative that keeps the key server side
-and also runs local analysis; it is not used by the UI at the moment.
+The frontend talks only to `server/app.py` on :3100 (Vite proxies `/api`
+there). The server holds the keys, strips foreign 3mf projects, and starts a
+director per upload; every stage after that is the same pipeline the
+headless runner uses. `frontend/src/api/dapi.ts` is kept for its types
+only; the temporary browser-to-dapi exception of 2026-09-04 ended on
+2026-09-09.
 
 Measured on the reference laptop (4 cores): an 8-frame draft turntable at
 320 px/24 samples about 30 s, a 640 px/64-sample hero about 30 s, a 1024 px/
@@ -299,6 +391,8 @@ Environment every skill expects:
 ```
 DAPI_API_KEY      scoped API key, never committed, never sent to the browser
 DAPI_API_URL      base URL of the public API service (public-api/v1), local or hosted
+DAPILOT_STORE_DIR store-private files (Etsy token, fee schedule, taxonomy cache); research stage
+ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app, research stage only
 ```
 
 `DAPI_API_URL` is the origin only; the contract's paths already carry `/v1`.
@@ -320,8 +414,13 @@ wrapper script per stage so a worker needs about three turns instead of ten. Use
 intake, ORDER for order triage, a separate print-farm key for fulfilment.
 
 ```bash
+# everything, locally: checks, job API on :3100, console on :8081, ctrl-c stops both
+scripts/dev/up.sh            # --check only verifies; --resume also picks up unfinished work dirs
+
 # an intake run over a folder, headless: director and lead are code, only workers spend tokens
 .venv/bin/python plugins/dapilot/scripts/run_intake.py <folder> [--run my-run] [--dry-run]
+.venv/bin/python plugins/dapilot/scripts/run_intake.py --resume          # every work dir with a stage left
+.venv/bin/python plugins/dapilot/scripts/run_intake.py --items <hash>,<hash>
 # the same loop from an interactive session, with model agents as director and lead
 claude --plugin-dir plugins/dapilot            # then: /dapilot:run-intake fixtures
 
@@ -418,11 +517,10 @@ parameter properties.
   does nothing. This applies to agents in a run as much as to the session.
 - Do not use em dashes in text shown to users.
 - No credential ever reaches the browser. Not a dapi API key, not an Anthropic
-  key. The browser gets a short-lived token and nothing else.
-  **Temporary exception, decided 2026-09-04:** the frontend calls the staging
-  public API directly with `VITE_DAPI_API_KEY` from `frontend/.env`
-  (`frontend/src/api/dapi.ts`). Staging key only, internal use only, never
-  committed. `server/app.py` is the key-holding path to return to.
+  key. The browser gets a short-lived token and nothing else. The temporary
+  exception of 2026-09-04 (browser calling staging directly with
+  `VITE_DAPI_API_KEY`) ended 2026-09-09; `server/app.py` is the only path.
+  `VITE_DAPI_*` in `frontend/.env` is unused and can be removed.
 - Prefer deterministic code over a model call. Every stage that can be a script
   should be a script.
 - Renders, analysis and quotes are cacheable on the content hash of the model

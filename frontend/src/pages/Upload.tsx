@@ -1,7 +1,7 @@
 import { Suspense, lazy, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ACCEPTED_EXTENSIONS, createJobs } from '@/api/jobs';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ACCEPTED_EXTENSIONS, type Job, createJobs, getJob, isLive } from '@/api/jobs';
 import { ConsoleNav, SiteHeader } from '@/components/site/SiteHeader';
 import { Spinner } from '@/components/site/Spinner';
 import { extensionOf } from '@/lib/model/load';
@@ -16,7 +16,7 @@ const ModelViewer = lazy(() =>
 /** The viewer's own frame, so the layout does not jump when the chunk lands. */
 function ViewerFallback() {
   return (
-    <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl border border-mist bg-white">
+    <div className="flex aspect-[6/5] w-full items-center justify-center rounded-2xl border border-mist bg-white">
       <Spinner />
     </div>
   );
@@ -38,6 +38,50 @@ interface Staged {
 
 type Rejection = { id: string; name: string; reason: string };
 
+/**
+ * One run this page started, followed while the pipeline moves it. The row
+ * says the latest fact the work dir holds: the dapi price and weight once
+ * sliced, the market verdict once researched, the proposed sale price once
+ * priced, and why it stopped when it stopped.
+ */
+function StartedRow({ job }: { job: Job }) {
+  const live = useQuery({
+    queryKey: ['job', job.id],
+    queryFn: () => getJob(job.id),
+    initialData: job,
+    refetchInterval: (q) => (isLive(q.state.data) ? 3000 : false),
+  });
+  const j = live.data;
+  const m = j.metrics;
+  const facts: string[] = [];
+  if (j.price != null) facts.push(`$${j.price.toFixed(2)} dapi`);
+  if (m) facts.push(`${m.model_g.toFixed(1)} g`);
+  if (j.viability?.verdict) facts.push(j.viability.verdict.replace('_', ' '));
+  if (j.pricing?.proposal) facts.push(`sell at $${j.pricing.proposal.price.toFixed(2)}`);
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-mist py-2.5 font-sans text-sm">
+      <Link to={`/jobs/${j.id}`} className="min-w-0 truncate text-navy underline-offset-4 hover:underline">
+        {j.fileName}
+      </Link>
+      {j.stripped ? <span className="text-xs text-slate/70">project settings stripped</span> : null}
+      {facts.length > 0 ? <span className="tabular-nums text-navy">{facts.join(' · ')}</span> : null}
+      {j.status === 'failed' || j.status === 'blocked' ? (
+        <span className={j.status === 'failed' ? 'text-destructive' : 'text-slate'}>
+          {j.stage}: {j.reason}
+        </span>
+      ) : j.status === 'done' ? (
+        <span className="text-slate">{j.stage} done</span>
+      ) : (
+        <span className="flex items-center gap-1.5 text-slate">
+          <Spinner className="size-3 border" />
+          {j.stage}
+          {j.reason ? ` · ${j.reason}` : ''}
+        </span>
+      )}
+    </li>
+  );
+}
+
 function fileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB'];
@@ -58,6 +102,7 @@ export default function Upload() {
   const [rejections, setRejections] = useState<Rejection[]>([]);
   const [steps, setSteps] = useState<Record<number, string>>({});
   const [sent, setSent] = useState(0);
+  const [started, setStarted] = useState<Job[]>([]);
 
   // dragenter/dragleave fire for every child too, so depth is counted rather
   // than toggled - otherwise crossing the inner text clears the drag state.
@@ -82,6 +127,7 @@ export default function Upload() {
       const failed = new Set(failures.map((f) => f.fileName));
       setStaged((prev) => prev.filter((s) => failed.has(s.file.name)));
       setSent(jobs.length);
+      setStarted((prev) => [...jobs, ...prev.filter((p) => !jobs.some((j) => j.id === p.id))]);
     },
     onSettled: () => setSteps({}),
   });
@@ -202,6 +248,19 @@ export default function Upload() {
           </p>
         ) : null}
 
+        {started.length > 0 ? (
+          <section className="mt-6">
+            <h2 className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.22em] text-slate/60">
+              Started
+            </h2>
+            <ul className="mt-3 border-t border-mist">
+              {started.map((job) => (
+                <StartedRow key={job.id} job={job} />
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         {staged.length > 0 ? (
           <section className="mt-10 grid gap-8 sm:grid-cols-[minmax(0,1fr)_15rem]">
             {/* Keyed on the file so switching selection remounts the viewer's
@@ -279,7 +338,9 @@ export default function Upload() {
               </button>
 
               <p className="mt-3 font-sans text-xs leading-relaxed text-slate/70">
-                Uploading slices and prices each file on dapi. Nothing is published.
+                Uploading analyses, slices and prices each file on dapi, then researches the
+                market and proposes a sale price. Renders run only for what can sell. Nothing is
+                published.
               </p>
             </div>
           </section>

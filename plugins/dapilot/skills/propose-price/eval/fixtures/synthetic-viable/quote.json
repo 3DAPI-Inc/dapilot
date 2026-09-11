@@ -1,0 +1,58 @@
+{
+  "publicId": "dapi_1ee452587f",
+  "name": "56d807087b0c06088bf5fd4d33c46fc825a676837cc3c7ecb2ee25e50886d449",
+  "store_id": null,
+  "status": "DONE",
+  "unit_price": 5.71,
+  "metrics": {
+    "model_g": 40.88209533691406,
+    "total_g": 40.88209533691406,
+    "print_time_s": 6614.7861328125,
+    "prepare_time_s": 558,
+    "filament_count": 1
+  },
+  "batch": {
+    "max_per_plate": 1,
+    "prices": [
+      {
+        "unit": 5.706099,
+        "total": 5.706099,
+        "plates": 1,
+        "quantity": 1
+      }
+    ]
+  },
+  "errorMessage": null,
+  "createdAt": "2026-09-09T10:17:51.918Z",
+  "finishedAt": "2026-09-09T10:18:11.581Z",
+  "fetched_at": "2026-09-09T10:18:23+00:00",
+  "seconds_waited": 33.2,
+  "raw": {
+    "publicId": "dapi_1ee452587f",
+    "name": "56d807087b0c06088bf5fd4d33c46fc825a676837cc3c7ecb2ee25e50886d449",
+    "webhook_metadata": null,
+    "status": "DONE",
+    "result": 5.71,
+    "metrics": {
+      "model_g": 40.88209533691406,
+      "total_g": 40.88209533691406,
+      "print_time_s": 6614.7861328125,
+      "prepare_time_s": 558,
+      "filament_count": 1
+    },
+    "batch": {
+      "max_per_plate": 1,
+      "prices": [
+        {
+          "unit": 5.706099,
+          "total": 5.706099,
+          "plates": 1,
+          "quantity": 1
+        }
+      ]
+    },
+    "store_id": null,
+    "createdAt": "2026-09-09T10:17:51.918Z",
+    "finishedAt": "2026-09-09T10:18:11.581Z"
+  }
+}

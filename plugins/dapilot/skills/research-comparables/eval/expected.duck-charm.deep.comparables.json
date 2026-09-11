@@ -1,0 +1,464 @@
+{
+  "mode": "rules",
+  "product": "duck",
+  "queries": [
+    "duck charm"
+  ],
+  "taxonomy_id": 1799,
+  "currency": "USD",
+  "rules": {
+    "noun": "duck",
+    "required_any": [
+      "charm",
+      "mini",
+      "miniature",
+      "tiny",
+      "pocket hug",
+      "figurine"
+    ],
+    "excluded": [
+      "set of",
+      "pcs",
+      "pack of",
+      "bundle",
+      "family",
+      "keychain",
+      "articulated",
+      "articulado",
+      "custom"
+    ],
+    "materials_allowed": [
+      "resin",
+      "epoxy resin",
+      "pla",
+      "petg",
+      "3d printed",
+      "plastic"
+    ],
+    "materials_excluded": [
+      "polymer clay",
+      "clay",
+      "ceramic",
+      "porcelain",
+      "metal",
+      "wood",
+      "wooden",
+      "glass"
+    ],
+    "taxonomy_id": 1799,
+    "notes": "a single 12 mm printed duck charm or miniature, not a family, a pack, a keychain or an articulated toy"
+  },
+  "n_scored": 15,
+  "n_selected": 12,
+  "min_relevance": 0.6,
+  "comparables": [
+    {
+      "listing_id": 1096010173,
+      "url": "https://www.etsy.com/listing/1096010173/hand-painted-miniature-halloween-duck",
+      "title": "Halloween Duck Witch Hat Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Minature, Baby Duck, Wirches Hat",
+      "price": 3.23,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "resin",
+        "paint"
+      ],
+      "sold": 85351,
+      "reviews": 22084,
+      "favorers": 766,
+      "relevance": 0.925,
+      "market_weight": 15.676,
+      "page": 2,
+      "shop": {
+        "name": "MoldedCandy",
+        "sold": 85351,
+        "review_count": 22084
+      }
+    },
+    {
+      "listing_id": 1626958314,
+      "url": "https://www.etsy.com/listing/1626958314/miniature-chef-duck-figurine-3d-printed",
+      "title": "Chef Duck Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Bird, 3d Printed Resin Kitchen Decor, Cook Gift, Food Lover",
+      "price": 2.58,
+      "currency": "USD",
+      "price_source": "variant_unsized",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "resin",
+        "paint"
+      ],
+      "sold": 85351,
+      "reviews": 22084,
+      "favorers": 327,
+      "relevance": 0.925,
+      "market_weight": 15.251,
+      "page": 2,
+      "shop": {
+        "name": "MoldedCandy",
+        "sold": 85351,
+        "review_count": 22084
+      }
+    },
+    {
+      "listing_id": 1602849144,
+      "url": "https://www.etsy.com/listing/1602849144/red-devil-duck-figurine-miniature",
+      "title": "Red Devil Duck Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Bird, Halloween Decor, Collectible Display",
+      "price": 2.58,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "resin",
+        "paint"
+      ],
+      "sold": 85351,
+      "reviews": 22084,
+      "favorers": 248,
+      "relevance": 0.925,
+      "market_weight": 15.113,
+      "page": 2,
+      "shop": {
+        "name": "MoldedCandy",
+        "sold": 85351,
+        "review_count": 22084
+      }
+    },
+    {
+      "listing_id": 4403388714,
+      "url": "https://www.etsy.com/listing/4403388714/glow-in-the-dark-duck-glitter-resin",
+      "title": "Glow in Dark Resin Duck Charm | Glitter Pocket Hug, Stocking Filler (Random Colour)",
+      "price": 2.57,
+      "currency": "USD",
+      "price_source": "variant_unsized",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "Epoxy Resin",
+        "Glitter",
+        "Glow Powder",
+        "Organza Bag",
+        "Card"
+      ],
+      "sold": 6952,
+      "reviews": 779,
+      "favorers": 192,
+      "relevance": 0.925,
+      "market_weight": 12.478,
+      "page": 2,
+      "shop": {
+        "name": "MarmaladeUnicorn",
+        "sold": 6952,
+        "review_count": 779
+      }
+    },
+    {
+      "listing_id": 4410124323,
+      "url": "https://www.etsy.com/listing/4410124323/mini-glow-in-the-dark-duck-stocking",
+      "title": "Mini Glow Duck Charm | Random Color Resin Figurine (1.7cm)",
+      "price": 1.92,
+      "currency": "USD",
+      "price_source": "variant_unsized",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "Epoxy Resin",
+        "Glow Powder",
+        "Organza Bag",
+        "Card"
+      ],
+      "sold": 6952,
+      "reviews": 779,
+      "favorers": 23,
+      "relevance": 0.925,
+      "market_weight": 11.436,
+      "page": 1,
+      "shop": {
+        "name": "MarmaladeUnicorn",
+        "sold": 6952,
+        "review_count": 779
+      }
+    },
+    {
+      "listing_id": 4415060153,
+      "url": "https://www.etsy.com/listing/4415060153/christmas-duck-pocket-hug-stocking",
+      "title": "Mini Resin Christmas Duck | Stocking Filler, Secret Santa Gift, Desk Buddy",
+      "price": 1.92,
+      "currency": "USD",
+      "price_source": "variant_unsized",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "Epoxy Resin",
+        "Organza Bag",
+        "Cardstock",
+        "Ink"
+      ],
+      "sold": 6952,
+      "reviews": 779,
+      "favorers": 2,
+      "relevance": 0.925,
+      "market_weight": 10.396,
+      "page": 2,
+      "shop": {
+        "name": "MarmaladeUnicorn",
+        "sold": 6952,
+        "review_count": 779
+      }
+    },
+    {
+      "listing_id": 4444149024,
+      "url": "https://www.etsy.com/listing/4444149024/5pcs-resin-duck-ornament-kawaii-desk",
+      "title": "5Pcs Resin Duck Ornament, Kawaii Desk Accessory, Car Dashboard Decor, Computer Display Accent",
+      "price": 34.82,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "Resin"
+      ],
+      "sold": 1510,
+      "reviews": 268,
+      "favorers": 6,
+      "relevance": 0.725,
+      "market_weight": 9.293,
+      "page": 5,
+      "shop": {
+        "name": "Pingfabricbag",
+        "sold": 1510,
+        "review_count": 268
+      },
+      "excluded_by": [
+        "pcs"
+      ]
+    },
+    {
+      "listing_id": 4428566462,
+      "url": "https://www.etsy.com/listing/4428566462/travel-duck-pocket-hug-cute-duck",
+      "title": "Travel Duck Pocket Hug Cute Duck Keepsake, Cruises, Holidays, Travellers, Sentimental Thoughtful Gifts",
+      "price": 1.81,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [],
+      "sold": 975,
+      "reviews": 143,
+      "favorers": 11,
+      "relevance": 0.775,
+      "market_weight": 9.126,
+      "page": 1,
+      "shop": {
+        "name": "FuzzyDucksAromas",
+        "sold": 975,
+        "review_count": 143
+      }
+    },
+    {
+      "listing_id": 1884254105,
+      "url": "https://www.etsy.com/listing/1884254105/pocket-hug-duck-keepsake-unusual",
+      "title": "Pocket Hug Duck Keepsake, Unusual, Thoughtful, Sentimental Gift Novelty Charm",
+      "price": 1.81,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [],
+      "sold": 975,
+      "reviews": 143,
+      "favorers": 6,
+      "relevance": 0.775,
+      "market_weight": 8.856,
+      "page": 1,
+      "shop": {
+        "name": "FuzzyDucksAromas",
+        "sold": 975,
+        "review_count": 143
+      }
+    },
+    {
+      "listing_id": 1867706896,
+      "url": "https://www.etsy.com/listing/1867706896/good-luck-duck-gift-cute-duck-gift-desk",
+      "title": "Good Luck Duck Gift Cute Duck Gift Desk Buddy Cute little Duck Pocket Hug Duck Best Friend Exams TravelGift Positive Gift Lucky Novelty Gift",
+      "price": 1.81,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "resin"
+      ],
+      "sold": 975,
+      "reviews": 143,
+      "favorers": 4,
+      "relevance": 0.925,
+      "market_weight": 8.688,
+      "page": 1,
+      "shop": {
+        "name": "FuzzyDucksAromas",
+        "sold": 975,
+        "review_count": 143
+      }
+    },
+    {
+      "listing_id": 4443717559,
+      "url": "https://www.etsy.com/listing/4443717559/lucky-duck-charm-inspirational-duck",
+      "title": "Lucky Duck Charm || Inspirational Duck Figurine || Friend Gift",
+      "price": 2.5,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [],
+      "sold": 1522,
+      "reviews": 413,
+      "favorers": 1,
+      "relevance": 0.775,
+      "market_weight": 8.675,
+      "page": 2,
+      "shop": {
+        "name": "ThreeLittleBirdsDS",
+        "sold": 1522,
+        "review_count": 413
+      }
+    },
+    {
+      "listing_id": 4511027038,
+      "url": "https://www.etsy.com/listing/4511027038/duck-animascota-pato-blanco-articulado",
+      "title": "Duck Animascota – Pato Blanco Articulado 3D",
+      "price": 3.88,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [],
+      "sold": 30,
+      "reviews": 8,
+      "favorers": 1,
+      "relevance": 0.725,
+      "market_weight": 4.781,
+      "page": 3,
+      "shop": {
+        "name": "Reality3Dreams",
+        "sold": 30,
+        "review_count": 8
+      },
+      "excluded_by": [
+        "keychain",
+        "articulated",
+        "articulado"
+      ]
+    }
+  ],
+  "rejected_count": 3,
+  "rejected_sample": [
+    {
+      "listing_id": 1823976342,
+      "url": "https://www.etsy.com/listing/1823976342/fancy-duck-friend-keychains-duck",
+      "title": "Fancy Duck Friend Keychains - Duck Figurines Handmade with Polymer Clay - Custom",
+      "price": 37.71,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "Sculpey Souffle Polymer Clay",
+        "UV Resin Coating",
+        "Acrylic Paint for Details"
+      ],
+      "sold": 80,
+      "reviews": 29,
+      "favorers": 7,
+      "relevance": 0.0,
+      "market_weight": 6.434,
+      "page": 6,
+      "shop": {
+        "name": "NeverloneHollow",
+        "sold": 80,
+        "review_count": 29
+      },
+      "excluded_by": [
+        "keychain",
+        "custom",
+        "material:polymer clay",
+        "material:clay"
+      ]
+    },
+    {
+      "listing_id": 4500299865,
+      "url": "https://www.etsy.com/listing/4500299865/mallard-duck-family-handmade-polymer",
+      "title": "Mallard duck family, handmade polymer clay miniature figurine",
+      "price": 45.0,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [],
+      "sold": 2223,
+      "reviews": 1011,
+      "favorers": 17,
+      "relevance": 0.0,
+      "market_weight": 10.152,
+      "page": 6,
+      "shop": {
+        "name": "ImaginingIt",
+        "sold": 2223,
+        "review_count": 1011
+      },
+      "excluded_by": [
+        "family",
+        "material:polymer clay",
+        "material:clay"
+      ]
+    },
+    {
+      "listing_id": 4566235475,
+      "url": "https://www.etsy.com/listing/4566235475/miniature-glowing-street-duck-figurine",
+      "title": "Miniature Glowing Street Duck Figurine – Set of 2, Pick Your Style",
+      "price": 10.96,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "Resin",
+        "Non toxic paint"
+      ],
+      "sold": 3,
+      "reviews": 0,
+      "favorers": 0,
+      "relevance": 0.0,
+      "market_weight": 2.386,
+      "page": 4,
+      "shop": {
+        "name": "Petitopia",
+        "sold": 3,
+        "review_count": 0
+      },
+      "excluded_by": [
+        "set of",
+        "material:polymer clay",
+        "material:clay"
+      ]
+    }
+  ]
+}

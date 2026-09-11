@@ -1,0 +1,48 @@
+{
+  "noun": "octagon",
+  "required_any": [
+    "fidget",
+    "twist",
+    "swirl",
+    "passthrough",
+    "pass through",
+    "infinity"
+  ],
+  "excluded": [
+    "spinner",
+    "keychain",
+    "pendant",
+    "slider",
+    "clicker",
+    "magnetic",
+    "cube",
+    "set of",
+    "piece set",
+    "bundle"
+  ],
+  "materials_allowed": [
+    "pla",
+    "petg",
+    "asa",
+    "tpu",
+    "3d printed",
+    "plastic"
+  ],
+  "materials_excluded": [
+    "metal",
+    "steel",
+    "stainless",
+    "damascus",
+    "copper",
+    "brass",
+    "titanium",
+    "zirc",
+    "leather",
+    "wood",
+    "wooden",
+    "glass",
+    "ceramic"
+  ],
+  "taxonomy_id": 1628,
+  "notes": "one printed octagon twist or passthrough fidget about 100 mm; spinners, sliders, cubes, keychains and metal EDC pieces are other products"
+}

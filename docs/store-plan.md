@@ -136,6 +136,9 @@ Levers, in order of effect:
    bug report, not a bill.
 5. **Draft before final.** Draft renders for anything a model looks at; the
    full turntable runs once, last, only for items that reached `publish`.
+   The product video is that turntable encoded (spec in
+   `render-model/SKILL.md`); it is required for every listing, so it runs
+   for everything that gets published, never for drafts.
 6. **Batch the API.** Integration accounts get batch pricing; quotes for a
    folder go in one pass.
 7. **Run-level budget.** `store/config.json` sets a spend ceiling per run and
@@ -170,7 +173,7 @@ Each phase ends with something that runs and a number that was measured.
 |---|---|---|
 | 0. Skeleton | four general skills; `validate_result.py`; `catalogue-worker` and `catalogue-lead` agent files; `run-intake` as the director for one department; `store/config.json` | a two-item dry run through the mock server spawns workers, collects two result lines, writes `state.json` and `report.md`, and rejects one deliberately malformed result |
 | 1. Quote | `quote-model` on top of `dapi-request`; quote polling script | three fixtures quoted against a real API, no file quoted twice on rerun, cost per quote recorded |
-| 2. Listing | `render-model`, `write-listing`, `publish-listing` (proposal only); design-create route added in `public-api/v1` | first listing approved by a person from `report.md`, cost per listing recorded |
+| 2. Listing | `render-model` (stills and the required turntable video), `write-listing`, `publish-listing` (proposal only, refuses a listing with no video); design-create route added in `public-api/v1` | first listing approved by a person from `report.md`, with stills and video attached, cost per listing recorded |
 | 3. Commerce | `commerce-lead`, `triage-order`, `estimate-shipping` read-only; then `propose-order-status` | a day of real orders triaged with zero mutations, then one status change proposed and confirmed by hand |
 | 4. Growth | `growth-lead`, `research-comparables`, `audit-copy` | comparables attached to listings; audit flags reviewed; no dapi key issued to Growth |
 | 5. Autonomy | director spanning all departments; scheduled runs; gates promoted by track record, one at a time, by commit | a scheduled run completes end to end with every Propose cleared by policy, and the cost line stays under threshold |

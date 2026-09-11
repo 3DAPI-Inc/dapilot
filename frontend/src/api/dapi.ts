@@ -12,11 +12,25 @@ const KEY = import.meta.env.VITE_DAPI_API_KEY ?? '';
 
 export type QuoteStatus = 'FILE_UPLOADED' | 'PROCESSING' | 'DONE' | 'CANCELLED' | 'ERROR';
 
+/** What the slicer measured for one unit. Present only on a DONE quote. */
+export interface QuoteMetrics {
+  /** Grams of filament in the finished part: the shipping weight. */
+  model_g: number;
+  /** Grams extruded in total, supports and purge included: what the print consumes. */
+  total_g: number;
+  print_time_s: number;
+  prepare_time_s: number;
+  /** Filaments on the busiest plate; null on quotes sliced before this was recorded. */
+  filament_count: number | null;
+}
+
 export interface Quote {
   publicId: string;
   name: string | null;
   status: QuoteStatus;
   result: number | null;
+  /** null while processing and after an error; quotes older than 2026-09-08 have none. */
+  metrics?: QuoteMetrics | null;
   batch?: { max_per_plate: number; prices: { quantity: number; unit: number; total: number; plates: number }[] } | null;
   errorMessage?: string;
   createdAt: string;
@@ -65,7 +79,31 @@ export async function sha256(file: File): Promise<string> {
 export const listQuotes = (page = 1, pageSize = 100) =>
   call<{ items: Quote[]; page: number; page_size: number; total: number }>(`/quotes?page=${page}&page_size=${pageSize}`);
 
-export const getQuote = (publicId: string) => call<Quote>(`/quotes/${encodeURIComponent(publicId)}`);
+/**
+ * Every finished quote fetched on its own is logged once in the console, so
+ * "did the weight come back" is answerable from devtools without a UI change.
+ */
+export function logQuote(q: Quote): void {
+  if (q.status !== 'DONE') return;
+  const m = q.metrics;
+  if (!m) {
+    console.info(`[dapilot] quote ${q.publicId} DONE at $${q.result?.toFixed(2)} with no metrics (sliced before the API recorded them)`);
+    return;
+  }
+  console.info(
+    `[dapilot] quote ${q.publicId} DONE: $${q.result?.toFixed(2)} · ${m.model_g.toFixed(1)} g filament in the part` +
+      ` (${m.total_g.toFixed(1)} g extruded) · ${(m.print_time_s / 60).toFixed(0)} min print` +
+      (m.prepare_time_s ? ` + ${(m.prepare_time_s / 60).toFixed(0)} min prepare` : '') +
+      (m.filament_count != null ? ` · ${m.filament_count} filament${m.filament_count === 1 ? '' : 's'}` : ''),
+    m,
+  );
+}
+
+export const getQuote = async (publicId: string): Promise<Quote> => {
+  const q = await call<Quote>(`/quotes/${encodeURIComponent(publicId)}`);
+  logQuote(q);
+  return q;
+};
 
 /** Find a live quote already made for this content hash, so a file is never sliced twice. */
 export async function findQuoteByName(name: string): Promise<Quote | null> {

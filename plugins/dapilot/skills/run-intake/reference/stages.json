@@ -1,6 +1,6 @@
 {
   "process": "intake",
-  "comment": "Fixed order. A stage runs when every `requires` glob matches in the work dir and no `produces` glob does. Disabled stages are listed so the vocabulary is agreed before they exist.",
+  "comment": "Fixed order. A stage runs when every `requires` glob matches in the work dir and no `produces` glob does. Reordered 2026-09-09: cheap drafts, research and the price proposal come before the expensive final renders, so an item that cannot sell never costs a hero render or a video. Disabled stages are listed so the vocabulary is agreed before they exist.",
   "stages": [
     {
       "stage": "analyze",
@@ -28,11 +28,57 @@
       "enabled": true
     },
     {
+      "stage": "preview",
+      "skill": "preview-model",
+      "requires": [
+        "source.*",
+        "analysis.json"
+      ],
+      "produces": [
+        "renders/draft_00.png"
+      ],
+      "gate": "auto",
+      "enabled": true
+    },
+    {
+      "stage": "research",
+      "skill": "research-comparables",
+      "requires": [
+        "meta.json",
+        "analysis.json",
+        "quote.json",
+        "renders/draft_00.png"
+      ],
+      "produces": [
+        "comparables.json",
+        "viability.json"
+      ],
+      "gate": "auto",
+      "enabled": true
+    },
+    {
+      "stage": "price",
+      "skill": "propose-price",
+      "requires": [
+        "quote.json",
+        "comparables.json",
+        "viability.json",
+        "renders/draft_00.png"
+      ],
+      "produces": [
+        "price.json"
+      ],
+      "gate": "auto",
+      "enabled": true
+    },
+    {
       "stage": "render",
       "skill": "render-model",
       "requires": [
         "source.*",
-        "analysis.json"
+        "analysis.json",
+        "renders/draft_00.png",
+        "price.json"
       ],
       "produces": [
         "renders/hero.png"
@@ -46,6 +92,8 @@
       "requires": [
         "analysis.json",
         "quote.json",
+        "comparables.json",
+        "price.json",
         "renders/hero.png"
       ],
       "produces": [

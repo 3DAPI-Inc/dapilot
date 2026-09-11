@@ -1,0 +1,105 @@
+{
+  "ok": true,
+  "product": "synthetic: weighted octagon fidget market, p75 clears everything",
+  "currency": "USD",
+  "quote_unit_price": 5.71,
+  "unit_cost": 5.71,
+  "floor": 8.99,
+  "floor_rule": "break-even (cost + fees + VAT owed) rounded up to the policy ending; a price below it is refused by --check for any author",
+  "min_margin_pct": 0.1,
+  "min_margin_rule": "candidates under this margin are rejected for the model; a person may still choose one with an override block",
+  "market": {
+    "n": 8,
+    "min": 8.99,
+    "p25": 11.2,
+    "median": 14.28,
+    "p75": 19.5,
+    "max": 22.99,
+    "basis": "weighted"
+  },
+  "candidates": [
+    {
+      "label": "median",
+      "price": 13.99,
+      "net_of_vat": 11.56,
+      "fees": 2.0,
+      "unit_cost": 5.71,
+      "margin": 3.85,
+      "margin_pct": 0.333,
+      "markup_on_cost_pct": 145.0,
+      "how": "market median of 8 comparables, 14.28, weighted band, rounded",
+      "vs_median": 0.98,
+      "position_in_band": "within_p25_p75"
+    },
+    {
+      "label": "p75",
+      "price": 19.99,
+      "net_of_vat": 16.52,
+      "fees": 2.63,
+      "unit_cost": 5.71,
+      "margin": 8.18,
+      "margin_pct": 0.495,
+      "markup_on_cost_pct": 250.1,
+      "how": "market p75 of 8 comparables, 19.50, weighted band, rounded",
+      "vs_median": 1.4,
+      "position_in_band": "above_p75"
+    }
+  ],
+  "rejected": [
+    {
+      "label": "markup",
+      "price": 8.99,
+      "net_of_vat": 7.43,
+      "fees": 1.47,
+      "unit_cost": 5.71,
+      "margin": 0.25,
+      "margin_pct": 0.033,
+      "markup_on_cost_pct": 57.4,
+      "how": "quote 5.71 plus 50% markup, rounded up",
+      "vs_median": 0.63,
+      "position_in_band": "below_p25",
+      "rejected_because": "below_min_margin",
+      "min_margin_pct": 0.1
+    }
+  ],
+  "skipped": [],
+  "p75_sellers": {
+    "p75": 19.5,
+    "n": 3,
+    "weight_total": 31.744,
+    "share_basis": "market_weight",
+    "shops": [
+      {
+        "name": "PolyBrain",
+        "weight_share": 0.374
+      },
+      {
+        "name": "ErnicShop",
+        "weight_share": 0.32
+      },
+      {
+        "name": "3DMOLDFARMLLC",
+        "weight_share": 0.306
+      }
+    ],
+    "distinct_named_shops": 3,
+    "top_share": 0.374,
+    "unnamed_share": 0.0,
+    "rule": "(c) of the p75 rule holds when distinct_named_shops >= 2, top_share < 0.6 and unnamed_share < 0.2; one dominant shop, or sellers without a name, means the median"
+  },
+  "p75_sellers_note": null,
+  "policy": {
+    "platform": "etsy",
+    "seller_region": "EU",
+    "listing_fee": 0.2,
+    "payment_fixed": 0.33,
+    "pct_of_price": 0.105,
+    "vat_rate": 0.21,
+    "vat_in_sale_price": true,
+    "vat_added_to_purchase": false,
+    "markup_pct": 50.0,
+    "min_margin_pct": 0.1,
+    "rounding": "0.99"
+  },
+  "verdict": "viable"
+}

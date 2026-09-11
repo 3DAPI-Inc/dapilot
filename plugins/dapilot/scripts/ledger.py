@@ -102,12 +102,68 @@ def exists(workdir: Path, pattern: str) -> bool:
 
 # ------------------------------------------------------------------ init
 
+def lock_is_stale(wd: Path, max_minutes: float) -> bool:
+    """A worker that died mid-stage leaves its .lock behind; past the worker budget it means nothing."""
+    lock = wd / ".lock"
+    if not lock.exists():
+        return False
+    age_min = (datetime.now(timezone.utc).timestamp() - lock.stat().st_mtime) / 60
+    return age_min > max_minutes
+
+
+def clear_stale_lock(wd: Path, max_minutes: float, notes: list | None = None) -> bool:
+    if lock_is_stale(wd, max_minutes):
+        (wd / ".lock").unlink(missing_ok=True)
+        if notes is not None:
+            notes.append(f"{now()} {wd.name[:8]}: removed a .lock older than {max_minutes:g} minutes")
+        return True
+    return False
+
+
+def unfinished(wd: Path, stages: dict) -> bool:
+    """True when an enabled stage still lacks its output and nothing marks the item as stopped."""
+    if (wd / ".lock").exists() and not lock_is_stale(wd, load_config().get("max_worker_minutes", 15)):
+        return False  # a live worker holds it; another run will pick it up when it is free
+    for st in stages["stages"]:
+        if not st.get("enabled", True):
+            continue
+        if all(exists(wd, p) for p in st["produces"]):
+            continue
+        # a stage whose own hold or error file exists is stopped, not pending
+        if st["stage"] == "price" and (wd / "price.rejected.json").exists():
+            return False
+        if st["stage"] == "quote" and (wd / "quote.error.json").exists():
+            return False
+        if st["stage"] == "analyze" and (wd / "analysis.error.json").exists():
+            return False
+        return True
+    return False
+
+
+def existing_items(a, stages: dict) -> list[str]:
+    """Work-dir hashes to register besides the folder: --items, or --resume for every unfinished one."""
+    work = root() / "work"
+    hashes = []
+    if a.items:
+        for h in a.items.split(","):
+            h = h.strip()
+            if h and (work / h / "meta.json").exists():
+                hashes.append(h)
+    if a.resume and work.exists():
+        for d in sorted(work.iterdir()):
+            if d.is_dir() and (d / "meta.json").exists() and unfinished(d, stages):
+                hashes.append(d.name)
+    return sorted(set(hashes))
+
+
 def cmd_init(a) -> int:
     cfg = load_config()
     stages = load_stages(a.stages)
-    folder = Path(a.folder)
-    if not folder.is_dir():
+    folder = Path(a.folder) if a.folder else None
+    if folder and not folder.is_dir():
         return out({"ok": False, "reason": f"not a directory: {folder}"}, 1)
+    if not folder and not a.items and not a.resume:
+        return out({"ok": False, "reason": "give --folder, --items or --resume"}, 1)
     rd = run_dir(a.run)
     rd.mkdir(parents=True, exist_ok=True)
     state_path = rd / "state.json"
@@ -119,7 +175,13 @@ def cmd_init(a) -> int:
         "items": {}, "cost": {"tokens": 0, "usd": 0.0, "by_agent": {}}, "notes": [],
     }
     added = []
-    for f in sorted(folder.iterdir()):
+    for h in existing_items(a, stages):
+        wd = root() / "work" / h
+        meta = json.loads((wd / "meta.json").read_text())
+        if h not in state["items"]:
+            state["items"][h] = {"file": meta.get("file", h), "workdir": str(wd.relative_to(root())), "stages": {}}
+            added.append(h)
+    for f in (sorted(folder.iterdir()) if folder else []):
         if f.suffix.lower() not in SUPPORTED or not f.is_file():
             continue
         h = sha256(f)
@@ -149,7 +211,11 @@ def refresh(state: dict, stages: dict) -> None:
             if not st.get("enabled", True):
                 continue  # disabled stages are vocabulary, not work
             rec = item["stages"].setdefault(st["stage"], {"status": "queued", "attempt": 0})
-            if all(exists(wd, p) for p in st["produces"]) and rec["status"] not in ("done",):
+            # A running stage belongs to its worker until `record` hears from it or
+            # it goes stale: its output appearing early is expected, not completion.
+            # Flipping it here made every record arrive at a "done" stage and be
+            # rejected, so no cost or summary was kept (seen 2026-09-09).
+            if all(exists(wd, p) for p in st["produces"]) and rec["status"] not in ("done", "running"):
                 rec.update({"status": "done", "finished": rec.get("finished") or now()})
                 if "summary" not in rec:
                     rec["summary"] = "output present on disk"
@@ -164,8 +230,10 @@ def refresh(state: dict, stages: dict) -> None:
 
 def ready_briefs(state: dict, stages: dict) -> list[dict]:
     briefs = []
+    stale_after = load_config().get("max_worker_minutes", 15)
     for h, item in state["items"].items():
         wd = root() / item["workdir"]
+        clear_stale_lock(wd, stale_after, state.setdefault("notes", []))
         if (wd / ".lock").exists():
             continue
         for st in stages["stages"]:
@@ -198,6 +266,9 @@ def cmd_next(a) -> int:
     refresh(state, stages)
     limit = a.max or state["budget"]["max_workers"]
     briefs = ready_briefs(state, stages)[:limit]
+    if getattr(a, "peek", False):
+        # a dry run must not claim stages, or the next real run finds them "running"
+        return out({"ok": True, "briefs": briefs, "remaining": remaining(state), "peek": True})
     for b in briefs:
         rec = state["items"][b["item"]]["stages"][b["stage"]]
         rec.update({"status": "running", "attempt": b["attempt"], "dispatched": now()})
@@ -237,6 +308,9 @@ def cmd_record(a) -> int:
         return out({"ok": False, "reason": f"stage {res['stage']} is not running for this item; not dispatched or already recorded"}, 1)
 
     wd = root() / item["workdir"]
+    # The worker that held this stage has ended, however it ended. A lock it
+    # left behind (killed on budget or time) would park the item until stale.
+    (wd / ".lock").unlink(missing_ok=True)
     rec["summary"] = res["summary"]
     rec["agent"] = res["agent"]
     rec["finished"] = now()
@@ -279,12 +353,11 @@ def cmd_record(a) -> int:
 # ---------------------------------------------------------------- status
 
 def cmd_status(a) -> int:
+    """Read-only: anyone may poll it while a director is mid-pass."""
     state = load_state(a.run)
     stages = load_stages(state.get("stages_file"))
     refresh(state, stages)
-    save_state(state)
     ready = len(ready_briefs(state, stages))
-    save_state(state)
     r = remaining(state)
     over = state["budget"].get("usd_per_run") is not None and state["cost"]["usd"] > state["budget"]["usd_per_run"]
     return out({"ok": True, "run": a.run, "counts": r, "ready": ready, "cost": state["cost"],
@@ -335,9 +408,12 @@ def cmd_report(a) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("init"); s.add_argument("--run", required=True); s.add_argument("--folder", required=True)
+    s = sub.add_parser("init"); s.add_argument("--run", required=True); s.add_argument("--folder")
+    s.add_argument("--items", help="comma-separated work-dir hashes to register, no folder needed")
+    s.add_argument("--resume", action="store_true", help="register every work dir with an enabled stage still to run")
     s.add_argument("--department", default="catalogue"); s.add_argument("--stages"); s.set_defaults(fn=cmd_init)
-    s = sub.add_parser("next"); s.add_argument("--run", required=True); s.add_argument("--max", type=int); s.set_defaults(fn=cmd_next)
+    s = sub.add_parser("next"); s.add_argument("--run", required=True); s.add_argument("--max", type=int)
+    s.add_argument("--peek", action="store_true", help="show the briefs without marking them running"); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("record"); s.add_argument("--run", required=True); s.add_argument("--result", required=True)
     s.add_argument("--tokens", type=int); s.add_argument("--usd", type=float, help="exact cost if the runtime reports it; overrides the token price estimate")
     s.add_argument("--model"); s.set_defaults(fn=cmd_record)

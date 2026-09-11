@@ -1,0 +1,43 @@
+{
+  "mode": "rules",
+  "product": "heptagon",
+  "queries": [
+    "octagon fidget"
+  ],
+  "taxonomy_id": 1628,
+  "currency": "USD",
+  "rules": {
+    "noun": "heptagon",
+    "required_any": [
+      "fidget"
+    ],
+    "excluded": [
+      "spinner",
+      "set of",
+      "bundle"
+    ],
+    "materials_allowed": [
+      "pla",
+      "petg",
+      "3d printed",
+      "plastic"
+    ],
+    "materials_excluded": [
+      "metal",
+      "steel",
+      "wood",
+      "leather",
+      "glass",
+      "ceramic"
+    ],
+    "taxonomy_id": 1628,
+    "min_relevance": 0.6,
+    "notes": "no listing carried the noun; rules written so the stage can close"
+  },
+  "n_scored": 0,
+  "n_selected": 0,
+  "min_relevance": 0.6,
+  "comparables": [],
+  "rejected_count": 0,
+  "rejected_sample": []
+}

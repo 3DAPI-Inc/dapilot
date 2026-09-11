@@ -35,14 +35,14 @@ export function ConsoleNav() {
 
 export function SiteHeader({ children }: { children: ReactNode }) {
   return (
-    <header className="mx-auto flex max-w-[940px] items-center justify-between gap-6 px-5 py-7 sm:px-10">
+    <header className="mx-auto flex max-w-[940px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 py-7 sm:px-10">
       <Link
         to="/"
         className="font-display text-[0.9375rem] font-semibold tracking-tight text-navy"
       >
         dapilot
       </Link>
-      <nav className="flex items-center gap-6">{children}</nav>
+      <nav className="flex flex-wrap items-center gap-x-6 gap-y-2">{children}</nav>
     </header>
   );
 }

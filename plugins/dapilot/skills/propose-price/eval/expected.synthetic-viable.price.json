@@ -1,0 +1,10 @@
+{
+  "price": 13.99,
+  "currency": "USD",
+  "candidate": "median",
+  "position": "mid",
+  "rationale": "The two shops with the most sales sit within a dollar of the median. Ours is the same two-piece spiral cone with no extra parts or finish. The band is unweighted, so test (a) of the p75 rule fails before the others are asked, and the markup candidate was rejected by the script for margin; the median is the one defensible price.",
+  "runner_up": {"candidate": "p75", "price": 19.99, "why_not": "the band basis is unweighted, so the p75 rule does not apply"},
+  "floor": 8.99,
+  "verdict": "viable"
+}

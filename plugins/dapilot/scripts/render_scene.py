@@ -38,7 +38,7 @@ ap.add_argument("--rotate", default="0,0,0", help="model rotation x,y,z in degre
 ap.add_argument("--layer-lines", action="store_true")
 ap.add_argument("--layer-mm", type=float, default=0.2)
 ap.add_argument("--hdri", default="studio.exr")
-ap.add_argument("--backdrop", default="#F2F0EB", help="backdrop colour, hex")
+ap.add_argument("--backdrop", default=None, help="backdrop colour, hex; default is chosen from --color")
 a = ap.parse_args(argv)
 res = a.res or (320 if a.mode == "draft" else 1024)
 samples = a.samples or (24 if a.mode == "draft" else 128)
@@ -53,6 +53,40 @@ def hex_rgb(h):
 def srgb_to_linear(c):
     return tuple((x / 12.92) if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c)
 
+
+# --- backdrop choice ----------------------------------------------------------
+# A cream product on a cream sweep has no silhouette. The filament colour is an
+# input to this script, not something to discover, so the backdrop is arithmetic
+# on a hex value rather than analysis of a render: relative luminance of the
+# product, then the lightest sweep that still separates it.
+#
+# The set is fixed and small on purpose. A backdrop computed freely per product
+# would give every listing a slightly different ground and the catalogue would
+# drift; three values keep it to three recognisable looks.
+BACKDROPS = ("#F2F0EB", "#BFBBB4", "#57544E")  # light, mid, deep
+MIN_CONTRAST = 1.45  # ratio; enough to read an edge without a hard studio look
+
+
+def luminance(hex_str):
+    """WCAG relative luminance, on linearised sRGB."""
+    r, g, b = srgb_to_linear(hex_rgb(hex_str))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(hex_a, hex_b):
+    la, lb = luminance(hex_a), luminance(hex_b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def pick_backdrop(product_hex):
+    """Lightest backdrop that clears MIN_CONTRAST; the deepest if none does."""
+    for cand in BACKDROPS:
+        if contrast(product_hex, cand) >= MIN_CONTRAST:
+            return cand
+    return BACKDROPS[-1]
+
+
+backdrop_hex = a.backdrop or pick_backdrop(a.color)
 
 t0 = time.time()
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -158,7 +192,7 @@ scene.collection.objects.link(backdrop)
 bd_mat = bpy.data.materials.new("backdrop")
 bd_mat.use_nodes = True
 bd_bsdf = bd_mat.node_tree.nodes["Principled BSDF"]
-bd_bsdf.inputs["Base Color"].default_value = (*srgb_to_linear(hex_rgb(a.backdrop)), 1.0)
+bd_bsdf.inputs["Base Color"].default_value = (*srgb_to_linear(hex_rgb(backdrop_hex)), 1.0)
 bd_bsdf.inputs["Roughness"].default_value = 0.7
 backdrop.data.materials.append(bd_mat)
 for p in backdrop.data.polygons:
@@ -299,7 +333,8 @@ else:
 
 print("RENDER_RESULT " + json.dumps({
     "ok": True, "mode": a.mode, "res": res, "samples": samples, "outputs": outputs,
-    "dims_mm": [round(d, 2) for d in dims_mm], "color": a.color, "rotate": a.rotate, "elevation": a.elevation,
+    "dims_mm": [round(d, 2) for d in dims_mm], "color": a.color, "backdrop": backdrop_hex,
+    "backdrop_contrast": round(contrast(a.color, backdrop_hex), 2), "rotate": a.rotate, "elevation": a.elevation,
     "layer_lines": a.layer_lines, "hdri": os.path.basename(hdri_path) if hdri_path else None,
     "import_s": round(t_import, 1), "render_s": round(time.time() - t_render, 1), "total_s": round(time.time() - t0, 1),
 }))

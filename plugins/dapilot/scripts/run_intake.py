@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -92,6 +93,17 @@ def last_json_line(text: str) -> dict | None:
     return None
 
 
+def worker_budget(brief: dict, a, cfg: dict) -> float:
+    """Per-stage budget from config `budget.usd_per_stage`, else the per-worker default."""
+    per_stage = cfg.get("budget", {}).get("usd_per_stage", {})
+    return float(per_stage.get(brief["stage"], a.budget_per_worker))
+
+
+def worker_turns(brief: dict, a, cfg: dict) -> int:
+    """Per-stage turn cap from config `turns_per_stage`, else --max-turns. Research needs about 20 tool calls."""
+    return int(cfg.get("turns_per_stage", {}).get(brief["stage"], a.max_turns))
+
+
 def worker_cmd(brief: dict, a, cfg: dict) -> list[str]:
     agent = cfg["departments"][brief["department"]]["worker"]
     return [
@@ -99,11 +111,43 @@ def worker_cmd(brief: dict, a, cfg: dict) -> list[str]:
         "--agent", f"{PLUGIN_NAME}:{agent}",
         "--plugin-dir", str(PLUGIN_ROOT),
         "--dangerously-skip-permissions",
-        "--max-turns", str(a.max_turns),
-        "--max-budget-usd", str(a.budget_per_worker),
+        "--max-turns", str(worker_turns(brief, a, cfg)),
+        "--max-budget-usd", str(worker_budget(brief, a, cfg)),
         "--output-format", "json",
         json.dumps(brief),
     ]
+
+
+def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None, str, str, bool]:
+    """Run a worker in its own process group and kill the whole group on timeout.
+
+    subprocess.run's timeout only kills the direct child; `claude -p` leaves
+    tool subprocesses holding the pipes, so the wait outlived the timeout by
+    an hour on 2026-09-09. Returns (returncode, stdout, stderr, timed_out).
+    """
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=timeout_s)
+        return p.returncode, out, err, False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            out, err = p.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            out, err = "", ""
+        return None, out or "", err or "", True
+
+
+def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, err: str, meta: dict) -> None:
+    """Every worker's raw output goes to runs/<run>/workers/, so a run can be read back later."""
+    d = root / "runs" / brief["run"] / "workers"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{brief['item'][:8]}-{brief['stage']}-{brief['attempt']}.json"
+    f.write_text(json.dumps({"brief": brief, "cmd": cmd, "returncode": rc, "meta": meta,
+                             "stdout": out[-200000:], "stderr": err[-20000:]}, indent=2))
 
 
 def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
@@ -119,18 +163,19 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
     for attempt in range(1, LAUNCH_RETRIES + 1):
         meta["launch_attempts"] = attempt
         t0 = time.time()
-        try:
-            p = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            synthetic["reason"] = f"worker exceeded {timeout_s}s wall clock"
-            log(f"{tag}: timeout after {timeout_s}s")
-            return synthetic, meta
+        rc, stdout, stderr, timed_out = run_headless(cmd, root, timeout_s)
         meta["seconds"] = round(time.time() - t0, 1)
+        if timed_out:
+            synthetic["reason"] = f"worker exceeded {timeout_s}s wall clock; process group killed"
+            log(f"{tag}: timeout after {timeout_s}s")
+            keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
+            return synthetic, meta
         try:
-            out = json.loads(p.stdout)
+            out = json.loads(stdout)
         except json.JSONDecodeError:
-            synthetic["reason"] = f"claude -p exit {p.returncode}, non-JSON output: {(p.stderr or p.stdout)[:200]}"
+            synthetic["reason"] = f"claude -p exit {rc}, non-JSON output: {(stderr or stdout)[:200]}"
             log(f"{tag}: {synthetic['reason']}")
+            keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
             return synthetic, meta
         usage = out.get("usage", {})
         meta["usd"] = float(out.get("total_cost_usd") or 0.0)
@@ -143,6 +188,7 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
             time.sleep(LAUNCH_PAUSE_S)
             continue
         result = last_json_line(str(out.get("result", "")))
+        keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
         if out.get("is_error") or result is None:
             synthetic["reason"] = f"worker ended without a result line: {str(out.get('result', ''))[:200]}"
             log(f"{tag}: {synthetic['reason']}")
@@ -154,7 +200,9 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("folder")
+    ap.add_argument("folder", nargs="?", help="model files to take in; optional with --items or --resume")
+    ap.add_argument("--items", help="comma-separated work-dir hashes to run, no folder needed")
+    ap.add_argument("--resume", action="store_true", help="run every work dir with an enabled stage still to do")
     ap.add_argument("--run")
     ap.add_argument("--department", default="catalogue")
     ap.add_argument("--max-workers", type=int)
@@ -184,10 +232,19 @@ def main() -> int:
     a.max_workers = a.max_workers or dept.get("max_workers") or cfg.get("max_workers_per_lead", 3)
     a.budget_per_worker = a.budget_per_worker or cfg.get("budget", {}).get("usd_per_item", 0.5)
     ceiling = cfg.get("budget", {}).get("usd_per_run")
-    timeout_s = int(cfg.get("max_wall_minutes", 60)) * 60
+    # per worker, not per run: one stuck worker must not hold an item for the run's whole budget
+    timeout_s = int(cfg.get("max_worker_minutes", 15)) * 60
     run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
 
-    init_args = ["init", "--run", run, "--folder", a.folder, "--department", a.department]
+    if not (a.folder or a.items or a.resume):
+        print(json.dumps({"ok": False, "reason": "give a folder, --items or --resume"})); return 2
+    init_args = ["init", "--run", run, "--department", a.department]
+    if a.folder:
+        init_args += ["--folder", a.folder]
+    if a.items:
+        init_args += ["--items", a.items]
+    if a.resume:
+        init_args += ["--resume"]
     if a.stages:
         init_args += ["--stages", a.stages]
     init = ledger(*init_args)
@@ -202,7 +259,7 @@ def main() -> int:
     dispatched_total = 0
     while True:
         passes += 1
-        nxt = ledger("next", "--run", run, "--max", str(a.max_workers))
+        nxt = ledger("next", "--run", run, "--max", str(a.max_workers), *(["--peek"] if a.dry_run else []))
         briefs = nxt.get("briefs", [])
         if a.dry_run:
             for b in briefs:

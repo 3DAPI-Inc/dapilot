@@ -1,0 +1,14 @@
+{
+  "price": 9.99,
+  "currency": "USD",
+  "candidate": "median",
+  "position": "mid",
+  "rationale": "The band is thin as printed: three comparables, and the weight sits with one shop at 10.49 with thousands of sales. Ours is the same two-piece spiral cone with no extra parts or finish. Markup was rejected under the minimum margin and p75 rounded to the median's price, so the median is the sole allowed price; for the record (a) held, (b) held, (c) failed with one shop at 0.875 of the weight above p75.",
+  "runner_up": {
+    "candidate": "markup",
+    "price": 8.99,
+    "why_not": "rejected by the script: margin under the policy minimum"
+  },
+  "floor": 8.99,
+  "verdict": "viable"
+}

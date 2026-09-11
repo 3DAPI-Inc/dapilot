@@ -1,0 +1,220 @@
+{
+  "product": "synthetic: weighted octagon fidget market, one shop holds p75",
+  "queries": [
+    "octagon fidget"
+  ],
+  "taxonomy_id": 1628,
+  "currency": "USD",
+  "source": "research/etsy.json",
+  "comparables": [
+    {
+      "listing_id": 9001,
+      "url": "https://www.etsy.com/listing/9001/synthetic",
+      "title": "Synthetic octagon fidget 9001",
+      "price": 22.99,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 65,
+      "shop": {
+        "name": "PolyBrain",
+        "review_count": 1302,
+        "review_average": 4.8,
+        "sold": 6513,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9002,
+      "url": "https://www.etsy.com/listing/9002/synthetic",
+      "title": "Synthetic octagon fidget 9002",
+      "price": 19.99,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 12,
+      "shop": {
+        "name": "PolyBrain",
+        "review_count": 1302,
+        "review_average": 4.8,
+        "sold": 6513,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9003,
+      "url": "https://www.etsy.com/listing/9003/synthetic",
+      "title": "Synthetic octagon fidget 9003",
+      "price": 19.5,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 22,
+      "shop": {
+        "name": "PolyBrain",
+        "review_count": 1302,
+        "review_average": 4.8,
+        "sold": 6513,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9004,
+      "url": "https://www.etsy.com/listing/9004/synthetic",
+      "title": "Synthetic octagon fidget 9004",
+      "price": 14.99,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 4,
+      "shop": {
+        "name": "Nally3D",
+        "review_count": 677,
+        "review_average": 4.8,
+        "sold": 3386,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9005,
+      "url": "https://www.etsy.com/listing/9005/synthetic",
+      "title": "Synthetic octagon fidget 9005",
+      "price": 13.49,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 8,
+      "shop": {
+        "name": "SpiralWorks",
+        "review_count": 180,
+        "review_average": 4.8,
+        "sold": 900,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9006,
+      "url": "https://www.etsy.com/listing/9006/synthetic",
+      "title": "Synthetic octagon fidget 9006",
+      "price": 12.99,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 35,
+      "shop": {
+        "name": "HDR2studio",
+        "review_count": 14,
+        "review_average": 4.8,
+        "sold": 72,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9007,
+      "url": "https://www.etsy.com/listing/9007/synthetic",
+      "title": "Synthetic octagon fidget 9007",
+      "price": 10.99,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 1,
+      "shop": {
+        "name": "Rosdas",
+        "review_count": 3,
+        "review_average": 4.8,
+        "sold": 15,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    },
+    {
+      "listing_id": 9008,
+      "url": "https://www.etsy.com/listing/9008/synthetic",
+      "title": "Synthetic octagon fidget 9008",
+      "price": 8.99,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "num_favorers": 0,
+      "shop": {
+        "name": "NewPrints",
+        "review_count": 0,
+        "review_average": 4.8,
+        "sold": 0,
+        "country": "US"
+      },
+      "materials": [
+        "PLA"
+      ],
+      "tags": [
+        "fidget"
+      ],
+      "reason": "synthetic"
+    }
+  ],
+  "rejected": []
+}

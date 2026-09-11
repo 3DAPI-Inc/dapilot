@@ -1,0 +1,351 @@
+{
+  "mode": "rules",
+  "product": "octagon",
+  "queries": [
+    "octagon fidget"
+  ],
+  "taxonomy_id": 1628,
+  "currency": "USD",
+  "rules": {
+    "noun": "octagon",
+    "required_any": [
+      "twist",
+      "swirl",
+      "passthrough",
+      "pass through",
+      "spiral",
+      "vortex",
+      "wobble",
+      "stretch"
+    ],
+    "excluded": [
+      "spinner",
+      "keychain",
+      "pendant",
+      "slider",
+      "clicker",
+      "magnetic",
+      "cube",
+      "set of",
+      "piece set",
+      "bundle",
+      "pcs"
+    ],
+    "materials_allowed": [
+      "pla",
+      "petg",
+      "asa",
+      "tpu",
+      "3d printed",
+      "plastic"
+    ],
+    "materials_excluded": [
+      "metal",
+      "steel",
+      "stainless",
+      "brass",
+      "copper",
+      "titanium",
+      "leather",
+      "wood",
+      "wooden",
+      "glass",
+      "ceramic"
+    ],
+    "taxonomy_id": 1628,
+    "notes": "a two-piece twisting passthrough octagon fidget in PLA, not a spinner, slider, cube, keychain or pendant"
+  },
+  "n_scored": 9,
+  "n_selected": 3,
+  "min_relevance": 0.6,
+  "comparables": [
+    {
+      "listing_id": 1890360765,
+      "url": "https://www.etsy.com/listing/1890360765/infinity-twist-das-unendliche-octagon",
+      "title": "Infinity Twist - das unendliche Octagon | Wobble Fidget | Octa Twist | Desktop Toy | Schreibtischspielzeug | faltbares Zappel Spielzeug",
+      "price": 10.48,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": null,
+      "size_ratio": null,
+      "weight_g": null,
+      "materials": [
+        "PLA",
+        "Polylactid"
+      ],
+      "sold": 6525,
+      "reviews": 1275,
+      "favorers": 66,
+      "relevance": 0.725,
+      "market_weight": 11.886,
+      "page": 4,
+      "shop": {
+        "name": "PolyBrain",
+        "sold": 6525,
+        "review_count": 1275
+      },
+      "excluded_by": [
+        "spinner",
+        "cube"
+      ]
+    },
+    {
+      "listing_id": 4307614125,
+      "url": "https://www.etsy.com/listing/4307614125/fidget-octagon-sports-teams-college-nfl",
+      "title": "Fidget Octagon - Sports Teams, College, NFL, Holidays, etc. - Swirl and Stretch Satisfying Handheld Trinket",
+      "price": 5.49,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": [
+        101.6,
+        101.6,
+        76.2
+      ],
+      "size_ratio": 0.98,
+      "weight_g": 226.8,
+      "materials": [
+        "plastic",
+        "soft rubbery plastic",
+        "PLA",
+        "PETG",
+        "TPU",
+        "ASA"
+      ],
+      "sold": 72,
+      "reviews": 4,
+      "favorers": 35,
+      "relevance": 0.996,
+      "market_weight": 7.082,
+      "page": 3,
+      "shop": {
+        "name": "HDR2studio",
+        "sold": 72,
+        "review_count": 4
+      }
+    },
+    {
+      "listing_id": 4462744773,
+      "url": "https://www.etsy.com/listing/4462744773/3d-printed-passthrough-octagon-fidget",
+      "title": "3D Printed Passthrough Octagon Fidget Toy (3 piece set)",
+      "price": 15.0,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": [
+        109.2,
+        55.9,
+        55.9
+      ],
+      "size_ratio": 1.05,
+      "weight_g": 226.8,
+      "materials": [],
+      "sold": 1,
+      "reviews": 1,
+      "favorers": 0,
+      "relevance": 0.789,
+      "market_weight": 1.693,
+      "page": 4,
+      "shop": {
+        "name": "LeahsPrintWonderUS",
+        "sold": 1,
+        "review_count": 1
+      },
+      "excluded_by": [
+        "piece set"
+      ]
+    }
+  ],
+  "rejected_count": 6,
+  "rejected_sample": [
+    {
+      "listing_id": 4468637655,
+      "url": "https://www.etsy.com/listing/4468637655/3d-printed-octagon-infinity-cube-fidget",
+      "title": "3D Printed Octagon Infinity Cube Fidget Toy – Stress Relief Desk Gadget, Pocket-Sized",
+      "price": 8.0,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": [
+        127.0,
+        127.0,
+        127.0
+      ],
+      "size_ratio": 1.22,
+      "weight_g": 170.1,
+      "materials": [],
+      "sold": 184,
+      "reviews": 41,
+      "favorers": 5,
+      "relevance": 0.557,
+      "market_weight": 7.116,
+      "page": 3,
+      "shop": {
+        "name": "Stark3DPrintStudios",
+        "sold": 184,
+        "review_count": 41
+      },
+      "excluded_by": [
+        "cube"
+      ]
+    },
+    {
+      "listing_id": 4558853169,
+      "url": "https://www.etsy.com/listing/4558853169/octagon-fidget-spinner-5-3d-printed",
+      "title": "Octagon Fidget Spinner with Handle 5&quot; – 3D Printed Sensory Desk Toy",
+      "price": 5.99,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": [
+        127.0,
+        127.0,
+        76.2
+      ],
+      "size_ratio": 1.22,
+      "weight_g": 113.4,
+      "materials": [],
+      "sold": 29,
+      "reviews": 6,
+      "favorers": 0,
+      "relevance": 0.557,
+      "market_weight": 4.401,
+      "page": 3,
+      "shop": {
+        "name": "HumorMeDesign",
+        "sold": 29,
+        "review_count": 6
+      },
+      "excluded_by": [
+        "spinner"
+      ]
+    },
+    {
+      "listing_id": 1836426612,
+      "url": "https://www.etsy.com/listing/1836426612/fidget-octagon-keychain",
+      "title": "fidget octagon keychain",
+      "price": 2.25,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": [
+        152.4,
+        152.4,
+        25.4
+      ],
+      "size_ratio": 1.47,
+      "weight_g": 453.6,
+      "materials": [],
+      "sold": 98,
+      "reviews": 25,
+      "favorers": 71,
+      "relevance": 0.367,
+      "market_weight": 7.733,
+      "page": 4,
+      "shop": {
+        "name": "DesignsMadeWell",
+        "sold": 98,
+        "review_count": 25
+      },
+      "excluded_by": [
+        "keychain"
+      ]
+    },
+    {
+      "listing_id": 4550321137,
+      "url": "https://www.etsy.com/listing/4550321137/blue-articulated-fidget-spinner-toy",
+      "title": "Blue Articulated Fidget Spinner Toy – Geometric Octagon Pendant",
+      "price": 7.5,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": [
+        203.2,
+        152.4,
+        76.2
+      ],
+      "size_ratio": 1.95,
+      "weight_g": 141.7,
+      "materials": [],
+      "sold": 9,
+      "reviews": 1,
+      "favorers": 0,
+      "relevance": 0.305,
+      "market_weight": 3.303,
+      "page": 3,
+      "shop": {
+        "name": "Isa3DprintzCo",
+        "sold": 9,
+        "review_count": 1
+      },
+      "excluded_by": [
+        "spinner",
+        "pendant"
+      ]
+    },
+    {
+      "listing_id": 1875598786,
+      "url": "https://www.etsy.com/listing/1875598786/leather-fidget-spinner-octagon-shaped",
+      "title": "Leather Fidget Spinner  - octagon-shaped unique EDC stress relief toy for adults and children",
+      "price": 50.0,
+      "currency": "USD",
+      "price_source": "listing",
+      "dims_mm": [
+        61.0,
+        61.0,
+        15.2
+      ],
+      "size_ratio": 0.59,
+      "weight_g": 36.9,
+      "materials": [
+        "genuine leather",
+        "stainless steel screws",
+        "selflubricating bearing"
+      ],
+      "sold": 1,
+      "reviews": 0,
+      "favorers": 0,
+      "relevance": 0.0,
+      "market_weight": 1.693,
+      "page": 6,
+      "shop": {
+        "name": "LeatherArtbyWY",
+        "sold": 1,
+        "review_count": 0
+      },
+      "excluded_by": [
+        "spinner",
+        "material:steel",
+        "material:stainless",
+        "material:leather"
+      ]
+    },
+    {
+      "listing_id": 4549475857,
+      "url": "https://www.etsy.com/listing/4549475857/the-silent-strike-40mm-octagon-magnetic",
+      "title": "The Silent Strike | 40mm Octagon Magnetic Fidget Toy | Haptic Desk Gadget | EDC Fidget Slider & Clicker",
+      "price": 35.0,
+      "currency": "USD",
+      "price_source": "variant_min",
+      "dims_mm": [
+        152.4,
+        101.6,
+        50.8
+      ],
+      "size_ratio": 1.47,
+      "weight_g": 226.8,
+      "materials": [],
+      "sold": 1472,
+      "reviews": 371,
+      "favorers": 7,
+      "relevance": 0.0,
+      "market_weight": 9.335,
+      "page": 6,
+      "shop": {
+        "name": "MPN3D",
+        "sold": 1472,
+        "review_count": 371
+      },
+      "excluded_by": [
+        "slider",
+        "clicker",
+        "magnetic",
+        "material:metal"
+      ]
+    }
+  ]
+}

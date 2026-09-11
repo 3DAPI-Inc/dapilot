@@ -1,0 +1,153 @@
+{
+  "ok": true,
+  "product": "octagon",
+  "n_comparables": 3,
+  "comparables_mode": "rules",
+  "market": {
+    "n": 3,
+    "min": 5.49,
+    "p25": 5.49,
+    "median": 10.48,
+    "p75": 10.48,
+    "max": 15.0,
+    "basis": "weighted",
+    "weighted": {
+      "n": 3,
+      "p25": 5.49,
+      "median": 10.48,
+      "p75": 10.48,
+      "weight_total": 20.661
+    },
+    "unweighted": {
+      "n": 3,
+      "min": 5.49,
+      "p25": 5.49,
+      "median": 10.48,
+      "p75": 15.0,
+      "max": 15.0
+    },
+    "currency": "USD",
+    "spread_ratio": 2.732,
+    "thin": true,
+    "per_gram": {
+      "n": 2,
+      "min": 0.02,
+      "p25": 0.02,
+      "median": 0.05,
+      "p75": 0.07,
+      "max": 0.07
+    },
+    "listings_with_weight": 2
+  },
+  "cost_basis": "full_plate",
+  "ours": {
+    "quote_unit_price_one_off": 5.71,
+    "quote_unit_price_full_plate": 5.71,
+    "plate_discount_pct": 0.0,
+    "max_per_plate": 1,
+    "model_g": 40.88209533691406,
+    "parcel_g": 70.9,
+    "per_gram_at_market_median": 0.256,
+    "shipping_usd": null,
+    "shipping_source": "unknown: no --shipping-usd and no table in the fee file",
+    "shipping_absorbed_by_seller": false
+  },
+  "policy": {
+    "file": "store/reference/pricing-policy.json",
+    "platform": "etsy",
+    "seller_region": "EU",
+    "listing_fee": 0.2,
+    "payment_fixed": 0.33,
+    "pct_of_price": 0.105,
+    "vat_rate": 0.21,
+    "vat_in_sale_price": true,
+    "vat_added_to_purchase": false,
+    "cost_basis": "full_plate",
+    "markup_pct": 50.0,
+    "min_margin_pct": 0.1,
+    "rounding": "0.99"
+  },
+  "fees_file": "plugins/dapilot/skills/research-comparables/reference/platform-fees.json",
+  "scenarios": [
+    {
+      "cost_basis": "one_off",
+      "is_policy_basis": true,
+      "quote_unit_price": 5.71,
+      "unit_cost": 5.71,
+      "units_per_plate": 1,
+      "break_even_price": 8.65,
+      "markup_price": 8.56,
+      "at": [
+        {
+          "label": "p25",
+          "price": 5.49,
+          "net_of_vat": 4.54,
+          "fees": 1.11,
+          "unit_cost": 5.71,
+          "margin": -2.28,
+          "margin_pct": -0.502,
+          "markup_on_cost_pct": -3.9
+        },
+        {
+          "label": "median",
+          "price": 10.48,
+          "net_of_vat": 8.66,
+          "fees": 1.63,
+          "unit_cost": 5.71,
+          "margin": 1.32,
+          "margin_pct": 0.152,
+          "markup_on_cost_pct": 83.5
+        },
+        {
+          "label": "p75",
+          "price": 10.48,
+          "net_of_vat": 8.66,
+          "fees": 1.63,
+          "unit_cost": 5.71,
+          "margin": 1.32,
+          "margin_pct": 0.152,
+          "markup_on_cost_pct": 83.5
+        }
+      ]
+    }
+  ],
+  "stock": {
+    "units": 100,
+    "plates": 100,
+    "unit_cost": 5.71,
+    "batch_cost": 571.0,
+    "payback": [
+      {
+        "label": "p25",
+        "price": 5.49,
+        "margin_per_unit": -2.28,
+        "units_to_pay_back": null,
+        "profit_if_all_sold": -227.93
+      },
+      {
+        "label": "median",
+        "price": 10.48,
+        "margin_per_unit": 1.32,
+        "units_to_pay_back": 433.0,
+        "profit_if_all_sold": 132.08
+      },
+      {
+        "label": "p75",
+        "price": 10.48,
+        "margin_per_unit": 1.32,
+        "units_to_pay_back": 433.0,
+        "profit_if_all_sold": 132.08
+      }
+    ]
+  },
+  "verdict": "viable",
+  "verdict_rule": "market median vs one-off break-even (not_viable below) and vs quote plus markup (thin below, viable at or above)",
+  "selection": {
+    "rules": "research/rules.json",
+    "full": "research/etsy.full.json",
+    "n_scored": 9,
+    "n_selected": 3,
+    "min_relevance": 0.6,
+    "compact_annotated": true
+  }
+}
