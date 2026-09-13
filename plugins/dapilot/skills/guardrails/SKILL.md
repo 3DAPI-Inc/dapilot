@@ -54,6 +54,9 @@ deletion, return `needs_human` with the path and the reason.
   into your own context or into a brief. Paths only.
 - Prefer the script to the turn: polling, arithmetic, validation and API
   calls are scripts.
+- Paid generation (fal) runs only through `design_product.py`, which counts
+  every accepted request against `design.usd_cap_per_item`. Never call a
+  generation script directly and never pass `--force` to one.
 
 ## Secrets and privacy
 

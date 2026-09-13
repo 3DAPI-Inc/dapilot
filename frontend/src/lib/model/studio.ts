@@ -70,6 +70,13 @@ export interface StudioConfig {
   shadowOpacity: number;
   shadowSoftness: number;
 
+  /**
+   * Orientation in degrees about the file's own x, y, z, applied in that order
+   * before framing. The same `--rotate` render_model.py takes, so a choice made
+   * from the Blender drafts stands the product up here too.
+   */
+  rotate: [number, number, number];
+
   fov: number;
   /** Camera height in degrees above the horizon. */
   elevation: number;
@@ -101,6 +108,7 @@ export const STUDIO_DEFAULTS: StudioConfig = {
   shadowOpacity: 0.28,
   shadowSoftness: 2.5,
 
+  rotate: [0, 0, 0],
   fov: 28,
   elevation: 18,
   margin: 0.08,
@@ -187,7 +195,11 @@ export interface Studio {
   setConfig(patch: Partial<StudioConfig>): void;
   config(): StudioConfig;
   setPass(pass: Pass): void;
-  /** Turntable position in degrees. The product turns; nothing else moves. */
+  /**
+   * Turntable position in degrees. The product turns; nothing else moves.
+   * Positive yaw turns it clockwise seen from above, as render_scene.py does,
+   * so yaw N here frames the same side as the Blender draft at yaw N.
+   */
   setYaw(deg: number): void;
   yaw(): number;
   render(): void;
@@ -283,6 +295,8 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
   const pivot = new Group();
   scene.add(pivot);
   let mesh: Mesh | null = null;
+  /** The geometry as loaded, kept so a new orientation can be applied from scratch. */
+  let pristine: BufferGeometry | null = null;
   let radius = 1;
   let centerY = 0;
   let currentYaw = 0;
@@ -381,6 +395,16 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
       pivot.remove(mesh);
       mesh.geometry.dispose();
     }
+    if (pristine !== geometry) {
+      pristine?.dispose();
+      pristine = geometry.clone();
+    }
+    geometry = pristine.clone();
+    // Orientation first, in file axes, X then Y then Z: Blender's XYZ Euler.
+    const [rx, ry, rz] = cfg.rotate;
+    if (rx) geometry.rotateX(MathUtils.degToRad(rx));
+    if (ry) geometry.rotateY(MathUtils.degToRad(ry));
+    if (rz) geometry.rotateZ(MathUtils.degToRad(rz));
     const box = new Box3().setFromBufferAttribute(geometry.getAttribute('position') as never);
     const size = box.getSize(new Vector3());
     const center = box.getCenter(new Vector3());
@@ -414,7 +438,9 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
   }
 
   function setConfig(patch: Partial<StudioConfig>) {
+    const turned = patch.rotate !== undefined && patch.rotate.join() !== cfg.rotate.join();
     cfg = { ...cfg, ...patch };
+    if (turned && pristine) show(pristine);
     productMaterial.color.set(cfg.color);
     productMaterial.roughness = cfg.roughness;
     productMaterial.metalness = cfg.metalness;
@@ -444,7 +470,7 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
     setConfig,
     config: () => ({ ...cfg }),
     setPass(next) { pass = next; },
-    setYaw(deg) { currentYaw = deg; pivot.rotation.y = MathUtils.degToRad(deg); },
+    setYaw(deg) { currentYaw = deg; pivot.rotation.y = -MathUtils.degToRad(deg); },
     yaw: () => currentYaw,
     render,
     capture() { render(); return renderer.domElement.toDataURL('image/png'); },
@@ -462,6 +488,7 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
     dispose() {
       observer.disconnect();
       mesh?.geometry.dispose();
+      pristine?.dispose();
       productMaterial.dispose();
       sweepMaterial.dispose();
       depthMaterial.dispose();

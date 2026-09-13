@@ -36,7 +36,8 @@ only source of truth about what has been done.
  Lead (one per department per run)            agent: catalogue-lead
    |  runs its stage table through ledger.py; spawns its own workers only
    v
- Worker (one per item per stage, short-lived)  agent: catalogue-worker
+ Worker (one per item per stage, short-lived)  agent: catalogue-worker, or the stage's own
+   |                                            (design: product-designer)
    |  runs one skill on one item, writes to work/<hash>/, returns one JSON
    v
  Script (no model)
@@ -78,19 +79,26 @@ form:
 | preview | `preview-model` | `source.*`, `analysis.json` | `renders/draft_00.png` | Auto |
 | research | `research-comparables` | `analysis.json`, `quote.json`, `renders/draft_00.png` | `comparables.json`, `viability.json` | Auto |
 | price | `propose-price` | `quote.json`, `comparables.json`, `viability.json`, drafts | `price.json` (only when sellable; else `price.rejected.json`) | Auto to write the proposal; the price itself is confirmed at publish |
-| render | `render-model` | `source.*`, `analysis.json`, drafts, `price.json` | `renders/hero.png`, `renders/turntable.mp4` | Auto |
-| copy | `write-listing` | `analysis.json`, `quote.json`, `comparables.json`, `price.json`, `renders/hero.png` | `listing.json` | Auto |
+| design | `design-product` (agent `product-designer`) | `source.*`, `analysis.json`, drafts, `price.json`, `comparables.json` | `design.json` (photos in Etsy order, listing video) | Auto, fal spend capped per item by the script |
+| copy | `write-listing` (disabled) | `analysis.json`, `quote.json`, `comparables.json`, `price.json`, `design.json` | `listing.json` | Auto |
 | publish | `publish-listing` | `listing.json` | `publish.json` | Propose |
 
 Reordered 2026-09-09: the cheap draft turntable, research and the price
 proposal run before the final renders, so an item that cannot sell costs a
 slice and eight 320 px frames, never a hero render or a video. `price.json`
-exists only for a sellable item, which is what keeps render, copy and
+exists only for a sellable item, which is what keeps design, copy and
 publish from ever running for the rest.
+
+2026-09-13: `design` replaced `render`. The storefront is Etsy, not dapi, so
+copy and publish are disabled until they are rebuilt for Etsy. A stage may
+name its own worker agent in `stages.json` (`"agent"`); the ledger copies it
+into the brief and `run_intake.py` launches that agent instead of the
+department's worker. Design workers get `minutes_per_stage.design` (40) of
+wall clock because a Wan clip can queue for minutes on fal.
 
 The orchestrator runs a stage for an item when, and only when, every file in
 Requires exists and the file in Produces does not. It never reorders, skips,
-or invents a stage. Render and research can run in parallel with quoting for
+or invents a stage. Preview and quote can run in parallel with quoting for
 the same item because their Requires sets allow it; that is the only
 parallelism within one item, and it falls out of the table rather than being
 decided at runtime.
@@ -111,7 +119,8 @@ work/3f9a.../
   meta.json            original filename, size, hash, first seen
   analysis.json        analyze-model
   quote.json           quote-model
-  renders/             render-model
+  renders/             preview-model drafts
+  design/, design.json design-product: brief, captures, lifestyle media, photos/, video.mp4
   comparables.json     research-comparables
   listing.json         write-listing
   publish.json         publish-listing: what would be sent, or what was sent
@@ -225,19 +234,20 @@ The brief is what the orchestrator sends. Same shape for every skill:
 run:      2026-09-03T10-12-intake
 item:     3f9a...
 workdir:  work/3f9a.../
-stage:    render
-skill:    render-model
-requires: source.3mf analysis.json
-produces: renders/
+stage:    design
+skill:    design-product
+agent:    product-designer
+requires: source.3mf analysis.json renders/draft_00.png price.json comparables.json
+produces: design.json
 attempt:  1
-previous: (only on attempt 2) "Blender exited 1: no mesh imported"
+previous: (only on attempt 2) "still generating at lifestyle_video"
 ```
 
 The result is the last line the worker prints. JSON, one line, same shape for
 every skill:
 
 ```json
-{"ok": true, "cached": false, "stage": "render", "outputs": ["renders/hero.png"], "needs_human": null, "reason": null, "summary": "36 frames at 512px, hero at 1024px, 6m12s."}
+{"ok": true, "cached": false, "stage": "design", "outputs": ["design.json"], "needs_human": null, "reason": null, "summary": "Cat Fidget Clicker: 7 photos, lifestyle clip, 1.11 USD"}
 ```
 
 - `ok: false` with `reason` means the stage could not be completed.

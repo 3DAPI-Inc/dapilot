@@ -48,8 +48,12 @@ export default function Studio() {
     const q = new URLSearchParams(window.location.search);
     const colour = q.get('color');
     const backdrop = q.get('backdrop');
+    const rotate = (q.get('rotate') ?? '').split(',').map(Number);
+    const elevation = Number(q.get('elevation'));
     return {
       ...STUDIO_DEFAULTS,
+      ...(rotate.length === 3 && rotate.every(Number.isFinite) ? { rotate: rotate as [number, number, number] } : {}),
+      ...(q.has('elevation') && Number.isFinite(elevation) ? { elevation } : {}),
       ...(colour ? { color: colour.startsWith('#') ? colour : `#${colour}` } : {}),
       ...(backdrop ? { backdrop: backdrop.startsWith('#') ? backdrop : `#${backdrop}` } : {}),
     };

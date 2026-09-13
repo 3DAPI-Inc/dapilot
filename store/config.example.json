@@ -10,7 +10,7 @@
   "usd_per_stage": {
    "research": 1.0,
    "price": 0.6,
-   "render": 0.6
+   "design": 1.0
   }
  },
  "pricing_usd_per_1k_tokens": {
@@ -47,6 +47,63 @@
  "resume_on_start": false,
  "turns_per_stage": {
   "research": 30,
-  "price": 25
+  "price": 25,
+  "design": 30
+ },
+ "minutes_per_stage": {
+  "design": 40
+ },
+ "design": {
+  "studio_url": "http://localhost:8081",
+  "palette": {
+   "#E8E4DC": "warm white",
+   "#1F1F1F": "matte black",
+   "#3B7DD8": "blue",
+   "#D8453B": "red",
+   "#F2C230": "yellow",
+   "#4E9A5B": "green",
+   "#F08BB4": "pink",
+   "#8A5CC7": "purple"
+  },
+  "stills": {
+   "count": 4,
+   "size": 2048,
+   "elevation": 18
+  },
+  "turntable": {
+   "frames": 240,
+   "size": 1080,
+   "fps": 24
+  },
+  "lifestyle_images": {
+   "max": 3,
+   "endpoint": "fal-ai/nano-banana-2/edit",
+   "resolution": "2K",
+   "aspect": "1:1",
+   "usd_each": 0.12
+  },
+  "lifestyle_video": {
+   "enabled": true,
+   "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+   "frames": 120,
+   "fps": 24,
+   "size": 720,
+   "resolution": "720p",
+   "steps": 50,
+   "guidance": 5.0,
+   "usd_per_second": 0.1,
+   "billed_fps": 16,
+   "drift_arc": 40
+  },
+  "usd_cap_per_item": 2.0,
+  "deadline_s": 480,
+  "etsy": {
+   "max_photos": 10,
+   "photo_min_px": 2000,
+   "video_min_s": 5.0,
+   "video_max_s": 15.0,
+   "video_max_mb": 100
+  },
+  "_prices": "estimates, checked on fal 2026-09-13: nano-banana-2/edit 0.08 USD per image, 1.5x at 2K; wan-22-vace depth 0.10 USD per second at 720p, billed at 16 fps"
  }
 }

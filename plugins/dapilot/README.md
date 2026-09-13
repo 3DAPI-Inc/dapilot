@@ -20,7 +20,14 @@ DAPILOT_STORE_DIR   store-private files: the Etsy OAuth token, reference/platfor
                     the cached Etsy taxonomy. Required by research-comparables.
 ETSY_KEYSTRING      Etsy Open API v3 app credentials, for research-comparables only
 ETSY_SHARED_SECRET
+FAL_KEY             fal.ai key (FAL_API_KEY also accepted), for design-product's paid assets only
+DAPILOT_STUDIO_URL  optional, the browser studio page for captures (default design.studio_url in config)
+CHROME              optional, path to Chrome or Chromium for headless captures
 ```
+
+The design stage also needs `ffmpeg` and `ffprobe` on PATH, the Python
+package `fal-client`, Chrome, and the studio page served (`npm run dev` in the
+host project's `frontend/`, route `/studio`).
 
 Nothing falls back to a default host. Missing env is a hard error.
 
@@ -43,7 +50,8 @@ python scripts/run_intake.py --items <hash>,…  # specific work dirs already on
 Each run keeps `runs/<id>/state.json` (the ledger), `report.md`,
 `director.log` and every worker's raw output under `workers/`. Workers are
 killed with their whole process group after `max_worker_minutes` from the
-store config (default 15); a `.lock` older than that is stale and cleared.
+store config (default 15), or `minutes_per_stage` for their stage (design: 40);
+a `.lock` older than its stage's limit is stale and cleared.
 
 `store/.env` (see `store/.env.example` in the host project) supplies
 `ANTHROPIC_API_KEY`, `DAPI_*` and `DAPILOT_PYTHON`.
@@ -57,7 +65,8 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `dapi-request` | Builds, validates and sends a request to any public API route from the live OpenAPI contract. Every other skill goes through it. |
 | `analyze-model` | First intake stage: geometry facts for one model file via the bundled mesh script. |
 | `quote-model` | Prices one model through dapi's slicer; quotes named by sha256 so a file is never sliced twice. |
-| `render-model` | Studio product images: draft turntable, the model picks orientation and hero angle, four finals. Needs Blender. |
+| `design-product` | Design stage, run by the `product-designer` agent: names the product and writes one brief (orientation, hero angle, stills, colour, lifestyle scenes); `design_product.py` captures studio stills and a turntable in the browser, generates lifestyle photos and a clip on fal under a per-item spend cap, and writes `design.json` with the photos in Etsy order and the listing video. |
+| `render-model` | Retired 2026-09-13 in favour of `design-product`; kept for reference. |
 | `preview-model` | The 8-frame draft turntable, so research and pricing can see the object before any final render is paid for. Needs Blender. |
 | `research-comparables` | Finds the Etsy listings a model competes with, picks the true comparables, and writes the market band and our margin (`viability.json`). Needs Etsy credentials, no dapi key. |
 | `propose-price` | Picks the sale price from the candidates `price_candidates.py` allows, with a rationale; the script's `--check` refuses anything below break-even or outside the candidates. Needs the store pricing policy. |
@@ -72,7 +81,11 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `validate_result.py` | the result-line contract every level checks on the level below |
 | `run_intake.py` | deterministic director and lead: launches one worker per brief |
 | `quote.py` | upload, create, poll one quote; resumable; finds an existing quote by hash |
-| `render_model.py`, `render_scene.py` | studio render driver and the Blender-side scene |
+| `render_model.py`, `render_scene.py` | Blender render driver and scene; the preview drafts |
+| `design_product.py` | the design stage: `context`, `check` (brief schema and spend cap), `produce` (resumable, exit 3 at its deadline), `finalize` (photo order, listing video, Etsy limits) |
+| `capture_turntable.py` | headless Chrome over the studio page: stills at exact yaws, turntables, depth passes; encodes with ffmpeg |
+| `generate_image.py`, `generate_video.py`, `fal_queue.py` | lifestyle photo (image edit) and depth-conditioned clip (Wan) on fal; a request is written on submit and a rerun attaches, so nothing is paid twice |
+| `upscale_video.py` | Topaz upscale on fal; manual, not part of any stage |
 | `strip_3mf.py` | removes foreign slicer project settings (Creality Print, Orca, Prusa) from a 3mf so Bambu Studio accepts it; `--check` to test first |
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `market_stats.py` | price band, fees, VAT and margin from `comparables.json`, `quote.json` and the store pricing policy; writes `viability.json` |

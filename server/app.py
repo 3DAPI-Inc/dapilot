@@ -180,7 +180,8 @@ def resume_on_start() -> None:
 
 def worker_budget_minutes() -> float:
     cfg = read_json(Path(os.environ["DAPILOT_STORE_DIR"]) / "config.json") or {}
-    return float(cfg.get("max_worker_minutes", 15))
+    base = float(cfg.get("max_worker_minutes", 15))
+    return max([base, *(float(v) for v in (cfg.get("minutes_per_stage") or {}).values())])
 
 
 def runs_on_disk() -> dict[str, dict]:
@@ -369,6 +370,16 @@ def detail(item: str) -> dict:
                         "hero": f"/api/jobs/{item}/files/renders/hero.png" if (renders / "hero.png").exists() else None,
                         "angles": [f"/api/jobs/{item}/files/renders/{p.name}" for p in sorted(renders.glob("angle_*.png"))],
                         "video": f"/api/jobs/{item}/files/renders/turntable.mp4" if (renders / "turntable.mp4").exists() else None}
+    d = read_json(wd / "design.json")
+    if d and d.get("ok"):
+        url = lambda rel: f"/api/jobs/{item}/files/{rel}"  # noqa: E731
+        video = d.get("video") or None
+        j["design"] = {"name": d.get("name"), "color": d.get("color"), "reason": d.get("reason"),
+                       "photos": [{"id": p["id"], "kind": p["kind"], "url": url(p["file"]), "px": p.get("px")} for p in d.get("photos", [])],
+                       "video": {"id": video["id"], "url": url(video["file"]), "seconds": video.get("seconds")} if video else None,
+                       "turntable": url(d["videos"]["turntable"]) if d.get("videos", {}).get("turntable") else None,
+                       "rejected": d.get("rejected", []), "failed": d.get("failed", []),
+                       "spendUsd": (d.get("spend") or {}).get("usd", 0), "warnings": d.get("warnings", [])}
     log = wd / "log.md"
     if log.exists():
         j["log"] = log.read_text()[-6000:]

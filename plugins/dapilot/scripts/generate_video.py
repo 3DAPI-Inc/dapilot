@@ -3,31 +3,38 @@
 
   generate_video.py --workdir DIR --source depth  [--prompt "..."] [--frames 120]
   generate_video.py --workdir DIR --source beauty [--prompt "..."]
+  generate_video.py --workdir DIR --engine ref --videos a.mp4 b.mp4 [--prompt "..."]
 
 --source depth   sends our ground-truth depth sequence with preprocess off, so
                  the model is conditioned on the real geometry of the mesh.
 --source beauty  sends the plain turntable with preprocess on, so fal estimates
                  depth itself. The fallback, and the control in a comparison.
 
-Writes DIR/renders/<name>.mp4 and a record at DIR/renders/<name>.json. Prints one
-JSON object. Exit 0 on success.
+Frames are read from FRAMES_ROOT/<source>/ (default DIR/renders, where
+capture_turntable.py writes them). Writes OUT (default DIR/renders/<name>.mp4),
+OUT.request.json the moment fal accepts the request, and a record at
+<OUT stem>.json. Prints one JSON object.
 
-Needs FAL_KEY in env (store/.env), ffmpeg, and a captured sequence from
-capture_turntable.py. Spends money: every run is a real generation.
+Exit 0 done, 1 failed, 2 usage or environment, 3 still running on fal after
+--deadline seconds. A rerun with the request file present attaches to that
+request; it never submits a second generation unless --force.
+
+Needs FAL_KEY or FAL_API_KEY (store/.env), ffmpeg, and a captured sequence from
+capture_turntable.py. Spends money: every submitted run is a real generation.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fal_queue  # noqa: E402
 
 ENDPOINTS = {
     # Depth-conditioned. Geometry is locked per frame; caps at 720p.
@@ -36,7 +43,6 @@ ENDPOINTS = {
     # three reference clips, which a full turntable suits unusually well.
     "ref": "wan/v2.6/reference-to-video",
 }
-ENDPOINT = ENDPOINTS["vace"]
 
 DEFAULT_PROMPT = (
     "a product photograph of a matte 3D printed object on a soft studio backdrop, "
@@ -45,56 +51,9 @@ DEFAULT_PROMPT = (
 NEGATIVE = "cartoon, illustration, distorted geometry, extra objects, text, watermark"
 
 
-def follow(handle, note) -> dict:
-    """Print queue position and logs as they arrive, then return the result.
-
-    fal_client.subscribe() blocks and swallows everything, which makes a slow
-    run indistinguishable from a hung one. iter_events yields the same status
-    objects the queue already publishes, so there is no reason to be blind.
-    """
-    seen = 0
-    last = None
-    for event in handle.iter_events(with_logs=True, interval=2.0):
-        kind = type(event).__name__
-        position = getattr(event, "position", None)
-        if kind != last or position is not None:
-            note(f"  {kind.lower()}" + (f", {position} ahead in the queue" if position is not None else ""))
-            last = kind
-        for entry in (getattr(event, "logs", None) or [])[seen:]:
-            note("  " + str(entry.get("message", entry) if isinstance(entry, dict) else entry))
-            seen += 1
-    return handle.get()
-
-
-def preflight(key: str) -> str | None:
-    """Ask fal for a storage token before doing any work.
-
-    The client turns a rejected key into a bare 403 from a URL nobody
-    recognises. fal's own body says exactly what is wrong, most often an
-    empty balance, so a cheap call up front turns a confusing failure into
-    an instruction.
-    """
-    req = urllib.request.Request(
-        "https://rest.fal.ai/storage/auth/token?storage_type=fal-cdn-v3",
-        data=b"{}", method="POST",
-        headers={"authorization": f"Key {key}", "content-type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30):
-            return None
-    except urllib.error.HTTPError as exc:
-        try:
-            detail = json.loads(exc.read()).get("detail")
-        except Exception:
-            detail = None
-        return detail or f"fal rejected the key with HTTP {exc.code}"
-    except Exception as exc:
-        return f"could not reach fal: {exc}"
-
-
-def fail(reason: str, **extra) -> int:
+def fail(reason: str, code: int = 1, **extra) -> int:
     print(json.dumps({"ok": False, "reason": reason, **extra}))
-    return 1
+    return code
 
 
 def encode_conditioning(frames: Path, out: Path, fps: int) -> tuple[bool, str]:
@@ -125,6 +84,8 @@ def main() -> int:
                     help="ref engine: clips to send as @Video1, @Video2, @Video3")
     ap.add_argument("--duration", type=int, default=5, choices=[5, 10])
     ap.add_argument("--source", choices=["depth", "beauty"], default="depth")
+    ap.add_argument("--frames-root", default=None, help="directory holding <source>/frame_*.png; default WORKDIR/renders")
+    ap.add_argument("--out", default=None, help="output mp4; default WORKDIR/renders/<name>.mp4")
     ap.add_argument("--prompt", default=DEFAULT_PROMPT)
     ap.add_argument("--negative", default=NEGATIVE)
     ap.add_argument("--frames", type=int, default=120)
@@ -140,7 +101,7 @@ def main() -> int:
     ap.add_argument("--reference", metavar="PNG",
                     help="a beauty frame sent as first_frame_url. Anchors colour, material "
                          "and lighting to our render while depth drives the geometry. "
-                         "Defaults to renders/beauty/frame_0000.png when it exists.")
+                         "Defaults to FRAMES_ROOT/beauty/frame_0000.png when it exists.")
     ap.add_argument("--no-reference", action="store_true", help="send depth alone")
     ap.add_argument("--reference-mode", choices=["ref", "first"], default="ref",
                     help="ref guides appearance only; first pins frame 0 to the image. "
@@ -148,68 +109,61 @@ def main() -> int:
                          "be our studio sweep and the clip will morph out of it.")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--name", default=None, help="output stem; defaults to lifestyle_<source>")
-    ap.add_argument("--force", action="store_true", help="regenerate even if the output exists")
+    ap.add_argument("--deadline", type=float, default=0, help="seconds to wait before exiting 3; 0 waits")
+    ap.add_argument("--force", action="store_true", help="submit again even if an output or request exists")
     ap.add_argument("--attach", metavar="REQUEST_ID",
-                    help="follow a request already in flight instead of submitting a new one")
+                    help="wait on a request already in flight and save it to the output")
     a = ap.parse_args()
 
-    # fal_client reads FAL_KEY; accept FAL_API_KEY too, since that is the name
-    # the rest of store/.env uses for credentials.
-    key = (os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY") or "").strip()
-    if not key:
-        return fail("neither FAL_KEY nor FAL_API_KEY is set; put one in store/.env and source it")
-    os.environ["FAL_KEY"] = key
-    problem = preflight(key)
-    if problem:
-        return fail(problem)
-    if not shutil.which("ffmpeg"):
-        return fail("ffmpeg not found")
-
     wd = Path(a.workdir).resolve()
+    frames_root = Path(a.frames_root).resolve() if a.frames_root else wd / "renders"
+    endpoint = a.endpoint or ENDPOINTS[a.engine]
+    default_name = "reference_video" if a.engine == "ref" else f"lifestyle_{a.source}"
+    out_mp4 = Path(a.out).resolve() if a.out else wd / "renders" / f"{a.name or default_name}.mp4"
+    req_p = out_mp4.with_name(out_mp4.name + ".request.json")
+    record_p = out_mp4.with_suffix(".json")
 
-    if a.attach:
-        import fal_client
-        note = lambda line: print(line, file=sys.stderr, flush=True)  # noqa: E731
-        handle = fal_client.SyncRequestHandle.from_request_id(ENDPOINT, a.attach)
-        note(f"attached to {a.attach}")
-        try:
-            result = follow(handle, note)
-        except Exception as exc:
-            return fail(f"following {a.attach} failed: {exc}")
-        print(json.dumps({"ok": True, "attached": a.attach, "result": result}))
+    if out_mp4.exists() and not a.force:
+        print(json.dumps({"ok": True, "cached": True, "video": str(out_mp4)}))
         return 0
 
-    endpoint = a.endpoint or ENDPOINTS[a.engine]
+    k = fal_queue.key()
+    if not k:
+        return fail("neither FAL_KEY nor FAL_API_KEY is set; put one in store/.env and source it", 2)
+    problem = fal_queue.preflight(k)
+    if problem:
+        return fail(problem, 2)
+    if not shutil.which("ffmpeg"):
+        return fail("ffmpeg not found", 2)
 
-    if a.engine == "ref":
+    import fal_client                                  # imported late: no key, no need
+
+    t0 = time.time()
+    extra: dict = {}
+    held = None if a.force else fal_queue.pending(req_p)
+    if a.attach:
+        held = {"request_id": a.attach, "endpoint": endpoint, "request": {}}
+    if held:
+        endpoint, request_id, recorded = held["endpoint"], held["request_id"], held.get("request", {})
+        fal_queue.note(f"attaching to {request_id}" + (f", submitted {held['submitted']}" if held.get("submitted") else ""))
+    elif a.engine == "ref":
         clips = [Path(v) for v in (a.videos or [])]
         if not clips:
-            return fail("--videos is required for the ref engine (1 to 3 clips)")
+            return fail("--videos is required for the ref engine (1 to 3 clips)", 2)
         if len(clips) > 3:
-            return fail("the ref engine takes at most 3 videos")
+            return fail("the ref engine takes at most 3 videos", 2)
         for c in clips:
             if not c.exists():
-                return fail(f"no video at {c}")
+                return fail(f"no video at {c}", 2)
             if c.stat().st_size > 30 * 1024 * 1024:
-                return fail(f"{c.name} is over the 30 MB per-clip limit")
-        name = a.name or "reference_video"
-        out_mp4 = wd / "renders" / f"{name}.mp4"
-        if out_mp4.exists() and not a.force:
-            print(json.dumps({"ok": True, "cached": True, "video": str(out_mp4)}))
-            return 0
-        problem = preflight(key)
-        if problem:
-            return fail(problem)
-        import fal_client
-        note = lambda line: print(line, file=sys.stderr, flush=True)  # noqa: E731
-        t0 = time.time()
+                return fail(f"{c.name} is over the 30 MB per-clip limit", 2)
         urls = []
         for c in clips:
             try:
                 urls.append(fal_client.upload_file(str(c)))
             except Exception as exc:
                 return fail(f"uploading {c.name} failed: {exc}")
-            note(f"uploaded {c.name} as @Video{len(urls)}")
+            fal_queue.note(f"uploaded {c.name} as @Video{len(urls)}")
         payload = {
             "prompt": a.prompt,
             "negative_prompt": a.negative[:500],
@@ -223,144 +177,99 @@ def main() -> int:
             "multi_shots": False,
             "enable_prompt_expansion": False,
         }
+        recorded = {**{k2: v for k2, v in payload.items() if k2 != "video_urls"}, "clips": [c.name for c in clips]}
         try:
-            handle = fal_client.submit(endpoint, arguments=payload)
+            request_id = fal_queue.submit(endpoint, payload, req_p, recorded)
         except Exception as exc:
             return fail(f"submit failed: {exc}", endpoint=endpoint)
-        (wd / "renders" / f"{name}.request.json").write_text(json.dumps(
-            {"request_id": handle.request_id, "endpoint": endpoint, "clips": [c.name for c in clips],
-             "request": {k: v for k, v in payload.items() if k != "video_urls"}}, indent=2))
-        note(f"submitted {handle.request_id}")
-        try:
-            result = follow(handle, note)
-        except Exception as exc:
-            return fail(f"generation failed: {exc}", request_id=handle.request_id)
-        url = (result.get("video") or {}).get("url")
-        if not url:
-            return fail("fal returned no video url", result_keys=sorted(result))
-        with urllib.request.urlopen(url, timeout=600) as res:
-            out_mp4.write_bytes(res.read())
-        record = {"ok": True, "endpoint": endpoint, "engine": "ref",
-                  "clips": [c.name for c in clips], "video": out_mp4.name,
-                  "video_bytes": out_mp4.stat().st_size,
-                  "request": {k: v for k, v in payload.items() if k != "video_urls"},
-                  "wall_s": round(time.time() - t0, 1)}
-        (wd / "renders" / f"{name}.json").write_text(json.dumps(record, indent=2))
-        print(json.dumps(record))
-        return 0
-
-    frames_dir = wd / "renders" / a.source
-    shots = sorted(frames_dir.glob("frame_*.png"))
-    if not shots:
-        return fail(f"no {a.source} frames in {frames_dir}; run capture_turntable.py first")
-
-    name = a.name or f"lifestyle_{a.source}"
-    out_mp4 = wd / "renders" / f"{name}.mp4"
-    record_p = wd / "renders" / f"{name}.json"
-    if out_mp4.exists() and not a.force:
-        print(json.dumps({"ok": True, "cached": True, "video": str(out_mp4)}))
-        return 0
-
-    # preprocess off means "this video IS the control signal"; on means
-    # "estimate depth from this video first". That single flag is the whole
-    # difference between our geometry and a guess at it.
-    preprocess = a.source == "beauty"
-
-    cond = wd / "renders" / f"_conditioning_{a.source}.mp4"
-    ok, why = encode_conditioning(frames_dir, cond, a.fps)
-    if not ok:
-        return fail(f"ffmpeg failed encoding the conditioning video: {why}")
-
-    import fal_client                                  # imported late: no key, no need
-
-    t0 = time.time()
-    try:
-        video_url = fal_client.upload_file(str(cond))
-    except Exception as exc:
-        return fail(f"upload to fal failed: {exc}")
-
-    reference = None
-    if not a.no_reference:
-        chosen = Path(a.reference) if a.reference else (wd / "renders" / "beauty" / "frame_0000.png")
-        if chosen.exists():
-            try:
-                reference = fal_client.upload_file(str(chosen))
-                note_early = f"reference frame: {chosen.name}"
-            except Exception as exc:
-                return fail(f"uploading the reference frame failed: {exc}")
-        elif a.reference:
-            return fail(f"no reference frame at {chosen}")
-        else:
-            note_early = "no reference frame found; depth alone"
+        fal_queue.note(f"submitted {request_id}")
+        extra = {"engine": "ref", "clips": [c.name for c in clips]}
     else:
-        note_early = "reference disabled; depth alone"
-    print(note_early, file=sys.stderr, flush=True)
+        frames_dir = frames_root / a.source
+        shots = sorted(frames_dir.glob("frame_*.png"))
+        if not shots:
+            return fail(f"no {a.source} frames in {frames_dir}; run capture_turntable.py first", 2)
 
-    payload = {
-        "prompt": a.prompt,
-        "negative_prompt": a.negative,
-        "video_url": video_url,
-        "preprocess": preprocess,
-        "num_frames": min(max(a.frames, 81), 241),
-        "frames_per_second": a.fps,
-        "resolution": a.resolution,
-        "aspect_ratio": a.aspect,
-        "guidance_scale": a.guidance,
-        "num_inference_steps": a.steps,
-        "seed": a.seed,
-        # Lock the output timing to what we sent, rather than letting the
-        # endpoint renormalise 120 frames at 24fps into its own default.
-        "match_input_num_frames": True,
-        "match_input_frames_per_second": True,
-    }
-    if reference:
-        if a.reference_mode == "first":
-            payload["first_frame_url"] = reference
-        else:
-            payload["ref_image_urls"] = [reference]
+        # preprocess off means "this video IS the control signal"; on means
+        # "estimate depth from this video first". That single flag is the whole
+        # difference between our geometry and a guess at it.
+        preprocess = a.source == "beauty"
+        cond = out_mp4.with_name(f"_conditioning_{a.source}.mp4")
+        cond.parent.mkdir(parents=True, exist_ok=True)
+        ok, why = encode_conditioning(frames_dir, cond, a.fps)
+        if not ok:
+            return fail(f"ffmpeg failed encoding the conditioning video: {why}")
+        try:
+            video_url = fal_client.upload_file(str(cond))
+        except Exception as exc:
+            return fail(f"upload to fal failed: {exc}")
 
-    def note(line: str) -> None:
-        """Progress goes to stderr, flushed. stdout stays one JSON object."""
-        print(line, file=sys.stderr, flush=True)
+        reference = None
+        if not a.no_reference:
+            chosen = Path(a.reference) if a.reference else (frames_root / "beauty" / "frame_0000.png")
+            if chosen.exists():
+                try:
+                    reference = fal_client.upload_file(str(chosen))
+                except Exception as exc:
+                    return fail(f"uploading the reference frame failed: {exc}")
+                fal_queue.note(f"reference frame: {chosen.name}")
+            elif a.reference:
+                return fail(f"no reference frame at {chosen}", 2)
+            else:
+                fal_queue.note("no reference frame found; depth alone")
+
+        payload = {
+            "prompt": a.prompt,
+            "negative_prompt": a.negative,
+            "video_url": video_url,
+            "preprocess": preprocess,
+            "num_frames": min(max(a.frames, 81), 241),
+            "frames_per_second": a.fps,
+            "resolution": a.resolution,
+            "aspect_ratio": a.aspect,
+            "guidance_scale": a.guidance,
+            "num_inference_steps": a.steps,
+            "seed": a.seed,
+            # Lock the output timing to what we sent, rather than letting the
+            # endpoint renormalise 120 frames at 24fps into its own default.
+            "match_input_num_frames": True,
+            "match_input_frames_per_second": True,
+        }
+        if reference:
+            if a.reference_mode == "first":
+                payload["first_frame_url"] = reference
+            else:
+                payload["ref_image_urls"] = [reference]
+        recorded = {k2: v for k2, v in payload.items() if k2 not in ("video_url", "first_frame_url", "ref_image_urls")}
+        recorded.update(source=a.source, reference_mode=a.reference_mode, reference_frame=bool(reference),
+                        frames_sent=len(shots),
+                        conditioning_sha256=hashlib.sha256(cond.read_bytes()).hexdigest()[:16])
+        try:
+            request_id = fal_queue.submit(endpoint, payload, req_p, recorded)
+        except Exception as exc:
+            return fail(f"submit failed: {exc}", sent=recorded)
+        fal_queue.note(f"submitted {request_id}; a rerun of this command attaches to it")
 
     try:
-        handle = fal_client.submit(endpoint, arguments=payload)
+        result = fal_queue.wait(endpoint, request_id, a.deadline, fal_queue.note)
     except Exception as exc:
-        return fail(f"submit failed: {exc}", sent={k: v for k, v in payload.items() if k != "video_url"})
-
-    # Written before the first poll so another shell can attach with --attach,
-    # and so a killed run leaves behind the one thing needed to recover it.
-    req_p = wd / "renders" / f"{name}.request.json"
-    req_p.write_text(json.dumps({"request_id": handle.request_id, "endpoint": ENDPOINT,
-                                 "submitted": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                                 "request": {k: v for k, v in payload.items() if k != "video_url"}}, indent=2))
-    note(f"submitted {handle.request_id}")
-    note(f"follow it from another shell: generate_video.py --attach {handle.request_id}")
-
-    try:
-        result = follow(handle, note)
-    except Exception as exc:
-        return fail(f"generation failed: {exc}", request_id=handle.request_id)
+        return fail(f"generation failed: {exc}", request_id=request_id)
+    if result is None:
+        print(json.dumps({"ok": False, "pending": True, "request_id": request_id,
+                          "reason": f"still running on fal after {a.deadline:g}s; run the same command again"}))
+        return fal_queue.PENDING_EXIT
 
     url = (result.get("video") or {}).get("url")
     if not url:
-        return fail("fal returned no video url", result_keys=sorted(result))
+        return fail("fal returned no video url", result_keys=sorted(result), request_id=request_id)
     try:
-        with urllib.request.urlopen(url, timeout=300) as res:
-            out_mp4.write_bytes(res.read())
+        fal_queue.download(url, out_mp4)
     except Exception as exc:
-        return fail(f"could not download the result: {exc}", url=url)
+        return fail(f"could not download the result: {exc}", url=url, request_id=request_id)
 
-    record = {
-        "ok": True, "endpoint": endpoint, "source": a.source, "preprocess": preprocess,
-        "frames_sent": len(shots), "request": {k: v for k, v in payload.items()
-                    if k not in ("video_url", "first_frame_url", "ref_image_urls")},
-        "reference_mode": a.reference_mode,
-        "reference_frame": bool(reference),
-        "video": out_mp4.name, "video_bytes": out_mp4.stat().st_size,
-        "conditioning_sha256": hashlib.sha256(cond.read_bytes()).hexdigest()[:16],
-        "wall_s": round(time.time() - t0, 1),
-    }
+    record = {"ok": True, "endpoint": endpoint, "request_id": request_id, **extra,
+              "request": recorded, "video": out_mp4.name, "video_bytes": out_mp4.stat().st_size,
+              "wall_s": round(time.time() - t0, 1)}
     record_p.write_text(json.dumps(record, indent=2))
     print(json.dumps(record))
     return 0

@@ -1,10 +1,15 @@
 ---
 name: render-model
-description: Produces studio product images for one model, a hero and three supporting angles, by running the bundled Blender scene and choosing the angle and orientation that flatter the object. Use as the render stage after price.json exists and the drafts from preview-model are in renders/. Not for drafts (preview-model), not for thumbnails (3MF previews are free) and not for deciding colour policy.
+description: Retired 2026-09-13, replaced by design-product; kept for reference and not dispatched by any stage. Produced studio product images for one model, a hero and three supporting angles, by running the bundled Blender scene and choosing the angle and orientation that flatter the object. Use as the render stage after price.json exists and the drafts from preview-model are in renders/. Not for drafts (preview-model), not for thumbnails (3MF previews are free) and not for deciding colour policy.
 allowed-tools: Read, Bash, Write
 ---
 
 # render-model
+
+> Retired 2026-09-13. The `design` stage (`design-product`, run by the
+> `product-designer` agent) replaced `render`: stills and turntable now come
+> from the browser studio, lifestyle media from fal. Blender still renders
+> the preview drafts through `render_model.py --mode draft`.
 
 ## When
 A brief with `stage: render`. The work dir has `source.<ext>`,

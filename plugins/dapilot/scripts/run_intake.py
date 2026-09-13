@@ -104,8 +104,14 @@ def worker_turns(brief: dict, a, cfg: dict) -> int:
     return int(cfg.get("turns_per_stage", {}).get(brief["stage"], a.max_turns))
 
 
+def worker_minutes(brief: dict, cfg: dict) -> int:
+    """Wall clock for one worker: `minutes_per_stage` for its stage, else `max_worker_minutes`."""
+    return int((cfg.get("minutes_per_stage") or {}).get(brief["stage"], cfg.get("max_worker_minutes", 15)))
+
+
 def worker_cmd(brief: dict, a, cfg: dict) -> list[str]:
-    agent = cfg["departments"][brief["department"]]["worker"]
+    # A stage may name its own worker (design runs product-designer); else the department's.
+    agent = brief.get("agent") or cfg["departments"][brief["department"]]["worker"]
     return [
         "claude", "-p",
         "--agent", f"{PLUGIN_NAME}:{agent}",
@@ -232,8 +238,6 @@ def main() -> int:
     a.max_workers = a.max_workers or dept.get("max_workers") or cfg.get("max_workers_per_lead", 3)
     a.budget_per_worker = a.budget_per_worker or cfg.get("budget", {}).get("usd_per_item", 0.5)
     ceiling = cfg.get("budget", {}).get("usd_per_run")
-    # per worker, not per run: one stuck worker must not hold an item for the run's whole budget
-    timeout_s = int(cfg.get("max_worker_minutes", 15)) * 60
     run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
 
     if not (a.folder or a.items or a.resume):
@@ -280,7 +284,8 @@ def main() -> int:
         stalls = 0
         log(f"pass {passes}: dispatching {len(briefs)} worker(s): " + ", ".join(f"{b['item'][:8]}/{b['stage']}#{b['attempt']}" for b in briefs))
         with ThreadPoolExecutor(max_workers=a.max_workers) as pool:
-            futures = {pool.submit(run_worker, b, a, cfg, root, timeout_s): b for b in briefs}
+            # per worker, not per run: one stuck worker must not hold an item for the run's whole budget
+            futures = {pool.submit(run_worker, b, a, cfg, root, worker_minutes(b, cfg) * 60): b for b in briefs}
             for fut in as_completed(futures):
                 b = futures[fut]
                 result, meta = fut.result()

@@ -10,7 +10,7 @@ user-invocable: false
 work/<sha256>/          one model, forever, whatever it was called on upload
   source.<ext>          the upload
   meta.json             original name, size, hash, first seen
-  <stage outputs>       analysis.json, quote.json, renders/, listing.json, publish.json
+  <stage outputs>       analysis.json, quote.json, renders/, comparables.json, price.json, design/, design.json
   log.md                one paragraph per stage
   .lock                 present while a worker holds the dir
 runs/<id>/
@@ -49,8 +49,10 @@ $PY ledger.py report --run $RUN            # writes report.md
   whether it counts. Pass the worker's token usage when you can see it.
 - Loop: `next`, dispatch all briefs in one message so they run in parallel,
   record each result, `status`. Stop when `work_left` is false.
+- Dispatch each brief to its `agent` when it names one, else the department worker.
 - Never edit `state.json`. Never delete an output. Never remove a `.lock`
-  younger than `max_wall_minutes`; the ledger handles stale ones.
+  younger than its stage's `minutes_per_stage` (else `max_worker_minutes`);
+  the ledger handles stale ones.
 
 ## Everyone
 

@@ -13,7 +13,7 @@ import type { Quote, QuoteMetrics } from './dapi';
 // Mirrors plugins/dapilot/skills/run-intake/reference/stages.json. Keep in sync.
 export type JobStage =
   | 'intake' | 'analyze' | 'slice' | 'preview'
-  | 'research' | 'price' | 'render' | 'copy' | 'publish';
+  | 'research' | 'price' | 'design' | 'copy' | 'publish';
 
 export type JobStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed';
 
@@ -25,6 +25,20 @@ export interface MarketBand {
   p75: number;
   max: number;
   currency?: string;
+}
+
+/** What the design stage made: design.json, with file paths turned into URLs. */
+export interface Design {
+  name: string;
+  color: string;
+  reason: string;
+  photos: { id: string; kind: 'studio' | 'lifestyle'; url: string; px: [number | null, number | null] }[];
+  video: { id: 'lifestyle_video' | 'turntable'; url: string; seconds: number | null } | null;
+  turntable: string | null;
+  rejected: { id: string; reason: string }[];
+  failed: { id: string; reason: string | null }[];
+  spendUsd: number;
+  warnings: string[];
 }
 
 export interface Viability {
@@ -107,6 +121,7 @@ export interface Job {
   comparables?: { product: string; queries: string[]; n: number; rejected: number; top: Comparable[] };
   pricing?: Pricing;
   renders?: { drafts: string[]; hero: string | null; angles: string[]; video: string | null };
+  design?: Design;
   log?: string;
 }
 

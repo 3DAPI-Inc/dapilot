@@ -102,16 +102,45 @@ def exists(workdir: Path, pattern: str) -> bool:
 
 # ------------------------------------------------------------------ init
 
-def lock_is_stale(wd: Path, max_minutes: float) -> bool:
-    """A worker that died mid-stage leaves its .lock behind; past the worker budget it means nothing."""
+def worker_minutes(stage: str | None, cfg: dict | None = None) -> float:
+    """Wall clock a worker may hold an item: `minutes_per_stage` for its stage, else `max_worker_minutes`."""
+    cfg = cfg if cfg is not None else load_config()
+    base = float(cfg.get("max_worker_minutes", 15))
+    return float((cfg.get("minutes_per_stage") or {}).get(stage, base)) if stage else base
+
+
+def lock_stage(wd: Path) -> str | None:
+    """The stage a .lock names. Workers write JSON or plain text; read either."""
+    try:
+        text = (wd / ".lock").read_text()
+    except OSError:
+        return None
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict) and isinstance(obj.get("stage"), str):
+            return obj["stage"]
+    except json.JSONDecodeError:
+        pass
+    for token in text.replace(",", " ").replace(":", " ").split():
+        if token in ("analyze", "quote", "preview", "research", "price", "design", "render", "copy", "publish"):
+            return token
+    return None
+
+
+def lock_is_stale(wd: Path, max_minutes: float | None = None) -> bool:
+    """A worker that died mid-stage leaves its .lock behind; past its stage's budget it means nothing."""
     lock = wd / ".lock"
     if not lock.exists():
         return False
+    if max_minutes is None:
+        max_minutes = worker_minutes(lock_stage(wd))
     age_min = (datetime.now(timezone.utc).timestamp() - lock.stat().st_mtime) / 60
     return age_min > max_minutes
 
 
-def clear_stale_lock(wd: Path, max_minutes: float, notes: list | None = None) -> bool:
+def clear_stale_lock(wd: Path, max_minutes: float | None = None, notes: list | None = None) -> bool:
+    if max_minutes is None:
+        max_minutes = worker_minutes(lock_stage(wd))
     if lock_is_stale(wd, max_minutes):
         (wd / ".lock").unlink(missing_ok=True)
         if notes is not None:
@@ -122,7 +151,7 @@ def clear_stale_lock(wd: Path, max_minutes: float, notes: list | None = None) ->
 
 def unfinished(wd: Path, stages: dict) -> bool:
     """True when an enabled stage still lacks its output and nothing marks the item as stopped."""
-    if (wd / ".lock").exists() and not lock_is_stale(wd, load_config().get("max_worker_minutes", 15)):
+    if (wd / ".lock").exists() and not lock_is_stale(wd):
         return False  # a live worker holds it; another run will pick it up when it is free
     for st in stages["stages"]:
         if not st.get("enabled", True):
@@ -230,10 +259,9 @@ def refresh(state: dict, stages: dict) -> None:
 
 def ready_briefs(state: dict, stages: dict) -> list[dict]:
     briefs = []
-    stale_after = load_config().get("max_worker_minutes", 15)
     for h, item in state["items"].items():
         wd = root() / item["workdir"]
-        clear_stale_lock(wd, stale_after, state.setdefault("notes", []))
+        clear_stale_lock(wd, None, state.setdefault("notes", []))
         if (wd / ".lock").exists():
             continue
         for st in stages["stages"]:
@@ -254,6 +282,7 @@ def ready_briefs(state: dict, stages: dict) -> list[dict]:
                 "run": state["run"], "department": state["department"], "item": h,
                 "workdir": item["workdir"], "file": item["file"], "stage": st["stage"], "skill": st["skill"],
                 "requires": st["requires"], "produces": st["produces"], "gate": st["gate"],
+                **({"agent": st["agent"]} if st.get("agent") else {}),
                 "attempt": rec["attempt"] + 1, "previous": rec.get("previous"),
             })
             break  # one stage per item per pass; stages of one item are sequential

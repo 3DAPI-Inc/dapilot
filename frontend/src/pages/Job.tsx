@@ -48,6 +48,42 @@ function Renders({ job }: { job: JobRecord }) {
   );
 }
 
+/* The listing media the design stage made, in the order Etsy will show them. */
+function DesignSection({ job }: { job: JobRecord }) {
+  const d = job.design;
+  if (!d) return null;
+  const [hero, ...rest] = d.photos;
+  return (
+    <section className="mt-14">
+      <h2 className={h2}>Design</h2>
+      <p className="mt-3 font-display text-2xl font-semibold tracking-tight text-navy">{d.name}</p>
+      <p className="mt-2 max-w-[62ch] font-sans text-sm leading-relaxed text-slate">{d.reason}</p>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        {hero ? <img src={hero.url} alt={`${d.name}, main photo`} className="w-full rounded-2xl border border-mist bg-white" /> : null}
+        {d.video ? (
+          <video src={d.video.url} controls muted loop playsInline className="w-full rounded-2xl border border-mist bg-white" />
+        ) : null}
+      </div>
+      {rest.length > 0 ? (
+        <div className="mt-3 flex gap-2 overflow-x-auto">
+          {rest.map((p) => (
+            <img key={p.id} src={p.url} alt={`${d.name}, ${p.kind} photo`} className="size-28 shrink-0 rounded-lg border border-mist bg-white" />
+          ))}
+        </div>
+      ) : null}
+      <p className="mt-3 font-sans text-xs text-slate/80">
+        {d.photos.length} photos{d.video ? `, listing video from the ${d.video.id === 'turntable' ? 'studio turntable' : 'lifestyle clip'}` : ''}
+        {' · '}about {money(d.spendUsd)} on generation
+        {d.rejected.length > 0 ? ` · rejected: ${d.rejected.map((r) => r.id).join(', ')}` : ''}
+        {d.failed.length > 0 ? ` · failed on fal: ${d.failed.map((r) => r.id).join(', ')}` : ''}
+      </p>
+      {d.warnings.map((w) => (
+        <p key={w} className="mt-1 font-sans text-xs text-destructive">{w}</p>
+      ))}
+    </section>
+  );
+}
+
 /* The market band research found, and the listings it was built from. */
 function Market({ job }: { job: JobRecord }) {
   const v = job.viability;
@@ -372,6 +408,7 @@ export default function Job() {
 
             <Market job={job.data} />
             <SalePrice job={job.data} />
+            <DesignSection job={job.data} />
             <Renders job={job.data} />
 
             <Events events={events.data ?? []} />

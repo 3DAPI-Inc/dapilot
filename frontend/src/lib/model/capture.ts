@@ -30,6 +30,11 @@ export interface CaptureOptions {
    * centred on startYaw so the hero angle stays the middle of the move.
    */
   arc: number;
+  /**
+   * Exact angles, one frame each, in order. When set it replaces frames,
+   * startYaw and arc: product stills want chosen angles, not an even sweep.
+   */
+  yaws?: number[];
 }
 
 export interface CaptureProgress {
@@ -49,7 +54,8 @@ export async function captureTurntable(
   options: CaptureOptions,
   onProgress?: (p: CaptureProgress) => void,
 ): Promise<{ frames: number; passes: Pass[]; size: number }> {
-  const { frames, size, passes, post, startYaw, arc } = options;
+  const { size, passes, post, startYaw, arc, yaws } = options;
+  const frames = yaws?.length || options.frames;
   const held = studio.yaw();
   studio.setSize(size);
 
@@ -59,7 +65,9 @@ export async function captureTurntable(
     for (const pass of passes) {
       studio.setPass(pass);
       for (let i = 0; i < frames; i++) {
-        const yaw = (startYaw - arc / 2 + (arc * i) / Math.max(frames - 1, 1) + 360) % 360;
+        const yaw = yaws?.length
+          ? (((yaws[i] % 360) + 360) % 360)
+          : (startYaw - arc / 2 + (arc * i) / Math.max(frames - 1, 1) + 360) % 360;
         studio.setYaw(yaw);
         const blob = await studio.captureBlob();
         if (post) {
@@ -86,6 +94,11 @@ export function captureFromQuery(search: string): CaptureOptions | null {
     .split(',')
     .map((p) => p.trim())
     .filter((p): p is Pass => p === 'beauty' || p === 'depth' || p === 'normal');
+  const yaws = (q.get('yaws') ?? '')
+    .split(',')
+    .filter((v) => v.trim() !== '')
+    .map(Number)
+    .filter((v) => Number.isFinite(v));
   return {
     frames: Math.max(1, Number(q.get('frames') ?? 120)),
     size: Math.max(64, Number(q.get('size') ?? 720)),
@@ -93,5 +106,6 @@ export function captureFromQuery(search: string): CaptureOptions | null {
     post: q.get('post') ?? '',
     startYaw: Number(q.get('startYaw') ?? 0),
     arc: Number(q.get('arc') ?? 360),
+    ...(yaws.length ? { yaws, frames: yaws.length } : {}),
   };
 }

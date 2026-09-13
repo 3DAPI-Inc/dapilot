@@ -3,9 +3,16 @@
 
   capture_turntable.py --workdir DIR [--frames 120] [--size 720] [--fps 24]
                        [--passes beauty,depth,normal] [--start-yaw 35] [--no-video]
+                       [--out DIR/renders] [--rotate x,y,z] [--elevation 18]
+  capture_turntable.py --workdir DIR --yaws 20,110,200,290 --size 2048 --passes beauty --no-video
 
-Writes DIR/renders/<pass>/frame_0000.png ... , DIR/renders/turntable.mp4 and a
-record at DIR/renders/video.json. Prints one JSON object. Exit 0 on success.
+Writes OUT/<pass>/frame_0000.png ... , OUT/turntable.mp4 and a record at
+OUT/video.json. OUT defaults to DIR/renders. Prints one JSON object. Exit 0 on
+success.
+
+Yaw follows render_scene.py: yaw N shows the side the Blender draft at yaw N
+shows. --rotate is the same orientation render_model.py takes. --yaws captures
+exactly those angles, one frame each, which is what product stills want.
 
 Why a browser: WebGL reaches a GPU that Cycles cannot on this hardware, so a
 rotation costs seconds instead of an hour. The depth and normal passes come off
@@ -162,6 +169,11 @@ def main() -> int:
     ap.add_argument("--start-yaw", type=float, default=0.0)
     ap.add_argument("--arc", type=float, default=360.0,
                     help="total degrees swept; 360 is a turntable, 20 is a slow drift")
+    ap.add_argument("--yaws", default=None, help="comma-separated exact angles; replaces --frames, --start-yaw, --arc")
+    ap.add_argument("--rotate", default=None, help="orientation x,y,z in degrees, as render_model.py")
+    ap.add_argument("--elevation", type=float, default=None, help="camera height in degrees above the horizon")
+    ap.add_argument("--out", default=None, help="output directory; default WORKDIR/renders")
+    ap.add_argument("--video-name", default="turntable.mp4")
     ap.add_argument("--color", default=None, help="filament colour hex, e.g. '#3B7DD8'")
     ap.add_argument("--studio", default=os.environ.get("DAPILOT_STUDIO_URL", "http://localhost:8081"))
     ap.add_argument("--no-video", action="store_true", help="frames only, skip ffmpeg")
@@ -175,6 +187,19 @@ def main() -> int:
     passes = [p.strip() for p in a.passes.split(",") if p.strip() in PASSES]
     if not passes:
         return fail(f"--passes must be some of {', '.join(PASSES)}")
+    yaws: list[float] = []
+    if a.yaws:
+        try:
+            yaws = [float(v) for v in a.yaws.split(",") if v.strip()]
+        except ValueError:
+            return fail("--yaws must be numbers separated by commas")
+        a.frames = len(yaws)
+    if a.rotate:
+        try:
+            if len([float(v) for v in a.rotate.split(",")]) != 3:
+                raise ValueError
+        except ValueError:
+            return fail("--rotate must be three numbers, x,y,z")
 
     browser = chrome()
     if not browser:
@@ -185,7 +210,7 @@ def main() -> int:
     if not page_is_up(base):
         return fail(f"no studio page at {base}: start it with `npm run dev` in frontend/")
 
-    out = wd / "renders"
+    out = Path(a.out).resolve() if a.out else wd / "renders"
     out.mkdir(parents=True, exist_ok=True)
     for name in passes:
         for stale in (out / name).glob("frame_*.png"):
@@ -198,11 +223,14 @@ def main() -> int:
     page = f"{base}/studio?" + urllib.parse.urlencode({
         "model": model_url, "capture": "1", "frames": a.frames, "size": a.size,
         "passes": ",".join(passes), "startYaw": a.start_yaw, "arc": a.arc,
+        **({"yaws": ",".join(f"{y:g}" for y in yaws)} if yaws else {}),
+        **({"rotate": a.rotate} if a.rotate else {}),
+        **({"elevation": a.elevation} if a.elevation is not None else {}),
         **({"color": a.color} if a.color else {}),
         "post": f"http://127.0.0.1:{server.port}/frame",
     })
 
-    profile = wd / ".chrome-capture"
+    profile = out / ".chrome-capture"
     proc = subprocess.Popen(
         [browser, "--headless=new", "--disable-gpu-sandbox", "--hide-scrollbars",
          "--window-size=1400,1400", f"--user-data-dir={profile}", page],
@@ -239,13 +267,14 @@ def main() -> int:
     wall = round(time.time() - t0, 1)
     record = {
         "ok": True, "frames": a.frames, "size": a.size, "fps": a.fps, "passes": passes,
-        "start_yaw": a.start_yaw, "arc": a.arc, "color": a.color,
+        "start_yaw": a.start_yaw, "arc": a.arc, "yaws": yaws or None, "rotate": a.rotate or "0,0,0",
+        "elevation": a.elevation, "color": a.color,
         "captured": server.counts, "capture_s": wall,
         "seconds": round(a.frames / a.fps, 2), "renderer": "webgl",
     }
 
     if not a.no_video and "beauty" in passes:
-        video = out / "turntable.mp4"
+        video = out / a.video_name
         ok, why = encode(out / "beauty", video, a.fps)
         if not ok:
             return fail(f"ffmpeg failed: {why}", captured=server.counts)

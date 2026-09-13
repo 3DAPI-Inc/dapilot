@@ -48,13 +48,37 @@ Read before building anything:
   box through the camera, 3MF converted to PLY through our loader. The model
   chooses only orientation and hero yaw from an 8-frame draft turntable.
   Draft turntable about 15 to 30 s; one 1024 px final about 60 to 90 s on
-  the reference laptop. **A product video is a required output of the
-  render stage (decided 2026-09-08)**: one 360 degree turntable,
+  the reference laptop. **Superseded on 2026-09-13 by the design stage
+  below; Blender now renders only the preview drafts.** A product video is a
+  required output of the render stage (decided 2026-09-08): one 360 degree turntable,
   10 s, 24 fps, 1080 px square, silent H.264 MP4 under 100 MB, within Etsy's
   listing video limits and reusable for social posting. Not built yet; the
   spec is in `render-model/SKILL.md`. Next: the video pass in
   `render_model.py`, `write-listing`, and the stage wrapper to cut worker
   turns.
+- **The storefront is Etsy (decided 2026-09-13).** Listings are not posted
+  on dapi's storefront for now, so `write-listing` and `publish-listing` are
+  unavailable for dapi and stay disabled until they are rebuilt for Etsy.
+  dapi remains the slicer, the cost basis and the producer.
+- **The design stage replaced render (2026-09-13).** The `product-designer`
+  agent runs `design-product`: it names the product and writes one brief
+  (`design/brief.json`: orientation, hero yaw, three angles, elevation,
+  colour from the store palette, up to three lifestyle scenes, one clip
+  scene), then reviews one contact sheet and rejects any generated asset that
+  misrepresents the product. `design_product.py` does the rest: studio
+  stills at 2048 px and a 10 s 1080 px turntable from the browser studio
+  (`capture_turntable.py`, headless Chrome over `/studio`, which now takes
+  `rotate`, `elevation` and `yaws` and turns the same way as the Blender
+  drafts), lifestyle photos on fal (`fal-ai/nano-banana-2/edit`, 2K, about
+  0.12 USD each) and a 5 s depth-conditioned Wan clip (about 0.75 USD),
+  photos in Etsy order and the listing video (the lifestyle clip if kept,
+  else the turntable) in `design.json`. Paid requests are written on submit
+  and a rerun attaches (`fal_queue.py`), spend is counted from those files
+  against `design.usd_cap_per_item` (2.00 USD), and `produce` exits 3 at its
+  deadline so a worker's Bash call never outlives 10 minutes. Stages may name
+  their own worker agent in `stages.json`; design workers get 40 minutes
+  (`minutes_per_stage`). First headless run on the cat clicker, studio only:
+  7 min, 37 turns, 0.43 USD at API rates. Not yet run with paid assets.
 - **Phase 4 research is live ahead of order (2026-09-09).** `research-comparables`
   runs as an intake stage after quote and render: `etsy_search.py` fetches
   and filters Etsy listings (physical, right size, variant closest to our
@@ -145,7 +169,7 @@ Read before building anything:
   candidates, the proposal or its rejection, the log. Stage and status are
   derived from files against `stages.json`, never stored.
   `frontend/src/api/jobs.ts` defines the stage vocabulary (`intake analyze
-  slice preview research price render copy publish`). The browser no longer
+  slice preview research price design copy publish`). The browser no longer
   calls dapi. Review, catalogue and approve are placeholders.
 
 ## Scope
@@ -233,7 +257,7 @@ exempt from the daily quote limit and get batch pricing.
 | `GET /print-farm/courier-options` | any key | courier list |
 | `GET /print-farm/stock-levels`, `PATCH /print-farm/stock-levels/:id/items-made` | READ_STOCK, WRITE_STOCK | stock levels; record items printed |
 
-**Missing, and needed for intake:** a route that creates a design (listing)
+**Missing, not pursued while the storefront is Etsy (2026-09-13):** a route that creates a design (listing)
 from a completed quote plus title, description, category, tags, images and a
 proposed price. Nothing in either surface creates a design today; the product
 save path in the platform is session-authed. Until that route exists,
@@ -258,7 +282,7 @@ Rules that follow from the split:
   choosing a price, something has gone wrong.
 - **The upload path is deterministic.** Intake stages run in a fixed order
   with fixed inputs and outputs. Since 2026-09-09 the order is analyze,
-  quote, preview (drafts), research, price, render (finals and video), copy,
+  quote, preview (drafts), research, price, design (stills, lifestyle media, video), copy,
   publish: nothing expensive runs for an item that cannot sell. The model's judgement is confined to the
   content of a stage (which category, which camera), never to which stage
   runs next or whether to run it again.
@@ -280,7 +304,7 @@ skill names so that future work lands under agreed names.
 
 | Process | Trigger | Stages | Skills | API surface | Status |
 |---|---|---|---|---|---|
-| Intake | new model file | intake, analyze, slice, preview, research, price, render, copy, publish | `dapi-request`, `analyze-model`, `quote-model`, `preview-model`, `research-comparables`, `propose-price`, `render-model`, `write-listing`, `publish-listing` | Designer: quotes; design creation route to be added | `dapi-request`, `analyze-model`, `quote-model`, `render-model` (stills), `preview-model`, `research-comparables`, `propose-price` done; `write-listing`, `publish-listing` not started |
+| Intake | new model file | intake, analyze, slice, preview, research, price, design, copy, publish | `dapi-request`, `analyze-model`, `quote-model`, `preview-model`, `research-comparables`, `propose-price`, `design-product`, `write-listing`, `publish-listing` | Designer: quotes. Listing: Etsy, not dapi | `dapi-request`, `analyze-model`, `quote-model`, `preview-model`, `research-comparables`, `propose-price`, `design-product` done; `render-model` retired; `write-listing`, `publish-listing` disabled until rebuilt for Etsy |
 | Pricing review | quote returned, or admin approval pending | price | `review-price` | admin approval is in the platform UI, not the API | not started |
 | Catalogue health | schedule | research, copy | `audit-listing` | design read routes to be added on the Designer surface | not started |
 | Orders | new or changed order | (none yet) | `triage-order` | Designer: `/designer/orders` | not started |
@@ -304,16 +328,23 @@ plugins/
       preview-model/              draft turntable, no judgement
       research-comparables/       research stage; reference/platform-fees.json, search-guide.md
       propose-price/              price stage; picks a candidate, the script checks it
+      design-product/             design stage; reference/art-direction.md
+      render-model/               retired 2026-09-13, kept for reference
       run-intake/                 director skill; reference/stages.json is the intake stage table
     agents/
-      catalogue-lead.md           spawns catalogue-worker only
+      catalogue-lead.md           spawns catalogue-worker and product-designer only
       catalogue-worker.md         no Agent tool; one stage on one item
+      product-designer.md         worker for the design stage; loads only design-product
     scripts/
       dapi.py                     spec-driven client: spec, ops, describe, validate, call, upload
       ledger.py                   run state: init, next, record, status, report
       validate_result.py          the result-line contract check
       analyze_mesh.py load_3mf.py make_fixtures.py quote.py
-      render_model.py render_scene.py   studio renders (driver, Blender-side scene)
+      render_model.py render_scene.py   Blender preview drafts (driver, scene)
+      design_product.py               design stage: context, check, produce, finalize
+      capture_turntable.py            browser studio captures: stills at yaws, turntables, depth
+      generate_image.py generate_video.py fal_queue.py   lifestyle photo and clip on fal, never paid twice
+      upscale_video.py                Topaz on fal, manual only
       render_turntable.py             older plain turntable, kept for reference
       strip_3mf.py                    foreign 3mf project -> geometry-only 3mf
       etsy_search.py etsy_auth.py market_stats.py   research stage: Etsy search, OAuth, viability
@@ -371,6 +402,13 @@ root pointing at `./plugins/dapilot`. Nothing about the skills changes.
 .venv/bin/python plugins/dapilot/scripts/render_model.py --workdir work/<hash> --mode draft --frames 8
 .venv/bin/python plugins/dapilot/scripts/render_model.py --workdir work/<hash> --mode final --angles "35,125,215,305" [--rotate 90,0,0] [--color '#3B7DD8'] [--layer-lines]
 
+# The design stage by hand. Captures need the studio page (npm run dev), Chrome and ffmpeg.
+.venv/bin/python plugins/dapilot/scripts/design_product.py context  --workdir work/<hash>
+#   write work/<hash>/design/brief.json, then:
+.venv/bin/python plugins/dapilot/scripts/design_product.py check    --workdir work/<hash>
+.venv/bin/python plugins/dapilot/scripts/design_product.py produce  --workdir work/<hash>   # exit 3: run again
+.venv/bin/python plugins/dapilot/scripts/design_product.py finalize --workdir work/<hash> [--reject lifestyle_2 --reason "..."]
+
 cd frontend && npm run dev        # :8081, 8080 is dapi's
 .venv/bin/uvicorn server.app:app --port 3100 --reload   # the frontend's job API; holds the dapi key
 ```
@@ -393,6 +431,7 @@ DAPI_API_KEY      scoped API key, never committed, never sent to the browser
 DAPI_API_URL      base URL of the public API service (public-api/v1), local or hosted
 DAPILOT_STORE_DIR store-private files (Etsy token, fee schedule, taxonomy cache); research stage
 ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app, research stage only
+FAL_KEY (or FAL_API_KEY)             fal.ai, design stage paid assets only
 ```
 
 `DAPI_API_URL` is the origin only; the contract's paths already carry `/v1`.

@@ -2,7 +2,7 @@ import type { JobStage, JobStatus } from '@/api/jobs';
 
 /** The nine intake stages, in order. Mirrors api/jobs.ts and stages.json. */
 export const STAGES: JobStage[] = [
-  'intake', 'analyze', 'slice', 'preview', 'research', 'price', 'render', 'copy', 'publish',
+  'intake', 'analyze', 'slice', 'preview', 'research', 'price', 'design', 'copy', 'publish',
 ];
 
 /**
