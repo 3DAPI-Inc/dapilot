@@ -16,7 +16,9 @@ A brief with `stage: price`. The work dir has `quote.json`,
   choose from, `skipped` with its reasons, and `p75_sellers` (who holds the
   weight at or above the p75)
 - `comparables.json`: the listings, their prices, sales, favourites, shop
-  and market weight, heaviest first
+  and market weight (estimated units sold per day, from the shop's recent
+  reviews; `sales_est` shows the reviews and window behind it), heaviest
+  first
 - `viability.json`: `market.basis`, `market.thin`, the band, the verdict
 - `renders/draft_00.png` to `draft_07.png`: what ours looks like
 - the comparables' `images` URLs, only if a Read of them is needed to settle

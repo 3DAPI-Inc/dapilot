@@ -64,7 +64,9 @@ script fails with a one-line JSON error when one is missing. Pass it on.
    genuine comparables, keep the rules, keep them in, and say so in the log.
 5. Append the log paragraph: noun, query, taxonomy id, windows and stop reason,
    fetched, kept, scored, selected, whether the rules were tightened and why,
-   weighted median and p75, basis, `market.thin` as printed, unit cost,
+   weighted median and p75, basis, `market.thin` and `market.weight_basis`
+   as printed, the heaviest shop and its `top_shop_share` when that is 0.5
+   or more, unit cost,
    break-even, margin at the median, verdict, quota left. Remove `.lock`.
    Print the result line with the verdict in `summary`.
 
@@ -87,13 +89,17 @@ script fails with a one-line JSON error when one is missing. Pass it on.
   `rejected_count`, `rejected_sample`.
 - `viability.json`, schema as printed by `market_stats.py`: `market` with
   `basis`, `weighted` and `unweighted` bands, `spread_ratio` and `thin`,
-  per-gram, unit cost, fees, margins, break-even, and a `verdict` of
-  `viable`, `thin` or `not_viable`. Paths in it are relative to the work dir.
+  `weight_basis` (`units_per_day`, or `legacy` for a file scored without
+  the review pass) and `weight_concentration` (the heaviest listing's and
+  shop's share of the weight), per-gram, unit cost, fees, margins,
+  break-even, and a `verdict` of `viable`, `thin` or `not_viable`. Paths in
+  it are relative to the work dir.
 
 ## Gate
 Auto. Etsy reads only; no dapi call. The one spend is Etsy quota: one search call
-per price window, one batch call per 100 survivors, one inventory call per
-survivor with variants. At most two searches per item.
+per price window, one batch call per 100 survivors, one review call per
+distinct shop among the survivors, one inventory call per survivor with
+variants. At most two searches per item.
 
 ## Failure
 - Missing Etsy credentials or `DAPILOT_STORE_DIR`: a script exits 1 with a one-line

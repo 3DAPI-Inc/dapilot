@@ -48,9 +48,10 @@ skipping starts every window above is skipped too, because a dry stretch of
 the ladder does not become wet again by pricing higher. --limit (1000) caps
 the survivors kept across windows. "stop_reason" is "ladder_done" when every
 window was visited or skipped and "limit" when the cap ended the read.
-Images, shop stats and the inventory pass are fetched for survivors only,
-after the ladder, so a deep read costs at most one search call and one batch
-call per window (18 with the default ladder) plus one inventory call per
+Images, shop stats, the review pass and the inventory pass are fetched for
+survivors only, after the ladder, so a deep read costs at most one search
+call and one batch call per window (18 with the default ladder), one review
+call per distinct shop among the survivors, plus one inventory call per
 survivor with variants. A narrow aisle costs about 20 calls, a broad query
 with 300 survivors can cost over 300; the quota is 10,000 calls a day and
 the stdout summary reports quota.calls for each read.
@@ -85,12 +86,13 @@ then rewrites the compact file from it. Both formulas are plain functions
         0.15  size: 0.15 x (1 - min(1, |log2(size_ratio)|)) when size_ratio is
               known, else 0.075 (half credit for unknown)
     market_weight, >= 0, how much the price says about what buyers pay:
-        log1p(sold) + 0.5 x log1p(favorers) + (1 if sold > 0 else 0)
-        sold is shop.sold when present, else top-level sold; favorers is
-        num_favorers when present, else favorers; null, missing or boolean
-        values count as 0. No sales, no favourites: 0. Thousands of sales
-        and hundreds of favourites: about 8 to 10.
-    Both scores are rounded to 3 decimals.
+        the listing's estimated units sold per day, sales_est.units_per_day,
+        computed by the search from the shop's newest reviews (see
+        sales_estimates); a record without an estimate (a search run with
+        --no-reviews, a raw dump, a file from before 2026-09-14) falls back to
+        the legacy formula log1p(sold) + 0.5 x log1p(favorers) + (1 if sold > 0)
+        and market_stats.py reports weight_basis "legacy" or "mixed".
+    relevance is rounded to 3 decimals, market_weight to 6.
 
 Words in rules are matched as whole words, case-insensitive, plural tolerant
 (duck/ducks, box/boxes, bunny/bunnies), multi-word phrases allowed ("set of",
@@ -130,6 +132,8 @@ LIMIT_LADDER = 1000  # survivors kept across windows with --noun
 LIMIT_OFFSET = 100  # listings fetched by offset without --noun; Etsy refuses deeper offsets
 
 RELEVANCE_WEIGHTS = {"noun": 0.30, "required": 0.20, "excluded": 0.20, "material": 0.15, "size": 0.15}
+REVIEW_WINDOW_DAYS = 365  # sales estimate window; see sales_estimates
+REVIEW_PAGE = 100  # newest reviews Etsy shows of another seller's shop; deeper offsets are refused
 
 def default_token_file():
     d = os.environ.get("DAPILOT_STORE_DIR")
@@ -443,6 +447,89 @@ def enrich(listings, currency, key, quota):
     return merged
 
 
+def sales_estimates(listings, key, quota, window_days=REVIEW_WINDOW_DAYS, now=None):
+    """Estimated units sold per day for every listing, from its shop's newest reviews.
+
+    Etsy keeps per-listing sales private, but every review carries a listing id
+    and a timestamp, and a shop's review feed is public. One call per distinct
+    shop: GET /shops/{id}/reviews, limit 100, offset 0, newest first. Etsy
+    refuses deeper offsets on another seller's shop ("Offset exceeds the
+    maximum allowed for anonymous requests", HTTP 400, with or without a
+    bearer, measured 2026-09-14), so the observable window is the newest 100
+    reviews or window_days, whichever is shorter. Per shop:
+
+      review_rate   = review_count / transaction_sold_count, lifetime
+      window        = window_days when the page holds every review the shop
+                      has or reaches back past window_days, else the span of
+                      the page (a full page that sits inside the window)
+      shop_rate     = reviews in the window / window / review_rate   units per day
+      share         = (listing reviews in window + 1) / (shop reviews in window + active listings)
+      units_per_day = shop_rate x share
+
+    share is add-one smoothed: the prior is an even split of the shop's sales
+    over its active listings, so a listing with no review in the window keeps
+    half the share of one with a single review instead of dropping out. A shop
+    with no review in the window has shop_rate 0, and so does every listing of
+    it. A shop with sales but no reviews at all falls back to lifetime sales
+    over shop age (basis "lifetime"). A listing without a shop id, or whose
+    review feed cannot be read, gets no estimate and market_weight applies the
+    legacy formula. Sets l["sales_est"] in place and returns the shop count.
+    """
+    now = now or time.time()
+    by_shop = {}
+    for l in listings:
+        sid = (l.get("shop") or {}).get("shop_id")
+        if sid:
+            by_shop.setdefault(sid, []).append(l)
+    cutoff = now - window_days * 86400
+    for sid, ls in by_shop.items():
+        shop = ls[0].get("shop") or {}
+        sold = number(shop.get("transaction_sold_count"))
+        reviews_total = number(shop.get("review_count"))
+        active = number(shop.get("listing_active_count"))
+        created = number(shop.get("create_date"))
+        try:
+            page = get(f"/shops/{sid}/reviews", {"limit": REVIEW_PAGE, "offset": 0}, key, quota, raise_http=True)
+        except urllib.error.HTTPError as e:
+            for l in ls:
+                l["sales_est"] = {"units_per_day": None, "basis": None, "note": f"review feed HTTP {e.code}"}
+            continue
+        res = [r for r in (page.get("results") or []) if number(r.get("created_timestamp")) > 0]
+        oldest = min(number(r["created_timestamp"]) for r in res) if res else None
+        if len(res) >= REVIEW_PAGE and oldest is not None and oldest > cutoff:
+            window = max(1.0, (now - oldest) / 86400)  # a full page inside the window: only this span was seen
+            in_window = res
+        else:
+            window = float(window_days)
+            in_window = [r for r in res if number(r["created_timestamp"]) >= cutoff]
+        n_win = len(in_window)
+        per_listing = {}
+        for r in in_window:
+            per_listing[r.get("listing_id")] = per_listing.get(r.get("listing_id"), 0) + 1
+        review_rate = reviews_total / sold if sold > 0 and reviews_total > 0 else None
+        if review_rate:
+            shop_rate, basis = n_win / window / review_rate, "reviews"
+        elif sold > 0 and created > 0:
+            shop_rate, basis = sold / max(1.0, (now - created) / 86400), "lifetime"
+        else:
+            shop_rate, basis = 0.0, "none"
+        denom = n_win + max(active, float(len(ls)))
+        for l in ls:
+            k = per_listing.get(l["listing_id"], 0)
+            share = (k + 1) / denom
+            l["sales_est"] = {
+                "units_per_day": round(shop_rate * share, 6),
+                "basis": basis,
+                "listing_reviews": k,
+                "shop_reviews": n_win,
+                "window_days": round(window, 1),
+                "review_rate": round(review_rate, 4) if review_rate else None,
+                "shop_units_per_day": round(shop_rate, 4),
+                "share": round(share, 5),
+            }
+    return len(by_shop)
+
+
 # ---------------------------------------------------------------- units
 
 def price_of(l):
@@ -589,6 +676,8 @@ def project(l, target_mm, desc_chars):
     price, cur = price_of(l)
     shop = l.get("shop") or {}
     imgs = l.get("images") or []
+    created = number(l.get("original_creation_timestamp"))
+    age = round(max(1.0, (time.time() - created) / 86400), 1) if created else None
     return {
         "listing_id": l["listing_id"],
         "url": l.get("url"),
@@ -616,13 +705,22 @@ def project(l, target_mm, desc_chars):
         "weight_g": weight_g(l),
         "shop": {
             "name": shop.get("shop_name"),
+            "shop_id": shop.get("shop_id"),
             "review_count": shop.get("review_count"),
             "review_average": shop.get("review_average"),
             "sold": shop.get("transaction_sold_count"),
             "country": shop.get("shop_location_country_iso"),
+            "created": shop.get("create_date"),
+            "active_listings": shop.get("listing_active_count"),
         },
         "images": [i.get("url_570xN") or i.get("url_fullxfull") for i in imgs[:3]],
         "created": l.get("original_creation_timestamp"),
+        # Per-day rates from listing age, recorded for a later fit against the
+        # sales estimate; not used by any score today.
+        "age_days": age,
+        "views_per_day": round(number(l.get("views")) / age, 4) if age else None,
+        "favorers_per_day": round(number(l.get("num_favorers")) / age, 4) if age else None,
+        "sales_est": l.get("sales_est"),
         "page": l.get("page"),
     }
 
@@ -637,6 +735,7 @@ def compact_record(k):
         "materials": (k.get("materials") or [])[:4], "tags": (k.get("tags") or [])[:6],
         "sold": (k.get("shop") or {}).get("sold"), "reviews": (k.get("shop") or {}).get("review_count"),
         "favorers": k.get("num_favorers"), "quantity": k.get("quantity"),
+        "sales_est": k.get("sales_est"),
         "description": (k.get("description") or "")[:160],
         "image": (k.get("images") or [None])[0],
         "page": k.get("page"),
@@ -693,6 +792,8 @@ def run_filter(survivors, dropped, args, query, total, quota, key=None, bearer=N
         "pages": pages or [],
         "stop_reason": stop_reason,
         "inventory_read": bool(bearer),
+        "reviews_read": bool(getattr(args, "reviews_read", False)),
+        "review_window_days": getattr(args, "review_window_days", None) if getattr(args, "reviews_read", False) else None,
         "kept": kept,
         "dropped": dropped,
         "quota": quota,
@@ -742,7 +843,8 @@ def write_outputs(result, out_path, quota):
     print(json.dumps({"ok": True, "kept": len(result["kept"]), "dropped": len(result["dropped"]),
                       "pages": len(pages), "pages_skipped": sum(1 for p in pages if p.get("skipped")),
                       "stop_reason": result.get("stop_reason"),
-                      "inventory_read": result["inventory_read"], "out": out_path, "full": full_path,
+                      "inventory_read": result["inventory_read"], "reviews_read": result.get("reviews_read", False),
+                      "out": out_path, "full": full_path,
                       "quota": quota}))
 
 
@@ -805,15 +907,23 @@ def relevance(rec, rules):
 def market_weight(rec):
     """How much this listing's price says about what buyers pay, >= 0.
 
+    The listing's estimated units sold per day, sales_est.units_per_day, when
+    the search computed one (see sales_estimates): a band weighted by it has a
+    plain meaning, the price at which half the units in the aisle sell. A
+    record without an estimate falls back to the legacy formula
+
         log1p(sold) + 0.5 x log1p(favorers) + (1 if sold > 0 else 0)
 
-    sold is the shop's lifetime sales, favorers the listing's favourites. sold
-    is shop.sold when present, else top-level sold; favorers is num_favorers
-    when present, else favorers; null, missing and boolean values count as 0.
-    A listing with no evidence of sales weighs 0; a shop with thousands of
-    sales and a listing with hundreds of favourites weighs 8 to 10. Accepts a
-    full record (shop.sold, num_favorers) or a compact one (sold, favorers).
+    where sold is the shop's lifetime sales and favorers the listing's
+    favourites (shop.sold or sold; num_favorers or favorers; nulls and
+    booleans count as 0). The two scales differ by orders of magnitude, so
+    market_stats.py reports which basis a band was built on and flags a mix.
+    Accepts a full record, a compact one, or a comparables record.
     """
+    est = rec.get("sales_est") if isinstance(rec.get("sales_est"), dict) else None
+    upd = est.get("units_per_day") if est else None
+    if isinstance(upd, (int, float)) and not isinstance(upd, bool):
+        return round(max(0.0, float(upd)), 6)
     shop = rec.get("shop") if isinstance(rec.get("shop"), dict) else {}
     # "Present" means a non-null value: a full record with shop.sold null and no
     # top-level sold scores the same as a compact record with sold null.
@@ -889,6 +999,9 @@ def main():
     s.add_argument("--stop-pages", type=int, default=2, help="skip the rest of the ladder after this many consecutive dry windows (with --noun)")
     s.add_argument("--taxonomy-id", type=int, help="buyer taxonomy id; parents include children")
     s.add_argument("--raw", help="also write the fetched listings here (survivors with images; without --noun, every listing)")
+    s.add_argument("--no-reviews", action="store_true", help="skip the per-shop review call; market_weight falls back to the legacy formula")
+    s.add_argument("--review-window-days", type=int, default=REVIEW_WINDOW_DAYS,
+                   help=f"sales estimate window (default {REVIEW_WINDOW_DAYS}); Etsy shows at most the newest {REVIEW_PAGE} reviews of a shop")
     common(s)
 
     f = sub.add_parser("filter", help="filter an existing raw dump (list of listings or a search result)")
@@ -950,6 +1063,12 @@ def main():
             args.keywords, args, target, noun, key, quota)
         fetched = len(survivors) + len(rejected)
         survivors = enrich(survivors, args.currency, key, quota)
+        args.reviews_read = False
+        if not args.no_reviews:
+            if args.review_window_days < 1:
+                die("--review-window-days must be at least 1")
+            sales_estimates(survivors, key, quota, args.review_window_days)
+            args.reviews_read = True
         if not noun:
             # Old behaviour: every listing carries images so a --raw dump can be re-filtered.
             rejected = enrich(rejected, args.currency, key, quota)

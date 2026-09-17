@@ -53,11 +53,17 @@ cannot disagree; a private copy of the same formulas is used otherwise:
           excluded material present anywhere forces relevance to 0 and is
           listed in "excluded_by" as "material:<word>"
     0.15 x (1 - min(1, |log2(size_ratio)|)) when size_ratio is known, else 0.075
-  market_weight, >= 0, rounded to 3 decimals
-    log1p(sold) + 0.5 x log1p(favorers) + (1 if sold > 0 else 0)
-    sold is shop.sold when present, else the top-level sold; favorers is
-    num_favorers when present, else favorers; nulls count as 0 and a boolean
-    never counts as a number
+  market_weight, >= 0, rounded to 6 decimals
+    the listing's estimated units sold per day, sales_est.units_per_day, as
+    the search computed it from the shop's newest reviews (etsy_search.py
+    sales_estimates: shop review rate, reviews in the window, add-one share
+    over the shop's active listings). A record without an estimate falls
+    back to the legacy formula log1p(sold) + 0.5 x log1p(favorers) +
+    (1 if sold > 0 else 0), and market.weight_basis says whether the band
+    was built on "units_per_day", "legacy" or a "mixed" set.
+    market.weight_concentration reports the share of the total weight held
+    by the heaviest listing and by the heaviest shop, so a band that is one
+    seller's volume is visible without reading the file by hand.
 
 Weighted band. p25, median and p75 over price with market_weight as weights,
 by cumulative mass and without interpolation: records sorted by price, the
@@ -258,6 +264,10 @@ def _relevance(r: dict, rules: dict) -> tuple[float, list[str]]:
 
 
 def _market_weight(r: dict) -> float:
+    est = r.get("sales_est") if isinstance(r.get("sales_est"), dict) else None
+    upd = est.get("units_per_day") if est else None
+    if _is_num(upd):
+        return round(max(0.0, float(upd)), 6)
     sold = max(0.0, _num(_sold_of(r)))
     fav = max(0.0, _num(_favorers_of(r)))
     return round(math.log1p(sold) + 0.5 * math.log1p(fav) + (1.0 if sold > 0 else 0.0), 3)
@@ -272,6 +282,39 @@ except ImportError:
 def weight_of(r: dict) -> float:
     w = r.get("market_weight")
     return float(w) if _is_num(w) and w >= 0 else float(market_weight(r))
+
+
+def weight_basis_of(rows: list[dict]) -> tuple[str, dict | None]:
+    """Which formula the weights came from, and how concentrated they are.
+
+    "units_per_day" when every row carries a sales estimate, "legacy" when
+    none does, "mixed" otherwise (a mixed band is not comparable across rows,
+    and the skills should say so). Concentration is the share of the total
+    weight held by the heaviest listing and by the heaviest shop; null when
+    the rows carry no weight at all.
+    """
+    def has_est(r):
+        est = r.get("sales_est") if isinstance(r.get("sales_est"), dict) else None
+        return est is not None and _is_num(est.get("units_per_day"))
+    n_est = sum(1 for r in rows if has_est(r))
+    basis = "units_per_day" if n_est == len(rows) else "legacy" if n_est == 0 else "mixed"
+    total = sum(weight_of(r) for r in rows)
+    if total <= 0:
+        return basis, None
+    by_shop: dict = {}
+    for r in rows:
+        shop = r.get("shop") if isinstance(r.get("shop"), dict) else {}
+        name = shop.get("name")
+        by_shop[name] = by_shop.get(name, 0.0) + weight_of(r)
+    top_listing = max(rows, key=weight_of)
+    top_shop = max(by_shop.items(), key=lambda kv: kv[1])
+    return basis, {
+        "top_listing_share": round(weight_of(top_listing) / total, 3),
+        "top_listing_id": top_listing.get("listing_id"),
+        "top_shop_share": round(top_shop[1] / total, 3),
+        "top_shop": top_shop[0],
+        "rows_with_estimate": n_est,
+    }
 
 
 # ---------------------------------------------------------------- quantiles
@@ -348,9 +391,13 @@ def comparable_record(r: dict) -> dict:
         "sold": _sold_of(r), "reviews": shop.get("review_count", r.get("reviews")),
         "favorers": _favorers_of(r),
         "relevance": r["relevance"], "market_weight": r["market_weight"], "page": r.get("page"),
+        # The estimate behind the weight, so a reader can see units per day,
+        # the reviews it came from and the window without the full file.
+        "sales_est": r.get("sales_est"),
         # Who sells it. price_candidates.py counts distinct shops among the p75
         # sellers from this block, so it is copied rather than left in the full file.
-        "shop": {"name": shop.get("name"), "sold": _sold_of(r), "review_count": shop.get("review_count")},
+        "shop": {"name": shop.get("name"), "sold": _sold_of(r), "review_count": shop.get("review_count"),
+                 "active_listings": shop.get("active_listings")},
     }
     if r.get("excluded_by"):
         out["excluded_by"] = r["excluded_by"]
@@ -433,7 +480,11 @@ def histogram(prices: list[float], buckets: int = HIST_BUCKETS) -> list[dict]:
 def title_row(r: dict, scored: bool) -> dict:
     row = {"listing_id": r.get("listing_id"), "title": r.get("title"), "price": r.get("price"),
            "sold": _sold_of(r), "favorers": _favorers_of(r), "materials": (r.get("materials") or [])[:4],
-           "size_ratio": r.get("size_ratio"), "market_weight": round(weight_of(r), 3)}
+           "size_ratio": r.get("size_ratio"), "market_weight": round(weight_of(r), 6)}
+    est = r.get("sales_est") if isinstance(r.get("sales_est"), dict) else None
+    if est:
+        row["units_per_day"] = est.get("units_per_day")
+        row["reviews_in_window"] = est.get("listing_reviews")
     if scored:
         row["relevance"] = r.get("relevance")
         if r.get("excluded_by"):
@@ -607,6 +658,7 @@ def main() -> int:
     # to premium and its median is still solid, so the spread test only
     # applies under 20 listings.
     market["thin"] = bool(unweighted["n"] < 5 or (unweighted["n"] < 20 and market["spread_ratio"] is not None and market["spread_ratio"] > 3))
+    market["weight_basis"], market["weight_concentration"] = weight_basis_of(rows)
     weighed = [c for c in rows if _is_num(c.get("weight_g")) and c["weight_g"] > 0]
     market["per_gram"] = quantiles([c["price"] / c["weight_g"] for c in weighed]) if weighed else None
     market["listings_with_weight"] = len(weighed)

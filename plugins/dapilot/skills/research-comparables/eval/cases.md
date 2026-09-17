@@ -27,6 +27,15 @@ for the duck). `summary.json` lists selected comparables only under
 the heaviest rejects under `top_rejected_by_market_weight`. No rules file
 carries a threshold.
 
+Weights changed 2026-09-14: `market_weight` is now the listing's estimated
+units sold per day from its shop's review feed (`sales_est` on every
+record), and the old log-of-shop-sales formula applies only to records
+without an estimate. Every expected file here predates that and carries
+legacy weights; a rerun with the review pass on gives a lower band on the
+fidget and the duck wherever the volume sits at the cheap end, so compare
+`market.weight_basis` and the shape, not the band numbers, until the
+fixtures are regenerated.
+
 Naming: `expected.<fixture>.deep.<work dir path with / as .>`. Fixtures:
 `octagon-fidget` is `work/56d80708...`, `duck-charm` is `work/2936c775...`,
 `no-noun-match` is the fidget dir with a wrong noun.

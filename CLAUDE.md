@@ -100,6 +100,20 @@ Read before building anything:
   is required: without it the duck read returned 404 listings and a 43 USD
   median for a 12 mm charm. Details and numbers in `docs/market-research.md`
   section 7.
+- **Market weight is estimated units per day (2026-09-14).** Etsy keeps
+  per-listing sales private, but a shop's review feed is public and every
+  review carries a listing id and a date, so `etsy_search.py` now reads the
+  newest 100 reviews of each survivor's shop (one call per shop; deeper
+  offsets are refused for shops we do not own, bearer or not) and writes
+  `sales_est` per listing: the shop's units per day from its review rate,
+  split over its active listings with add-one smoothing. `market_weight`
+  is that number; the weighted median is the price at which half the
+  aisle's units sell. Records without an estimate fall back to the old
+  log formula and `viability.json` says so in `market.weight_basis`, with
+  `weight_concentration` naming the heaviest listing and shop. On the
+  shark the weighted median moved from 7.00 to 4.99 and the p75 from
+  13.99 to 10.00; the eval fixtures carry legacy weights until rerun.
+  Details in `docs/market-research.md` section 7c.
 - **Pricing policy decided 2026-09-09**, in `store/reference/pricing-policy.json`
   (private). Cost basis is dapi's quote as charged, commission included and
   never backed out: whoever produces on the platform pays it. Two candidates

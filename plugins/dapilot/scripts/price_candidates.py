@@ -67,6 +67,10 @@ try:
     from etsy_search import market_weight  # noqa: E402
 except Exception:  # the plugin copy may lack the search script; the formula is small
     def market_weight(rec):
+        est = rec.get("sales_est") if isinstance(rec.get("sales_est"), dict) else None
+        upd = est.get("units_per_day") if est else None
+        if isinstance(upd, (int, float)) and not isinstance(upd, bool):
+            return round(max(0.0, float(upd)), 6)
         sold = rec.get("sold")
         fav = rec.get("favorers")
         sold = sold if isinstance(sold, (int, float)) and not isinstance(sold, bool) and sold > 0 else 0
@@ -141,7 +145,7 @@ def _compact(rec: dict) -> dict:
 
     sold = present(shop["sold"]) if shop.get("sold") is not None else present(rec.get("sold"))
     fav = present(rec["num_favorers"]) if rec.get("num_favorers") is not None else present(rec.get("favorers"))
-    return {"sold": sold, "favorers": fav}
+    return {"sold": sold, "favorers": fav, "sales_est": rec.get("sales_est")}
 
 
 def _weight(rec: dict) -> float:

@@ -1,7 +1,7 @@
 # Market research and pricing
 
 How dapilot decides whether a model can sell and at what price. This is
-the record of what is built as of 2026-09-11 and what was learned running
+the record of what is built as of 2026-09-17 and what was learned running
 it. Read `CLAUDE.md` first; the stage table
 is in `docs/agents.md` and the skill rules in `docs/skills.md`.
 
@@ -23,13 +23,14 @@ Since 2026-09-09 intake runs in this fixed order:
 | preview | `preview-model` | `renders/draft_00..07.png` | about 30 to 70 s of CPU |
 | research | `research-comparables` | `comparables.json`, `viability.json` | one to three Etsy searches, about 0.45 USD of worker |
 | price | `propose-price` | `price.json` or `price.rejected.json` | about 0.20 USD of worker |
-| render | `render-model` | `renders/hero.png`, later the video | minutes of CPU |
-| copy | `write-listing` | `listing.json` | not built |
-| publish | `publish-listing` | `publish.json` | not built, Propose gate |
+| design | `design-product` | `design.json`: stills, lifestyle media, video | about 0.45 USD of worker, up to 2.00 USD of paid assets |
+| copy | `write-listing` | `listing.json` | disabled until rebuilt for Etsy |
+| publish | `publish-listing` | `publish.json` | disabled until rebuilt for Etsy, Propose gate |
 
-Research and pricing come before the expensive renders so an item that
+Research and pricing come before the expensive media so an item that
 cannot sell costs one slice and eight small drafts. `price.json` exists only
-for a sellable item; render, copy and publish require it.
+for a sellable item; design, copy and publish require it. (`design`
+replaced `render` on 2026-09-13.)
 
 ## 3. The research stage today
 
@@ -66,7 +67,29 @@ Store-private inputs: `$DAPILOT_STORE_DIR/etsy_token.json`,
 
 ## 4. The price chain
 
-Every number in this chain is in `pricing.py`, shared by the two scripts.
+How a sale price comes to exist, end to end. The model never computes a
+number: scripts compute at most three candidate prices, the model picks one
+and writes why, and a script checks the pick. Each step reads and writes
+files in `work/<sha256>/`.
+
+| Step | Who | Reads | Writes |
+|---|---|---|---|
+| 1. cost | `quote.py` (quote stage) | the model file | `quote.json`: `unit_price`, `batch`, `metrics` |
+| 2. market band | `market_stats.py` (research stage) | `comparables.json`, `quote.json`, policy, fees | `viability.json`: band, `thin`, verdict, `stock` |
+| 3. candidates | `price_candidates.py` (price stage) | `quote.json`, `viability.json`, `comparables.json`, policy, fees | `price.candidates.json`, or `price.rejected.json` |
+| 4. choice | the model, `propose-price` | the candidates, the comparables, the drafts | `price.json` |
+| 5. check | `price_candidates.py --check` | `price.json`, the candidates | exit code only |
+| 6. confirmation | a person, at publish | `price.json` with its rationale | an `override` block if they change it |
+
+Two store-private files drive every number:
+`$DAPILOT_STORE_DIR/reference/pricing-policy.json` (required; the scripts
+exit 1 without it) and `platform-fees.json` (the store copy when present,
+else the plugin copy under `research-comparables/reference/`).
+
+### 4.1 The formula
+
+All of it is in `pricing.py`, imported by both scripts so they cannot
+disagree.
 
 ```
 manufacturing  = setup + grams x filament rate + hours x time rate + post-processing + extras
@@ -76,26 +99,150 @@ cost           = plate unit (policy cost_basis full_plate), VAT added if the sel
 net(P)         = P / (1 + VAT rate) when VAT sits inside the price, else P
 fees(P)        = listing fee + payment fixed + P x (transaction pct + payment pct + extra pct)
 margin(P)      = net(P) - fees(P) - cost
-break-even     = the P with margin 0, solved in closed form
+margin pct     = margin(P) / net(P)
+break-even     = (cost + listing fee + payment fixed) / (k - pct),  k = 1 / (1 + VAT rate) or 1
 ```
 
-Decided 2026-09-09 and 2026-09-11 for dapi's own shop:
+The first two lines happen inside dapi and arrive as `unit_price`; dapilot
+never sees the terms. Fees and VAT are both functions of the price the
+buyer pays, so the break-even is solved, not looked up.
 
-- The cost basis is dapi's batch price as charged: the unit price at a
-  full plate, from the batch curve on the quote. The shop buys in runs of
-  about 100 and sells from stock, so that is the real unit cost. For an
-  object that fits one per plate it equals the one-off quote. dapi's
-  commission is never backed out: whoever produces on the platform pays
-  it, us included. The one-off quote is reported beside the plate price in
-  every viability file as the road not taken (`cost_basis: one_off`).
-- Two candidates go to the model: the quote plus 50 percent markup, and
-  the market median. Both rounded to a .99 ending.
-- Hard rule: the sale price is never below break-even, for any author of
-  `price.json`. `price_candidates.py --check` refuses it with exit 3. A
-  person may override to another price with an `override` block, never
-  below the floor. The model never writes an override block.
-- Soft rule: candidates under `min_margin_pct` (10 percent) are not
-  proposed by the model.
+With the policy in force for dapi's own shop (Etsy, EU seller, 21 percent
+VAT inside every sale, purchase VAT reclaimable, Offsite Ads at 0):
+
+```
+fees(P)    = 0.53 + 0.105 x P
+break-even = (cost + 0.53) / 0.7214
+```
+
+### 4.2 The policy (decided 2026-09-09 and 2026-09-11)
+
+- **Cost basis** `full_plate`: the unit price at a full plate, the last
+  entry of the batch curve on the quote. The shop buys in runs of about
+  100 (`stock_units`) and sells from stock, so that is the real unit cost.
+  For an object that fits one per plate it equals the one-off quote.
+  dapi's commission is never backed out: whoever produces on the platform
+  pays it, us included. The one-off basis is reported beside it in every
+  file (`cost_bases`, `scenarios`) as the road not taken, and
+  `--cost-basis` overrides the policy for one run. Section 7b has the
+  numbers.
+- **Markup** 50 percent on cost.
+- **Rounding** to a .99 ending. The markup candidate and the floor round
+  up; the market candidates round to the nearest ending.
+- **Hard rule**: the sale price is never below the floor, which is
+  break-even rounded up, for any author of `price.json`. Enforced by
+  `--check`, never by a prompt.
+- **Soft rule**: a candidate under `min_margin_pct` (10 percent of net
+  revenue) is not offered to the model. A person may still choose it with
+  an override, as long as it is at or above the floor.
+
+### 4.3 The candidates
+
+`price_candidates.py` builds at most three:
+
+| Candidate | Value | Rounded |
+|---|---|---|
+| `markup` | cost x 1.5 | up |
+| `median` | `market.median` from `viability.json` | nearest |
+| `p75` | `market.p75` from `viability.json` | nearest |
+
+The band is the weighted one when `market.basis` says so (weights are
+estimated units per day, section 7c), else the unweighted one. Each
+candidate carries its net, fees, margin, margin percent, markup on cost and
+position in the band. Then:
+
+- `skipped`: the input is missing (no market block, no median, no p75), or
+  the p75 rounds to the same price as another candidate, so the band gave
+  no room above it.
+- `rejected`: below the floor (`below_floor`) or under the minimum margin
+  (`below_min_margin`).
+- Exit 0 with one to three candidates in `price.candidates.json`. Exit 2
+  when none is left: `price.rejected.json` is written, the skill returns
+  `needs_human`, and the item stops there. Exit 1 on error, including a
+  `viability.json` with `ok: false`.
+
+The file also carries `p75_sellers`: among the selected comparables priced
+at or above the p75, each shop's share of the market weight,
+`distinct_named_shops`, `top_share` and `unnamed_share`.
+
+### 4.4 The model's one decision
+
+`propose-price` answers one question: which allowed price will the buyer
+who sees ours next to those listings accept. The order of the rules, from
+`SKILL.md` and `reference/positioning.md`:
+
+1. `market.thin` is true (fewer than 5 comparables, or fewer than 20 with
+   max over min above 3; the script sets it, the model never works it
+   out): `markup` when it is a candidate, else `median`, else the sole
+   candidate, with the thinness stated. A thin band never picks `p75` over
+   an allowed `median`.
+2. `median` and `p75` are both candidates: `p75` only when all three hold,
+   else `median`.
+   (a) the band is weighted, so the p75 is what buyers pay, not what
+       sellers ask;
+   (b) the drafts show ours at least as good as the median listing: same
+       object, no fewer parts, no worse finish;
+   (c) the p75 is not one shop's price: `distinct_named_shops` is 2 or
+       more, `top_share` under 0.6, `unnamed_share` under 0.2. A null
+       `p75_sellers` fails.
+3. One candidate: propose it. When it is `p75`, the position is `premium`
+   and the rationale names which of (a), (b), (c) held and which failed.
+
+Margin is never a reason: every candidate already clears the floor and the
+minimum margin. The price is copied from the candidate, never typed.
+`price.json` holds the price, the candidate label, the position (`budget`,
+`mid`, `premium`), a three-sentence rationale, the runner-up with one
+sentence of why not, the floor and the verdict.
+
+### 4.5 The check and the gate
+
+`price_candidates.py --check` recomputes the floor from the quote and the
+policy and compares:
+
+| Exit | Meaning |
+|---|---|
+| 0 | the price is a candidate, or carries a person's `override: {by, reason}`, and is at or above the floor |
+| 3 | below the floor; refused for any author, override or not |
+| 4 | not a candidate and no override block, or the currency differs from the candidates' |
+
+On any failure the skill deletes `price.json` and returns `ok: false` with
+the errors; it does not adjust the price to pass. The model never writes an
+override block. The gate on the stage is auto because nothing here touches
+dapi or Etsy: the price is a proposal, confirmed by a person at publish
+together with the copy and the media.
+
+### 4.6 Worked example: the cat clicker
+
+Eight per plate, aisle 1628, 170 comparables, weighted band, not thin.
+
+```
+cost        1.83                               full-plate unit (one-off: 4.97)
+break-even  (1.83 + 0.53) / 0.7214 = 3.27      floor 3.99
+markup      1.83 x 1.5 = 2.75 -> 2.99          rejected, below the floor
+median      8.00 -> 7.99                       net 6.60, fees 1.37, margin 3.40, 52 percent
+p75         11.99                              net 9.91, fees 1.79, margin 6.29, 63 percent
+```
+
+Both market candidates stand, so the choice between 7.99 and 11.99 rests
+on (a), (b) and (c), not on the 2.89 USD of extra margin.
+
+### 4.7 What the chain does not do yet
+
+- **The verdict gates nothing.** `viable`, `thin` and `not_viable` are
+  reported, but the price stage runs on any of them; only
+  `price.rejected.json` stops an item. A `not_viable` item with a live
+  `p75` candidate goes on to design.
+- **The `verdict_rule` string in `viability.json` is out of date.** It says
+  "one-off break-even"; the code compares the median with the break-even
+  and markup price of the policy basis, `full_plate` today.
+- **No item has a `price.json` yet.** The two work dirs that reached the
+  stage (duck, fidget) hold `price.rejected.json` files written before
+  `cost_bases` and `skipped` existed; rerun them before quoting them.
+- **Shipping is unknown and Offsite Ads are 0**, which flatters the floor,
+  while VAT inside every sale is the worst case and inflates it. Under the
+  current numbers the 50 percent markup rarely survives: on the fidget it
+  clears break-even by 0.25 USD and is rejected at 3 percent margin. See
+  section 8.
 
 Platform fees, verified 2026-09-09:
 
@@ -182,8 +329,11 @@ windows count as neither. `pages` in the output records every window.
 **Two scores per listing, in `etsy_search.py` and imported by
 `market_stats.py`** so the formulas cannot drift: relevance from the noun,
 the model's word lists, the material class and the size ratio; market
-weight from sales and favourites. Word matching is whole-word, plural
-tolerant, hyphen tolerant and accepts digits glued on the left.
+weight as estimated units sold per day from the shop's review feed
+(section 7c; until 2026-09-14 it was a log of shop sales and favourites,
+which records without an estimate still fall back to). Word matching is
+whole-word, plural tolerant, hyphen tolerant and accepts digits glued on
+the left.
 
 **Rules, not verdicts.** The model reads `research/summary.json` (material
 classes, a price histogram, the heaviest titles, a deterministic sample)
@@ -288,6 +438,79 @@ stay where they were. The batch curve, not the market, is the selection
 rule for small items: an object that packs is a candidate, an object that
 does not is not, and `viability.json` says which with `max_per_plate`,
 `plate_discount_pct` and the `stock` block.
+
+## 7c. Market weight from reviews (decided 2026-09-14)
+
+Until 2026-09-14 the weight behind the band was
+`log1p(shop sales) + 0.5 x log1p(favourites) + 1 if sold`, an invented
+heuristic with two unfitted constants that mostly measured how old and
+big the shop was, because Etsy only exposes a shop's lifetime sales
+counter. It is replaced by an estimate of the listing's own sales rate,
+from data one public read gives:
+
+- Etsy keeps per-listing sales private, and `getReviewsByListing` returns
+  next to nothing for other sellers' listings. But `GET /shops/{id}/reviews`
+  is public, newest first, and every review carries a listing id and a
+  timestamp. Every review is a sale.
+- The feed is capped: offset above 100 returns HTTP 400 "Offset exceeds the
+  maximum allowed for anonymous requests", with or without an OAuth bearer
+  (measured 2026-09-14 on five shops). So one call per shop reads the
+  newest 100 reviews, and the window is twelve months or the span of that
+  page, whichever is shorter. For a shop with 2,900 reviews that is about
+  three months; for one with 186 it is the full year.
+
+Per shop, in `etsy_search.py sales_estimates`:
+
+```
+review_rate    = review_count / transaction_sold_count            lifetime
+window         = 365 days, or the span of the page when the page is full and inside the year
+shop_rate      = reviews in the window / window / review_rate    units per day
+share          = (listing reviews in window + 1) / (shop reviews in window + active listings)
+units_per_day  = shop_rate x share
+```
+
+The share is add-one smoothed: the prior is an even split of the shop's
+recent sales over its active listings, so a listing with no review in the
+window keeps half the share of one with a single review instead of
+dropping out (the "fallback" decided with the twelve-month window). A shop
+with sales but no reviews at all uses lifetime sales over shop age
+(`basis: lifetime`); a shop with no sales weighs 0 and stays out of the
+band as before. Every record carries the estimate under `sales_est`, plus
+`age_days`, `views_per_day` and `favorers_per_day` for a later fit.
+
+`market_weight` is `units_per_day`, so the weighted median is the price at
+which half the aisle's units sell. `viability.json` reports
+`market.weight_basis` (`units_per_day`, `legacy`, or `mixed` when a file
+from before the change is rescored) and `market.weight_concentration`
+(the heaviest listing's and the heaviest shop's share of the weight).
+Nothing is capped; a band that is one seller's volume is reported, and
+the p75 seller-concentration check in `price_candidates.py` is unchanged.
+
+Cost: one review call per distinct shop among the survivors. The shark
+read went from 11 to 48 calls with the inventory pass on.
+
+What the shark showed, same 23 comparables, same rules:
+
+| | legacy weight | units per day |
+|---|---|---|
+| p25 / median / p75 | 4.50 / 7.00 / 13.99 | 3.00 / 4.99 / 10.00 |
+| unweighted median | 7.99 | 7.99 |
+| heaviest listing's share | 7% | 20% |
+| verdict | not_viable | not_viable |
+| candidates | p75 13.99 at 36% | p75 9.99 at 15% |
+
+The volume in the aisle sits at the cheap end: the shops that sell most
+sharks sell them for 2 to 5 USD, and the 14 USD listings hardly move.
+The old weight hid that because a shop with thousands of lifetime sales
+weighed the same whether or not its shark listing sold. Two caveats the
+numbers make visible: the set-or-bundle residue matters more now (a 2 USD
+sea-animals set with three recent reviews is the heaviest listing), and a
+zero-review listing from a young shop can rank high on the lifetime basis.
+Both are reported in `sales_est`, not corrected. The estimate is noisy
+where reviews are sparse: most shark listings had 0 or 1 review in their
+window, so the smoothing prior carries much of the band. That is the
+market, not the formula, and the cure is a longer observation, which the
+API does not offer.
 
 ## 8. Open decisions
 

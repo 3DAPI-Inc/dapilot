@@ -52,8 +52,12 @@ decides, except that test 4 is always asked before `p75` is written.
    Any of them failing, or `p75_sellers` being null, means the median. A
    premium is not a margin argument: the p75 candidate always earns more,
    which is exactly why it needs (a), (b) and (c) and nothing else counts.
-   Market weight rewards incumbents, so a new listing at p75 is a proposal a
-   person confirms at publish, and the rationale should read like one.
+   Market weight is estimated units sold per day, so the band says where
+   the aisle's volume is today, and it still rewards incumbents: a new
+   listing at p75 is a proposal a person confirms at publish, and the
+   rationale should read like one. `market.weight_concentration` in
+   `viability.json` says whether one listing or one shop is most of that
+   volume; when `top_shop_share` is 0.5 or more, name the shop.
 
 5. **Is the market thin?** Read `market.thin` in `viability.json`; the
    script sets it when fewer than five comparables carry the band or the

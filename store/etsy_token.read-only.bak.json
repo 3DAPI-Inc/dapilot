@@ -1,0 +1,11 @@
+{
+ "access_token": "1107228885.EJFVUW5FFT25Vw844u9hFAvxrYvHa6Xmi-7gYrY0mTe9YBJOn0yj9JTpGjwwUtpUsD7-moVfJHQ_MXkzr2MhzTbO5",
+ "token_type": "Bearer",
+ "expires_in": 3600,
+ "refresh_token": "1107228885.yPv0e_V3FjeaN18WdUB1N4RUi_uzgiml_uxsb5dWWDyBuu4JoRD272KHwF4F2_pWIr8WwT4s5bStoAhVVEfxzzaHr",
+ "user_id": null,
+ "api_key": null,
+ "scope": "listings_r shops_r",
+ "obtained_at": 1789392612,
+ "expires_at": 1789396212
+}

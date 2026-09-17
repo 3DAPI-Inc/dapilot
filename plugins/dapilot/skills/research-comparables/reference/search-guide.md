@@ -18,8 +18,10 @@ the result, each with its hit rate: the share of listings that carry the
 noun in the title and survive the physical and size filters (digital files
 and supplies out; stated size more than 2x or less than 0.5x our longest
 edge out). `stop_reason` says why the ladder ended. Survivors are then
-enriched with shop stats and, when an OAuth token exists, their inventory,
-so `price` is the variant closest to our size where one exists.
+enriched with shop stats, with the shop's newest reviews (one call per
+shop, the source of the sales estimate under `sales_est`), and, when an
+OAuth token exists, their inventory, so `price` is the variant closest to
+our size where one exists.
 
 `market_stats.py --summary` condenses the survivors into one file you can
 read in one pass. `etsy_search.py score` and `market_stats.py --rules` turn
@@ -98,6 +100,11 @@ Read it top to bottom; every block answers one question.
 - `top_by_market_weight`: the thirty titles whose prices say the most about
   what buyers pay, heaviest first. Read every title. These are the listings
   that will carry the band, so a wrong product here is the one that matters.
+  `market_weight` is the listing's estimated units sold per day, from its
+  shop's recent reviews split over the shop's listings; `reviews_in_window`
+  says how many reviews the listing itself had. A set or bundle at the top
+  of this list matters more than one further down, because the band is
+  weighted by units and a set that sells is a lot of units.
 - `sample_every_kth`: twenty titles spread across the survivors in id order,
   to see the tail the heavy sellers hide.
 
