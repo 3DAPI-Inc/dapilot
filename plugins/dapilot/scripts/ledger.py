@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_result import validate  # noqa: E402
+from source_thumbnails import extract as extract_thumbnails  # noqa: E402
 
 SUPPORTED = {".stl", ".3mf", ".obj", ".step", ".stp"}
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -188,6 +189,14 @@ def existing_items(a, stages: dict) -> list[str]:
     return sorted(set(hashes))
 
 
+def thumbnails(wd: Path, state: dict) -> None:
+    """A 3MF's own previews, copied to thumbnails/ at registration: free pictures for the research worker."""
+    try:
+        extract_thumbnails(wd)
+    except Exception as e:  # a bad zip is the quote stage's problem to report, not the ledger's
+        state.setdefault("notes", []).append(f"{now()} {wd.name[:8]}: thumbnails not extracted: {e}")
+
+
 def cmd_init(a) -> int:
     cfg = load_config()
     stages = load_stages(a.stages)
@@ -213,6 +222,7 @@ def cmd_init(a) -> int:
         if h not in state["items"]:
             state["items"][h] = {"file": meta.get("file", h), "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
+        thumbnails(wd, state)
     for f in (sorted(folder.iterdir()) if folder else []):
         if f.suffix.lower() not in SUPPORTED or not f.is_file():
             continue
@@ -228,6 +238,7 @@ def cmd_init(a) -> int:
         if h not in state["items"]:
             state["items"][h] = {"file": f.name, "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
+        thumbnails(wd, state)
     save_state(state)
     return out({"ok": True, "run": a.run, "state": str(state_path), "items": len(state["items"]), "added": added})
 
@@ -286,6 +297,8 @@ def ready_briefs(state: dict, stages: dict) -> list[dict]:
                 "workdir": item["workdir"], "file": item["file"], "stage": st["stage"], "skill": st["skill"],
                 "requires": st["requires"], "produces": st["produces"], "gate": st["gate"],
                 **({"agent": st["agent"]} if st.get("agent") else {}),
+                # A stage with no judgement in it names a script; run_intake.py runs it instead of a worker.
+                **({"script": st["script"]} if st.get("script") else {}),
                 "attempt": rec["attempt"] + 1, "previous": rec.get("previous"),
             })
             break  # one stage per item per pass; stages of one item are sequential

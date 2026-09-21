@@ -37,10 +37,22 @@ replaced `render` on 2026-09-13.)
 Five steps, alternating judgement and script. Rewritten 2026-09-11 for the
 deep read; section 7 has the mechanics.
 
-1. **Name the product** (model). From the filename, the analysis and two
-   drafts: the noun sellers put in titles, a two or three word buyer query,
-   and the taxonomy id of the aisle. The id is required whenever a node
-   contains the product.
+1. **Name the product** (model). Decided 2026-09-21: the pictures decide
+   and the filename is a witness. The worker reads the 3MF's own previews
+   when the project carried them (`thumbnails/plate_1.png`, `top_1.png`,
+   copied out by `source_thumbnails.py` at `ledger init`; in colour, every
+   part as laid on the bed), two drafts, the analysis, and last the
+   filename, and writes `identity` into `rules.json`: the object in a few
+   words, `confidence` of high, medium or low, the `witnesses` that
+   supported the reading, one sentence of reason. `market_stats.py`
+   checks the shape and copies the block into `comparables.json` and
+   `viability.json`; the price skill repeats a low reading before the
+   number and the console shows it in red above the band. The reason: on
+   `test2.stl` the worker read "a curved upright with a top lip and a foot"
+   as a phone stand, said in its log it was guessing, and nothing
+   downstream heard it. Then the noun sellers put in titles, a two or
+   three word buyer query, and the taxonomy id of the aisle. The id is
+   required whenever a node contains the product.
 2. **Search** (script, `etsy_search.py search --noun`). One relevance page
    per price window of the aisle, filtered as it lands: physical, not a file
    or supply, noun in the title, stated size within half to double ours.
@@ -61,7 +73,7 @@ deep read; section 7 has the mechanics.
    one tightening of the words.
 5. **Log and result line.**
 
-Scripts: `etsy_search.py`, `etsy_auth.py`, `market_stats.py`, `pricing.py`.
+Scripts: `source_thumbnails.py`, `etsy_search.py`, `etsy_auth.py`, `market_stats.py`, `pricing.py`.
 Store-private inputs: `$DAPILOT_STORE_DIR/etsy_token.json`,
 `reference/pricing-policy.json`, optional `reference/platform-fees.json`.
 
@@ -556,6 +568,103 @@ window, so the smoothing prior carries much of the band. That is the
 market, not the formula, and the cure is a longer observation, which the
 API does not offer.
 
+## 7d. The coaster run (2026-09-21): clones, sets and the launch price
+
+`kumikoaster_kakuasa_v.1.2.3mf`, work dir `a5371524`. Research named it a
+kumiko lattice coaster (identity medium: the plate thumbnails showed the
+lattice, the drafts were washed out, a second plate held unexplained star
+parts). Query "kumiko coaster", aisle 1060. Four comparables survived, and
+they were the problem:
+
+- All four are listings by one shop, Multiverse3DForge, of one product, a
+  set of six coasters with a holder, at 31.00. `market.thin` true,
+  `weight_concentration.top_shop_share` 1.0, `p75_sellers` one named shop.
+- None of the four carries a single review. The shop sells about 1.27
+  units a day over some 200 listings, so each coaster listing's estimate is
+  0.006 units a day, which is the add-one smoothing and not evidence of a
+  sale. The "market" has no observed demand.
+- The verdict was `viable` all the same, because the verdict asks one
+  question: is the median above break-even. Markup 3.99 fell under the
+  4.99 floor, p75 collided with the median, and the price worker was left
+  one allowed candidate, 30.99, which it proposed at a 75.5% margin while
+  writing in its log that this was one shop's six-coaster set price and a
+  person should override lower for a single. The doubt was in prose,
+  where nothing downstream reads it.
+
+Three things follow, in the order they matter.
+
+**Clones and concentration.** Two deterministic rules, no judgement:
+
+1. Collapse listings from the same shop at the same price with
+   near-identical titles into one comparable before the band, weights
+   summed (a shop's units are already split over its listings, so the sum
+   restores the shop's rate). The coaster band then has n 1.
+2. Concentration and demand become verdict inputs. Today test (c) guards
+   p75 only; the median has no guard. A band where one shop holds 0.6 or
+   more of the weight, or whose selected set carries less than a minimum
+   total demand (proposed: 0.1 units a day), is `unreliable`, and
+   `propose-price` treats it as it treats `thin`: markup when allowed,
+   else a human gate. Never the median of one seller.
+
+**The unit of sale.** The pipeline compares per listing; this market sells
+per set. Research should record the offer as data: `units` and `extras`
+parsed from titles and variants ("set of 6", "6 pcs", "pair", "with
+holder"), and two bands, per listing and per unit. The price stage then
+decides the offer with numbers: our per-unit cost from the batch curve
+times the market's modal set. For the coaster, six at 2.49 is 14.94 in
+cost, a set floor near 21.99, 31.00 in the (unproven) market: a 27%
+margin, not 76%. The recommended shape of the offer is Etsy quantity
+variations on one listing (1, 2, 6), each priced from the same curve, so
+a single is a real option at its own price and the set carries the plate
+discount. That needs an `offer` block in `price.json` and the design and
+copy stages to know they are showing a set. It also leans on the batch
+curve, which this quote capped at 2 per plate for a coaster; the curve
+question from the fresh-quote finding is on this path too.
+
+**Pricing under the band for the ranking.** Etsy's stated ranking inputs
+are title and tag relevance, a listing quality score built from clicks,
+favourites and conversion, a temporary boost for new listings, reviews
+and shop record, and free shipping in US results. Price enters through
+conversion only, so a lower price helps exactly as much as it converts,
+and a price far below the band reads as cheap. Position taken: a bounded
+launch policy, not a permanent discount. A fourth candidate, `launch`,
+10 to 15% under the median, never under p25 and never under the floor,
+valid until the listing has N sales or reviews (N to be set in the
+policy), after which the price moves to the median. Two Etsy mechanics do
+more for the same goal: a Sale on a median list price shows a
+strike-through and converts better than a plain lower number, and free
+shipping outranks a 10% cut in US search. None of it is measurable from
+outside; the evidence will be the shop's own conversion after launch,
+which needs the re-pricing step the pipeline lacks (every item is priced
+once, at intake). And a market with no observed sales has nobody to
+undercut: a lower price does not create buyers.
+
+**Outliers.** Same day, same reasoning from the other side: one listing of
+the same design in a gold-compound filament at 100 USD is not the market
+cap for a 10 USD print, and with a small n it drags the median. So
+`market_stats.py` fences prices with Tukey's rule on the log of price
+(with r = max(p75 / p25, 1.5) over the unweighted quartiles, outside
+p25 / r^1.5 .. p75 x r^1.5 is out; needs 5 or more priced comparables),
+keeps the fenced listings in `comparables.json` marked `outlier`, lists
+them under `market.outliers` with title, shop and materials for the
+worker to read, and writes `market.iqr` and `market.iqr_ratio`. On the
+cat a 49 USD resin keycap bundle went out of a 2.50 to 35 USD band; on
+the shark a 1.27 USD mini went out at the low end.
+
+Status (2026-09-21): built. `market_stats.py` collapses clones
+(`n_collapsed`, `collapsed` ids on the surviving record, weights summed),
+fences outliers, sums demand (`market.demand`), and returns the verdict
+`unreliable` with `verdict_reason` when one shop holds 0.6 or more of the
+weight, demand is under 0.1 units a day, or fewer than 2 comparables
+remain. `price_candidates.py` then lists median and p75 under `rejected`
+as `unreliable_band`, so only the markup candidate can stand and no prompt
+can argue the band back in; `propose-price` proposes it as
+`cost_anchored` and repeats the reason. Rerun on the coaster: 4 listings
+fold to 1, demand 0.006 a day, verdict unreliable, markup 3.99 under the
+4.99 floor, `price.rejected.json`; the item stops at the gate with the
+reason instead of proposing 30.99. The offer block and the launch
+candidate stay open: they change the pricing policy and want a decision.
+
 ## 8. Open decisions
 
 - The VAT share of sales in the pricing policy.
@@ -566,3 +675,8 @@ API does not offer.
 - Shipping: dapi's rates by zone into the fee file, which needs an
   ORDER-scoped key and account approval.
 - The six old fixture work dirs that a blanket resume would spend money on.
+- The offer block (set sizes as Etsy quantity variations) and the `launch`
+  candidate from section 7d; both change the pricing policy.
+- Fresh quotes return no batch curve (`max_per_plate` 1, or 2 for a
+  coaster); the full-plate cost basis, the stock block and any set price
+  depend on it.

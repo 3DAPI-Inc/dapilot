@@ -129,6 +129,7 @@ def main() -> int:
     comps = read(wd / "comparables.json") or {}
     viab = read(wd / "viability.json") or {}
     analysis = read(wd / "analysis.json") or {}
+    display = read(wd / "display.json") or {}
     metrics = quote.get("metrics") or {}
     sources = sorted(p.name for p in wd.iterdir() if p.stem == "source")
     if not sources:
@@ -164,7 +165,8 @@ def main() -> int:
         "quote": {"publicId": quote["publicId"], "unit_price": quote.get("unit_price"), "store_id": quote.get("store_id"),
                   "max_per_plate": (quote.get("batch") or {}).get("max_per_plate"),
                   "model_g": metrics.get("model_g"), "print_time_s": metrics.get("print_time_s")},
-        "size_mm": analysis.get("bbox_mm"),
+        # the assembled product when assembly_3mf.py built one; analysis.json's bbox is the print layout
+        "size_mm": (display.get("bbox_mm") if display.get("pose") == "assembled" else None) or analysis.get("bbox_mm"),
         "order_item": {"quoteId": quote["publicId"], "filament_slots": metrics.get("filament_count") or 1, "quantity": 1,
                        "note": "createOrder takes one filament code per slot, chosen per order from listFilaments"},
         "media": {"photos": photos, "video": {"id": video.get("id"), "file": video["file"]} if video else None,

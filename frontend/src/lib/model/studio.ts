@@ -417,6 +417,14 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
     geometry.scale(s, s, s);
     geometry.computeBoundingSphere();
 
+    // A multicolour display.ply carries each part's filament colour per vertex; it replaces cfg.color.
+    const painted = geometry.hasAttribute('color');
+    if (productMaterial.vertexColors !== painted) {
+      productMaterial.vertexColors = painted;
+      productMaterial.needsUpdate = true;
+    }
+    productMaterial.color.set(painted ? '#ffffff' : cfg.color);
+
     mesh = new Mesh(geometry, productMaterial);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -441,7 +449,7 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
     const turned = patch.rotate !== undefined && patch.rotate.join() !== cfg.rotate.join();
     cfg = { ...cfg, ...patch };
     if (turned && pristine) show(pristine);
-    productMaterial.color.set(cfg.color);
+    productMaterial.color.set(productMaterial.vertexColors ? '#ffffff' : cfg.color);
     productMaterial.roughness = cfg.roughness;
     productMaterial.metalness = cfg.metalness;
     productMaterial.clearcoat = cfg.coat;

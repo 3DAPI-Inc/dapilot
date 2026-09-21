@@ -78,7 +78,81 @@ Read before building anything:
   deadline so a worker's Bash call never outlives 10 minutes. Stages may name
   their own worker agent in `stages.json`; design workers get 40 minutes
   (`minutes_per_stage`). First headless run on the cat clicker, studio only:
-  7 min, 37 turns, 0.43 USD at API rates. Not yet run with paid assets.
+  7 min, 37 turns, 0.43 USD at API rates. First paid run, the kumiko coaster
+  (2026-09-21): the designer planned two lifestyle photos and no clip, one
+  photo was rejected, and the listing got one lifestyle photo and the turntable.
+- **The listing standard is config (2026-09-21).** Every listing carries four
+  lifestyle photos and one lifestyle clip (`design.lifestyle_images.count`,
+  `design.lifestyle_video.required`); `check` refuses a brief that plans
+  anything else. Studio stills are always captured, as the references the
+  generated assets start from, but enter the listing only through the brief's
+  `studio_photos` or to stand in for a missing lifestyle photo. A rejected or
+  failed paid asset is made again once (`design_product.py redo`,
+  `design.redo_per_asset`) with the rejection in its prompt, inside the 2.00
+  USD cap; the first attempt is kept as `<asset>.rN.*` and still counts as
+  spend. `design.json` carries `standard.met`.
+- **Design models changed on 2026-09-21.** Photos: `fal-ai/nano-banana-pro/edit`
+  (about 0.15 USD each), sent the chosen still plus two other sides. Clip:
+  `minimax/h3-max/image-to-video` at 1080p, 6 s, 0.16 USD a second, first on the
+  Artificial Analysis image-to-video board that day; it animates the lifestyle
+  photo the brief names in `lifestyle_video.start_from`, so the clip can only be
+  as right as that photo, and nothing locks the geometry. `generate_video.py
+  --engine i2v`; the Wan 2.2 depth route stays as `design.lifestyle_video.engine:
+  "vace"`. A standard item is about 1.56 USD, so under the 2.00 USD cap there is
+  room to redo photos but not the clip (0.96 USD): the cap needs a decision.
+  H3 Max answers in 10 to 20 s where Wan took 7 minutes.
+- **Assembly and part colours come from the project file (2026-09-21).** A
+  Bambu project places its objects twice: `<build>` is the print layout,
+  `<assemble>` in `Metadata/model_settings.config` is the Assembly View, kept
+  whenever a designer split one import into objects. The same file names each
+  object's extruder and `project_settings.config` the filament colours.
+  `strip_3mf.py` removes both, so the server runs `assembly_3mf.py read` on
+  the original first and writes `work/<hash>/assembly.json`:
+  `required_assembly` (true when the assembled placement differs from the
+  print layout; a person or the design brief's `assembled` may flip it),
+  `multicolour`, and per item the two transforms, extruder and colour.
+  `assembly_3mf.py build` writes `display.ply`, the parts placed by that flag
+  with their filament colour per vertex, and both renderers
+  (`render_model.py`, `capture_turntable.py`) show it instead of
+  `source.<ext>`; the studio page reads `.ply` and paints vertex colours. The
+  slicer, the quote and `analyze_mesh.py` still use `source.<ext>`. First
+  case, the kumiko coaster: 386 x 100 x 5 mm as laid out, 100 x 100 x 5 mm
+  assembled, walnut lattice and cream star. Not done: `run_intake.py <folder>`
+  does not read assemblies yet (only the server upload does), the quote is
+  still priced as one filament because the strip drops the extruder
+  assignment, and a file with no assemble block gets no assembly.
+- **Social posting has its contracts and one platform (2026-09-21).**
+  `scripts/social/base.py` defines `Integration` (limits, check, submit with a
+  checkpoint before the irreversible step, confirm, metrics) and `Session`
+  (status, refresh, keepalive, login_help; one per account per platform, state
+  under `$DAPILOT_STORE_DIR/social/sessions/`). `social/instagram_api.py` is
+  the first adapter: Meta's free API, a 60-day token renewed by keepalive,
+  media fetched by Instagram from the listing's own public Etsy URLs in
+  `publish.json`, so no bucket. `social_post.py` is the only caller: `session
+  status|keepalive|login`, `check`, `post` (prints without `--confirm`),
+  `metrics`. Browser adapters (X, TikTok, LinkedIn page over CloakBrowser)
+  load from `DAPILOT_SOCIAL_ADAPTER_DIR`, outside the plugin. Not built: the
+  `write-social-post` skill, the browser adapters, the schedule. Not yet run
+  against Instagram: it needs a Meta app and `INSTAGRAM_ACCESS_TOKEN`. Plan in
+  `docs/social-plan.md`.
+- **Approving the price publishes (2026-09-21, built, not yet run end to end).**
+  `copy` and `publish` are enabled. `copy` is the `write-listing` skill: one
+  draft with the Etsy title, description, tags, materials and the Instagram
+  captions, which `listing_copy.py check` validates (Etsy's limits, the
+  platform's limits, a list of claims a printed part cannot back, research's
+  category against the seller taxonomy) and splits into `listing.json` and
+  `social/posts.json`. `publish` has no judgement, so it is the first `script`
+  stage: `stages.json` names `publish_product.py`, the ledger passes it in the
+  brief, and `run_intake.py` runs it with no worker and no tokens. It drafts,
+  uploads media, activates the Etsy listing (0.20 USD, public) and sends every
+  social post, then writes `published.json`. The person's approval of the sale
+  price is the gate for all of it; `publish.auto_activate` and
+  `publish.auto_post` in store config hand either half back to a person, and
+  `publish.auto_since` keeps a price approved before that moment from going
+  public until it is approved again. The console has a Social tab on the job
+  page (`/jobs/{id}/social` routes) to edit captions, post one by hand and read
+  the numbers. Not in the browser yet: Etsy draft, media and activate buttons,
+  and the Instagram sign-in.
 - **Phase 4 research is live ahead of order (2026-09-09).** `research-comparables`
   runs as an intake stage after quote and render: `etsy_search.py` fetches
   and filters Etsy listings (physical, right size, variant closest to our
@@ -375,6 +449,10 @@ plugins/
       upscale_video.py                Topaz on fal, manual only
       render_turntable.py             older plain turntable, kept for reference
       strip_3mf.py                    foreign 3mf project -> geometry-only 3mf
+      assembly_3mf.py                 Bambu assemble block and part colours -> assembly.json, display.ply
+      etsy_listing.py                 Etsy draft, media, status, activate for one work dir -> publish.json
+      social_post.py social/          social posting: the Integration and Session contracts, instagram_api
+      source_thumbnails.py            a 3MF's own plate and top previews -> thumbnails/, at ledger init
       etsy_search.py etsy_auth.py market_stats.py   research stage: Etsy search, OAuth, viability
       pricing.py price_candidates.py  the sale-price formula and the two candidates; --check is the break-even hard floor
       product_record.py               the product record for an approved price; copies, decides nothing

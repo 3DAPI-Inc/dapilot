@@ -4,6 +4,12 @@
   generate_video.py --workdir DIR --source depth  [--prompt "..."] [--frames 120]
   generate_video.py --workdir DIR --source beauty [--prompt "..."]
   generate_video.py --workdir DIR --engine ref --videos a.mp4 b.mp4 [--prompt "..."]
+  generate_video.py --workdir DIR --engine i2v --image photo.png --prompt "..." [--duration 5]
+
+--engine i2v     animates one still, normally a lifestyle photo that already passed
+                 review, so the clip opens on a picture the listing also shows. No
+                 structural control: whoever reviews it watches for the product
+                 changing shape. The audio track the model adds is removed.
 
 --source depth   sends our ground-truth depth sequence with preprocess off, so
                  the model is conditioned on the real geometry of the mesh.
@@ -42,6 +48,9 @@ ENDPOINTS = {
     # Reference-to-video. No structural control, but 1080p and it accepts up to
     # three reference clips, which a full turntable suits unusually well.
     "ref": "wan/v2.6/reference-to-video",
+    # Image-to-video from a first frame. Ranked first on the Artificial Analysis image-to-video
+    # leaderboard when chosen (2026-09-21), and about half the price of the depth route per clip.
+    "i2v": "minimax/h3-max/image-to-video",
 }
 
 DEFAULT_PROMPT = (
@@ -82,7 +91,9 @@ def main() -> int:
     ap.add_argument("--endpoint", default=None, help="override the endpoint id")
     ap.add_argument("--videos", nargs="*", default=None,
                     help="ref engine: clips to send as @Video1, @Video2, @Video3")
-    ap.add_argument("--duration", type=int, default=5, choices=[5, 10])
+    ap.add_argument("--duration", type=int, default=5, help="seconds: 5 or 10 for ref, 5 to 15 for i2v")
+    ap.add_argument("--image", metavar="PNG", help="i2v engine: the still the clip starts from")
+    ap.add_argument("--i2v-resolution", default="768P", choices=["480P", "768P", "1080P"])
     ap.add_argument("--source", choices=["depth", "beauty"], default="depth")
     ap.add_argument("--frames-root", default=None, help="directory holding <source>/frame_*.png; default WORKDIR/renders")
     ap.add_argument("--out", default=None, help="output mp4; default WORKDIR/renders/<name>.mp4")
@@ -146,7 +157,35 @@ def main() -> int:
     if held:
         endpoint, request_id, recorded = held["endpoint"], held["request_id"], held.get("request", {})
         fal_queue.note(f"attaching to {request_id}" + (f", submitted {held['submitted']}" if held.get("submitted") else ""))
+    elif a.engine == "i2v":
+        if not 5 <= a.duration <= 15:
+            return fail("the i2v engine takes 5 to 15 seconds", 2)
+        still = Path(a.image) if a.image else None
+        if not still or not still.exists():
+            return fail("--image is required for the i2v engine: the still the clip starts from", 2)
+        try:
+            image_url = fal_client.upload_file(str(still))
+        except Exception as exc:
+            return fail(f"uploading {still.name} failed: {exc}")
+        payload = {
+            "prompt": a.prompt,
+            "image_url": image_url,
+            "duration": a.duration,
+            "resolution": a.i2v_resolution,
+            "seed": a.seed,
+            # Our own wording, not a rewrite: the scene text names what must not change.
+            "prompt_expansion_mode": "disabled",
+        }
+        recorded = {**{k2: v for k2, v in payload.items() if k2 != "image_url"}, "image": still.name}
+        try:
+            request_id = fal_queue.submit(endpoint, payload, req_p, recorded)
+        except Exception as exc:
+            return fail(f"submit failed: {exc}", endpoint=endpoint)
+        fal_queue.note(f"submitted {request_id}")
+        extra = {"engine": "i2v", "image": still.name}
     elif a.engine == "ref":
+        if a.duration not in (5, 10):
+            return fail("the ref engine takes 5 or 10 seconds", 2)
         clips = [Path(v) for v in (a.videos or [])]
         if not clips:
             return fail("--videos is required for the ref engine (1 to 3 clips)", 2)
@@ -266,6 +305,14 @@ def main() -> int:
         fal_queue.download(url, out_mp4)
     except Exception as exc:
         return fail(f"could not download the result: {exc}", url=url, request_id=request_id)
+
+    if extra.get("engine") == "i2v" or (held and "image-to-video" in endpoint):
+        # Listing videos are silent (Etsy drops audio anyway); keep the picture stream untouched.
+        silent = out_mp4.with_name(out_mp4.stem + ".silent.mp4")
+        p = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(out_mp4), "-an", "-c:v", "copy", str(silent)],
+                           capture_output=True, text=True)
+        if p.returncode == 0:
+            silent.replace(out_mp4)
 
     record = {"ok": True, "endpoint": endpoint, "request_id": request_id, **extra,
               "request": recorded, "video": out_mp4.name, "video_bytes": out_mp4.stat().st_size,

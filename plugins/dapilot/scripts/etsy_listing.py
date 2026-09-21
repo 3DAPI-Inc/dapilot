@@ -2,9 +2,13 @@
 """Etsy listing lifecycle for one work dir: draft, media, status, activate.
 
 Deterministic. The copy comes from <workdir>/listing.json (written by the
-copy stage), the price from price.json (never from listing.json, so the copy
-cannot set it), the photos and video from design.json, the parcel weight
-from quote.json metrics and the size from analysis.json. Every Etsy id the
+copy stage), the price from price.approved.json (the price a person approved;
+never from listing.json or the proposal in price.json, so neither the copy nor
+the price stage can set it), the shop-wide choices from
+$DAPILOT_STORE_DIR/reference/etsy-listing.json, the photos and video from
+design.json, the parcel weight from quote.json metrics and the size from
+analysis.json (single-body models only: with several bodies the bounding box
+is the plate layout, not the product). Every Etsy id the
 script creates is recorded in <workdir>/publish.json, and every command is
 idempotent on that file: a rerun never creates a second draft and never
 uploads a photo whose rank is already recorded.
@@ -12,7 +16,10 @@ uploads a photo whose rank is already recorded.
     etsy_listing.py shop                                   who the token is; shop id, name, currency
     etsy_listing.py profiles                               shipping profiles, return policies, readiness states
     etsy_listing.py draft    --workdir W                   createDraftListing -> publish.json {listing_id, state: draft}
-    etsy_listing.py media    --workdir W                   upload photos in design.json order, then the video
+    etsy_listing.py media    --workdir W [--replace]       upload photos in design.json order, then the video.
+                                                           --replace: the listing's recorded photos and video are
+                                                           removed from Etsy once the new photos are up (a redone
+                                                           design stage); a person passes it, never a worker
     etsy_listing.py status   --workdir W                   the listing as Etsy sees it now
     etsy_listing.py activate --workdir W --by NAME --reason TEXT
                                                            the gate: publish on etsy.com; charges the listing fee
@@ -39,6 +46,13 @@ listing.json, the copy stage's output, the fields this script reads:
     alt_text         {photo id: text}, optional; defaults to the title
     processing_min, processing_max   optional, days
 
+$DAPILOT_STORE_DIR/reference/etsy-listing.json, optional, holds the keys that
+are the shop's and not the product's: who_made, when_made, is_supply, type,
+quantity, should_auto_renew, is_taxable, is_customizable, shipping_profile_id,
+return_policy_id, readiness_state_id, production_partner_ids. A key set there
+wins over listing.json, so a copy worker never chooses a shipping profile.
+`profiles` prints the ids to put in it.
+
 Draft creation is free and private. Activation is the paid, public step and
 this script refuses it without --by and --reason, which it records in
 publish.json as the override block the guardrails expect.
@@ -59,6 +73,10 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+
+SHOP_KEYS = ("who_made", "when_made", "is_supply", "type", "quantity", "should_auto_renew", "is_taxable",
+             "is_customizable", "shipping_profile_id", "return_policy_id", "readiness_state_id",
+             "production_partner_ids")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import etsy_auth  # noqa: E402
@@ -120,6 +138,9 @@ class Client:
         url = f"{API}{path}" + (f"?{urllib.parse.urlencode(params)}" if params else "")
         return self._send(urllib.request.Request(url, headers=self._headers()))
 
+    def delete(self, path: str):
+        return self._send(urllib.request.Request(f"{API}{path}", method="DELETE", headers=self._headers()))
+
     def form(self, method: str, path: str, fields: dict):
         data = urllib.parse.urlencode({k: v for k, v in fields.items() if v is not None}).encode()
         req = urllib.request.Request(f"{API}{path}", data=data, method=method,
@@ -179,14 +200,17 @@ def cmd_profiles(args) -> int:
     ship = c.get(f"/shops/{sid}/shipping-profiles").get("results") or []
     ret = c.get(f"/shops/{sid}/policies/return").get("results") or []
     ready = c.get(f"/shops/{sid}/readiness-state-definitions").get("results") or []
+    partners = c.get(f"/shops/{sid}/production-partners").get("results") or []
     print(json.dumps({
         "ok": True, "shop_id": sid,
         "shipping_profiles": [{"id": p.get("shipping_profile_id"), "title": p.get("title"),
                                "origin": p.get("origin_country_iso"), "processing_days": [p.get("min_processing_days"), p.get("max_processing_days")]} for p in ship],
         "return_policies": [{"id": p.get("return_policy_id"), "accepts_returns": p.get("accepts_returns"),
                              "accepts_exchanges": p.get("accepts_exchanges"), "return_deadline": p.get("return_deadline")} for p in ret],
-        "readiness_states": [{"id": p.get("readiness_state_definition_id"), "state": p.get("readiness_state"),
-                              "processing": [p.get("min_processing_time"), p.get("max_processing_time"), p.get("processing_time_unit")]} for p in ready],
+        "readiness_states": [{"id": p.get("readiness_state_id"), "state": p.get("readiness_state"),
+                              "processing_days": [p.get("min_processing_days"), p.get("max_processing_days")]} for p in ready],
+        "production_partners": [{"id": p.get("production_partner_id"), "name": p.get("partner_name"),
+                                 "location": p.get("location")} for p in partners],
         "quota": c.quota(),
     }, indent=1))
     return 0
@@ -219,10 +243,19 @@ def _check_copy(listing: dict) -> list[str]:
     return errors
 
 
+def shop_defaults() -> dict:
+    store = os.environ.get("DAPILOT_STORE_DIR")
+    path = Path(store) / "reference" / "etsy-listing.json" if store else None
+    if not path or not path.is_file():
+        return {}
+    doc = load_json(path, "etsy-listing.json")
+    return {k: doc[k] for k in SHOP_KEYS if doc.get(k) is not None}
+
+
 def cmd_draft(args) -> int:
     wd = Path(args.workdir)
-    listing = load_json(wd / "listing.json", "listing.json")
-    price = load_json(wd / "price.json", "price.json")
+    listing = {**load_json(wd / "listing.json", "listing.json"), **shop_defaults()}
+    price = load_json(wd / "price.approved.json", "price.approved.json (a person approves the price before anything is listed)")
     quote = load_json(wd / "quote.json", "quote.json")
     analysis = load_json(wd / "analysis.json", "analysis.json")
     pub_path = wd / "publish.json"
@@ -236,7 +269,10 @@ def cmd_draft(args) -> int:
         die("listing.json: " + "; ".join(errors))
     amount = price.get("price")
     if not isinstance(amount, (int, float)) or amount <= 0:
-        die("price.json has no positive price")
+        die("price.approved.json has no positive price")
+    floor = price.get("floor")
+    if isinstance(floor, (int, float)) and amount < floor:
+        die(f"approved price {amount} is below the break-even floor {floor}")
 
     c = sid = None
     if not args.dry_run:
@@ -262,9 +298,19 @@ def cmd_draft(args) -> int:
         "readiness_state_id": listing.get("readiness_state_id"),
         "processing_min": listing.get("processing_min"),
         "processing_max": listing.get("processing_max"),
+        "production_partner_ids": ",".join(str(i) for i in listing.get("production_partner_ids") or []) or None,
     }
+    for k in ("is_taxable", "is_customizable"):
+        if listing.get(k) is not None:
+            fields[k] = "true" if listing[k] else "false"
     if isinstance(model_g, (int, float)) and model_g > 0:
         fields.update({"item_weight": round(float(model_g), 1), "item_weight_unit": "g"})
+    display_p = wd / "display.json"
+    display = json.loads(display_p.read_text()) if display_p.is_file() else {}
+    if display.get("pose") == "assembled" and len(display.get("bbox_mm") or []) == 3:
+        bbox = display["bbox_mm"]  # the assembled product, from assembly_3mf.py
+    elif analysis.get("bodies") != 1:
+        bbox = []  # several bodies and no assembly: the box is the plate layout, not the product
     if len(bbox) == 3 and all(isinstance(v, (int, float)) and v > 0 for v in bbox):
         fields.update({"item_length": round(float(bbox[1]), 1), "item_width": round(float(bbox[0]), 1),
                        "item_height": round(float(bbox[2]), 1), "item_dimensions_unit": "mm"})
@@ -308,6 +354,18 @@ def cmd_media(args) -> int:
     c = Client(args, {"listings_w"})
     sid = int(pub.get("shop_id") or shop_of(c, args))
     lid = pub["listing_id"]
+    old_images, old_video = [], None
+    if args.replace and not pub.get("replacing"):
+        # Set the recorded media aside in publish.json first, so a rerun after a failure still knows what to remove.
+        pub["replacing"] = {"images": pub.get("images") or [], "video": pub.get("video")}
+        pub["images"], pub["video"] = [], None
+        pub_path.write_text(json.dumps(pub, indent=2))
+    if pub.get("replacing"):
+        old_images, old_video = pub["replacing"]["images"], pub["replacing"]["video"]
+        if old_video and old_video.get("video_id"):  # a listing holds one video, so the old one goes first
+            c.delete(f"/shops/{sid}/listings/{lid}/videos/{old_video['video_id']}")
+            pub["replacing"]["video"] = None
+            pub_path.write_text(json.dumps(pub, indent=2))
     done = {img["rank"]: img for img in pub.get("images") or []}
     uploaded, skipped = [], []
     for rank, p in enumerate(photos, start=1):
@@ -326,6 +384,17 @@ def cmd_media(args) -> int:
         uploaded.append(rank)
         if args.limit and len(uploaded) >= args.limit:
             break
+    removed = []
+    if old_images and not (args.limit and len(uploaded) >= args.limit):
+        for img in list(old_images):  # only once every new photo is up, so the listing is never left bare
+            c.delete(f"/shops/{sid}/listings/{lid}/images/{img['listing_image_id']}")
+            removed.append(img["listing_image_id"])
+            pub["replacing"]["images"].remove(img)
+            pub_path.write_text(json.dumps(pub, indent=2))
+    if pub.get("replacing") and not pub["replacing"]["images"] and not pub["replacing"]["video"]:
+        pub.setdefault("replaced", []).append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "images_removed": removed})
+        del pub["replacing"]
+        pub_path.write_text(json.dumps(pub, indent=2))
     video = design.get("video")
     video_state = "none"
     if video and not args.no_video:
@@ -335,7 +404,7 @@ def cmd_media(args) -> int:
             f = wd / video["file"]
             if not f.is_file():
                 die(f"video missing: {f}", 2)
-            res = c.multipart(f"/shops/{sid}/listings/{lid}/videos", {}, "video", f)
+            res = c.multipart(f"/shops/{sid}/listings/{lid}/videos", {"name": f.name}, "video", f)  # Etsy refuses a video without a name
             pub["video"] = {"id": video.get("id"), "file": video["file"], "video_id": res.get("video_id"),
                             "state": res.get("video_state"), "url": res.get("video_url")}
             pub_path.write_text(json.dumps(pub, indent=2))
@@ -400,6 +469,7 @@ def main() -> int:
     m = sub.add_parser("media"); m.add_argument("--workdir", required=True)
     m.add_argument("--limit", type=int, help="upload at most this many photos this run")
     m.add_argument("--no-video", action="store_true")
+    m.add_argument("--replace", action="store_true", help="remove the recorded photos and video from Etsy and upload design.json's")
     s = sub.add_parser("status"); s.add_argument("--workdir", required=True)
     a = sub.add_parser("activate"); a.add_argument("--workdir", required=True)
     a.add_argument("--by"); a.add_argument("--reason")

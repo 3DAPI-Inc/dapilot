@@ -88,7 +88,9 @@ def main() -> int:
         except Exception as exc:
             return fail(f"uploading the reference failed: {exc}")
         payload = {
-            "prompt": f"{a.prompt.strip()} {KEEP}",
+            "prompt": f"{a.prompt.strip()} {KEEP}" + (
+                " The reference images are the same single product seen from different sides; the first one "
+                "sets the viewing angle. Show one product." if len(refs) > 1 else ""),
             "image_urls": urls,
             "num_images": 1,
             "aspect_ratio": a.aspect,

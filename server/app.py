@@ -109,6 +109,18 @@ def exists(wd: Path, pattern: str) -> bool:
 
 # ------------------------------------------------------------------ intake
 
+def read_assembly(path: Path) -> dict | None:
+    """Bambu's assemble block and per-part filament colours. Read before the strip, which removes both."""
+    if path.suffix.lower() != ".3mf":
+        return None
+    out = path.with_name(path.stem + ".assembly.json")
+    r = subprocess.run([PY, str(SCRIPTS / "assembly_3mf.py"), "read", str(path), "--out", str(out)],
+                       capture_output=True, text=True)
+    doc = read_json(out) if r.returncode == 0 else None
+    out.unlink(missing_ok=True)
+    return doc if doc and (doc.get("source") or doc.get("multicolour")) else None
+
+
 def strip_if_project(path: Path) -> dict:
     """Foreign 3mf project settings make dapi's slicer fail; keep the geometry only."""
     if path.suffix.lower() != ".3mf":
@@ -268,6 +280,7 @@ async def create_jobs(files: list[UploadFile]) -> JSONResponse:
         safe = re.sub(r"[^A-Za-z0-9._+-]", "_", name)
         path = folder / safe
         path.write_bytes(data)
+        assembly = read_assembly(path)
         strip = strip_if_project(path)
         item = hashlib.sha256(path.read_bytes()).hexdigest()
         wd = WORK / item
@@ -279,6 +292,10 @@ async def create_jobs(files: list[UploadFile]) -> JSONResponse:
         if not meta_p.exists():
             meta = {"file": name, "bytes": path.stat().st_size, "sha256": item, "first_seen": now(), "via": "frontend", **strip}
             meta_p.write_text(json.dumps(meta, indent=2))
+        if assembly and not (wd / "assembly.json").exists():
+            # The renderers show display.ply: parts placed per required_assembly, in their filament colours.
+            (wd / "assembly.json").write_text(json.dumps(assembly, indent=1))
+            subprocess.run([PY, str(SCRIPTS / "assembly_3mf.py"), "build", "--workdir", str(wd)], capture_output=True)
         runs_p = wd / "runs.json"
         runs = read_json(runs_p) or []
         runs.append(f"frontend-{upload_id}")
@@ -348,6 +365,11 @@ def job(item: str) -> dict | None:
     a = read_json(wd / "analysis.json")
     if a:
         j["analysis"] = {k: a.get(k) for k in ("bbox_mm", "volume_mm3", "bodies", "watertight_bodies", "triangles")}
+        shown = read_json(wd / "display.json") or {}
+        if shown.get("pose") == "assembled" and shown.get("bbox_mm"):
+            j["analysis"]["bbox_mm"] = shown["bbox_mm"]  # the assembled product; the analysis box is the print layout
+    # The 3MF's own previews, copied out at registration: the first picture of an upload, before any draft.
+    j["thumbnails"] = [f"/api/jobs/{item}/files/thumbnails/{p.name}" for p in sorted((wd / "thumbnails").glob("*.png"))]
     return j
 
 
@@ -359,7 +381,9 @@ def detail(item: str) -> dict:
     v = read_json(wd / "viability.json")
     if v and v.get("ok"):
         s0 = (v.get("scenarios") or [{}])[0]
-        j["viability"] = {"verdict": v.get("verdict"), "product": v.get("product"), "n": v.get("n_comparables"),
+        j["viability"] = {"verdict": v.get("verdict"), "verdictReason": v.get("verdict_reason"),
+                          "product": v.get("product"), "n": v.get("n_comparables"),
+                          "identity": v.get("identity"),
                           "market": v.get("market"), "breakEven": s0.get("break_even_price"), "markupPrice": s0.get("markup_price"),
                           "unitCost": s0.get("unit_cost"), "atMedian": next((a for a in s0.get("at", []) if a.get("label") == "median"), None),
                           "policy": v.get("policy"), "stock": v.get("stock"), "costBasis": v.get("cost_basis"),
@@ -374,7 +398,7 @@ def detail(item: str) -> dict:
         rows = c.get("comparables", [])
         if not any(isinstance(x.get("market_weight"), (int, float)) for x in rows):
             rows = sorted(rows, key=lambda x: (x.get("shop") or {}).get("sold") or 0, reverse=True)
-        j["comparables"] = {"product": c.get("product"), "queries": c.get("queries"), "n": len(rows),
+        j["comparables"] = {"product": c.get("product"), "identity": c.get("identity"), "queries": c.get("queries"), "n": len(rows),
                             "rejected": c.get("rejected_count", len(c.get("rejected", []))),
                             "top": [{"title": x.get("title"), "url": x.get("url"), "price": x.get("price"),
                                      "sold": (x.get("shop") or {}).get("sold", x.get("sold")),
@@ -633,13 +657,15 @@ def product_view(item: str) -> dict | None:
     media = rec.get("media") or {}
     photos = [{**p, "url": url(p["file"])} for p in media.get("photos", [])]
     drafts = sorted((WORK / item / "renders").glob("draft_*.png"))
+    thumbs = sorted((WORK / item / "thumbnails").glob("*.png"))
     s = status_of(item, WORK / item, read_json(WORK / item / "meta.json") or {}) if (WORK / item / "meta.json").exists() else {}
     return {**{k: rec.get(k) for k in ("id", "status", "created_at", "updated_at", "owner", "name", "source_file", "price",
                                        "quote", "order_item", "storefront", "size_mm")},
             "photos": photos,
             "video": {**media["video"], "url": url(media["video"]["file"])} if media.get("video") else None,
             # Until the design stage has run, the draft is the only picture there is.
-            "thumbnail": photos[0]["url"] if photos else (url(f"renders/{drafts[0].name}") if drafts else None),
+            "thumbnail": photos[0]["url"] if photos else (url(f"renders/{drafts[0].name}") if drafts else
+                                                          (url(f"thumbnails/{thumbs[0].name}") if thumbs else None)),
             "pipeline": {"stage": s.get("stage"), "status": s.get("status"), "reason": s.get("reason")},
             "pendingUploads": len(rec.get("pending_uploads") or [])}
 
@@ -676,6 +702,125 @@ def get_product(item: str) -> dict:
 def approve(item: str) -> dict:
     """Kept for the old client call: approve the proposal as it stands."""
     return decide_price(item, PriceDecision())
+
+
+# ------------------------------------------------------------------ social posting
+
+SOCIAL = SCRIPTS / "social_post.py"
+POST_FORMATS = {"reel": ["video"], "carousel": ["photo:1", "photo:2", "photo:3"], "image": ["photo:1"]}
+
+
+def social_cli(*args: str, timeout: int = 420) -> tuple[int, dict]:
+    """social_post.py is the only thing that talks to a platform; the server passes a person's click on."""
+    r = subprocess.run([PY, str(SOCIAL), *args], capture_output=True, text=True, cwd=ROOT, timeout=timeout)
+    try:
+        return r.returncode, json.loads(r.stdout)
+    except ValueError:
+        return r.returncode or 1, {"ok": False, "reason": (r.stderr or r.stdout).strip()[-300:] or "social_post.py printed nothing"}
+
+
+def social_view(item: str) -> dict:
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    pub, sd = read_json(wd / "publish.json") or {}, wd / "social"
+    by_rank = {i.get("rank"): i.get("url") for i in pub.get("images") or []}
+    ready = bool(pub.get("listing_id") and (pub.get("images") or pub.get("video")))
+    doc = read_json(sd / "posts.json") or {"posts": []}
+    errors: dict[str, list] = {}
+    if doc["posts"] and ready:
+        _, checked = social_cli("check", "--workdir", str(wd), timeout=60)
+        errors = {row["post"]: row["errors"] for row in checked.get("posts", [])}
+    latest: dict[str, dict] = {}
+    if (sd / "metrics.jsonl").exists():
+        for line in (sd / "metrics.jsonl").read_text().splitlines():
+            try:
+                row = json.loads(line)
+                latest[row["post"]] = row
+            except ValueError:
+                pass
+    posts = []
+    for row in doc["posts"]:
+        pid = f"{row.get('platform')}.{row.get('format')}"
+        done, pending = read_json(sd / f"{pid}.json"), read_json(sd / f"{pid}.pending.json")
+        media = [{"kind": "video", "url": (pub.get("video") or {}).get("url")} if ref == "video"
+                 else {"kind": "image", "url": by_rank.get(int(ref[6:])) if ref[6:].isdigit() else None}
+                 for ref in row.get("media") or []]
+        posts.append({"id": pid, "platform": row.get("platform"), "format": row.get("format"),
+                      "caption": row.get("caption") or "", "hashtags": row.get("hashtags") or [], "media": media,
+                      "errors": errors.get(pid, []),
+                      "state": "posted" if done else "pending" if pending else "draft",
+                      "url": (done or {}).get("url"), "postedAt": iso(done["posted_at"]) if done and done.get("posted_at") else None,
+                      "metrics": {k: v for k, v in (latest.get(pid) or {}).items() if k not in ("post", "at", "age_h")} or None})
+    _, sessions = social_cli("session", "status", timeout=60)
+    return {"ready": ready, "reason": None if ready else "The listing has no photos or video on Etsy yet; posts use those files.",
+            "listingUrl": pub.get("url"), "posts": posts,
+            "sessions": [{"platform": s["platform"], "account": s["account"], "state": s["state"], "note": s.get("note")}
+                         for s in sessions.get("sessions", [])]}
+
+
+@api.get("/jobs/{item}/social")
+def get_social(item: str) -> dict:
+    return social_view(item)
+
+
+class SocialPostBody(BaseModel):
+    caption: str
+    hashtags: list[str] = []
+
+
+@api.put("/jobs/{item}/social/posts/{post_id}")
+def save_social_post(item: str, post_id: str, body: SocialPostBody) -> dict:
+    """A person writes or edits the words of one post. Nothing is sent."""
+    wd = WORK / item
+    platform, _, fmt = post_id.partition(".")
+    if not (wd / "meta.json").exists() or fmt not in POST_FORMATS:
+        raise HTTPException(404, "no such job or post format")
+    if (wd / "social" / f"{post_id}.json").exists():
+        raise HTTPException(409, "this post is already on the platform; its words can only be changed there")
+    path = wd / "social" / "posts.json"
+    doc = read_json(path) or {"posts": []}
+    row = next((r for r in doc["posts"] if r.get("platform") == platform and r.get("format") == fmt), None)
+    if row is None:
+        row = {"platform": platform, "format": fmt, "media": POST_FORMATS[fmt]}
+        doc["posts"].append(row)
+    row["caption"] = body.caption.strip()
+    row["hashtags"] = [t.strip().lstrip("#") for t in body.hashtags if t.strip()]
+    doc["edited"] = {"by": "console", "at": now()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+    return social_view(item)
+
+
+class SocialPublishBody(BaseModel):
+    by: str | None = None
+
+
+@api.post("/jobs/{item}/social/posts/{post_id}/publish")
+def publish_social_post(item: str, post_id: str, body: SocialPublishBody) -> dict:
+    """The gate for a public post: a person pressed the button. Recorded, then handed to social_post.py --confirm."""
+    wd = WORK / item
+    platform, _, fmt = post_id.partition(".")
+    if not (wd / "social" / "posts.json").exists():
+        raise HTTPException(404, "no posts written for this job")
+    approved = wd / "social" / "approved.json"
+    log = read_json(approved) or {"approvals": []}
+    log["approvals"].append({"post": post_id, "by": (body.by or "").strip() or "console", "at": now()})
+    approved.write_text(json.dumps(log, indent=1) + "\n")
+    code, res = social_cli("post", "--workdir", str(wd), "--platform", platform, "--format", fmt, "--confirm")
+    if code == 4:
+        raise HTTPException(409, res.get("reason") or "the session needs a person to sign in again")
+    if code not in (0, 3):
+        raise HTTPException(502, "; ".join(res.get("errors") or []) or res.get("reason") or "the post failed")
+    return {"result": res, "social": social_view(item)}
+
+
+@api.post("/jobs/{item}/social/metrics")
+def refresh_social_metrics(item: str) -> dict:
+    code, res = social_cli("metrics", "--workdir", str(WORK / item), timeout=120)
+    if code != 0:
+        raise HTTPException(502, res.get("reason") or "the numbers could not be read")
+    return social_view(item)
 
 
 @api.get("/health")

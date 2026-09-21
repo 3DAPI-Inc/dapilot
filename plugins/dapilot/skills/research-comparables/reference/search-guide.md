@@ -31,21 +31,52 @@ typed by hand except the words in `rules.json`.
 
 ## Naming the product
 
-Three inputs, three outputs.
+Four witnesses, and the pictures outrank the name. Look at them in this
+order and decide what the object is before you decide what to call it.
 
-- `meta.json` `file`: sellers name files after the thing.
-  "octagone+fidget+k2.3mf" says octagon, fidget, and the printer it was set
-  up for. Ignore printer names, filament brands and version tags.
-- The drafts: what it looks like.
+- `thumbnails/plate_1.png` and `top_1.png`, when present: the designer's
+  own render out of the 3MF, in colour, every part laid out on the bed the
+  way it prints. Parts that assemble into one thing sit apart here (the
+  octagon fidget shows its two nested shells side by side), so count the
+  parts and imagine them together. The top view shows the footprint.
+- The drafts: eight grey views of the file as exported, at 45 degree steps.
+  Read at least two, from different sides.
 - `analysis.json`: size and body count. Two interlocked bodies of 100 mm is
   a fidget; one body of 12 mm is a charm or a miniature.
+- `meta.json` `file`: what the uploader called it. Sellers often name files
+  after the thing ("octagone+fidget+k2.3mf" says octagon, fidget, and the
+  printer it was set up for; ignore printer names, filament brands and
+  version tags), and just as often after nothing ("test2.stl",
+  "final_v3.3mf", "part A.stl"). A name is corroboration when the pictures
+  already show the thing, and a hint of where to look when they are
+  ambiguous. It is never the reading on its own: if the pictures do not
+  support it, the pictures win, and say so.
+
+**The identity** goes into `rules.json` as `identity`: `object` in a few
+words, `confidence`, `witnesses`, `reason`. The levels:
+
+- `high`: the pictures show an unmistakable object and at least one other
+  witness agrees (the name says the same, or the size and body count fit
+  nothing else). The shark, the duck, the octagon.
+- `medium`: the pictures show what it is, but nothing corroborates, or the
+  name says something the pictures neither confirm nor deny. A clear phone
+  stand called "test2.stl" is medium at best.
+- `low`: the pictures are ambiguous, or they contradict the name, or the
+  object is a shape that could serve several purposes (a bracket, a
+  housing, a mount, a jig). Two readings you cannot choose between is low.
+  A low reading still names the product and still runs the read; it says
+  in the log, the summary and the console that a person should confirm the
+  object before trusting the band.
+
+`witnesses` lists only the sources that supported the reading you chose.
+`reason` is one sentence: what settled it, or what is still open.
 
 **The noun** is the one word a seller would not leave out of the title.
 Singular; plurals match. It must be the object, not the aisle: "octagon",
 "duck", "shark", "clip", not "fidget", "toy", "charm", "gift". A noun that
 names the aisle admits the whole aisle and the rules cannot save you; a
 noun sellers do not use ("heptagon" for an octagon) leaves nothing to score.
-When the file name and the drafts disagree, trust the drafts.
+When the file name and the pictures disagree, trust the pictures.
 
 **The query** is what a buyer types: the noun plus one qualifier, two or
 three words. "octagon fidget", "duck charm", "cable clip". No brand, no

@@ -11,9 +11,14 @@ A brief with `stage: research`. The work dir has `meta.json`, `analysis.json`,
 `quote.json` and `renders/draft_00.png`, and no `comparables.json`.
 
 ## Inputs
-- `meta.json`: the original filename, the strongest hint at what the object is
+- `meta.json`: the original filename. A witness, not the verdict: it is
+  what the uploader called the file, and may be a code, a printer name or
+  a lie
 - `analysis.json`: `bbox_mm`, `bodies`
 - `renders/draft_00.png` and one more draft: what it looks like
+- `thumbnails/plate_1.png` and `thumbnails/top_1.png` when they exist: the
+  designer's own renders out of the 3MF, in colour and as arranged on the
+  bed. The best witness there is; absent for STL and OBJ uploads
 - `quote.json`: `unit_price`, `batch`, `metrics.model_g`
 - `research/summary.json`, written in step 3 and refreshed in step 4: the
   only research file the judgements read. The compact `research/etsy.json`
@@ -24,14 +29,21 @@ script fails with a one-line JSON error when one is missing. Pass it on.
 
 ## Procedure
 1. If `comparables.json` exists, print a `cached:true` result and stop.
-2. Judge: name the product from `meta.json`, `analysis.json` and two drafts:
-   the noun (one word, singular, the word sellers put in the title), a buyer
-   query of two or three words containing it, and the taxonomy id of the
-   aisle the product is sold in, from
-   `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/etsy_search.py taxonomy find "<word>"`.
+2. Judge: decide what the object is. Read the thumbnails when there are
+   any, two drafts, `analysis.json`, and last the filename. The pictures
+   and the size say what it is; the filename only corroborates or
+   contradicts. From that, name the product: the noun (one word, singular,
+   the word sellers put in the title), a buyer query of two or three words
+   containing it, and the taxonomy id of the aisle the product is sold in,
+   from `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/etsy_search.py taxonomy find "<word>"`.
    The id is not optional when one fits: the ladder reads the whole aisle,
    and without an aisle it reads every product that carries the noun.
-   How to choose all three: `reference/search-guide.md`.
+   Also decide how sure you are, as `identity` in `rules.json` (step 4):
+   `object` (what it is, a few words), `confidence` of `high`, `medium` or
+   `low`, `witnesses` (which of `filename`, `drafts`, `thumbnails`,
+   `analysis` supported the reading) and a one-sentence `reason`. How to
+   choose all of it, and what each confidence level means:
+   `reference/search-guide.md`.
 3. Run, with the defaults for the ladder and its stop rule:
    `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/etsy_search.py search "<query>" --noun <noun> [--taxonomy-id N] --analysis $WORKDIR/analysis.json --currency USD --out $WORKDIR/research/etsy.json`
    The search fetches by price window, each in Etsy's own relevance order: one
@@ -62,13 +74,16 @@ script fails with a one-line JSON error when one is missing. Pass it on.
    two scripts once. Never a third pass. One exception: when the only wrong
    entries are sets or bundles and no word removes them without removing
    genuine comparables, keep the rules, keep them in, and say so in the log.
-5. Append the log paragraph: noun, query, taxonomy id, windows and stop reason,
+5. Append the log paragraph: the object and the confidence with its reason,
+   noun, query, taxonomy id, windows and stop reason,
    fetched, kept, scored, selected, whether the rules were tightened and why,
    weighted median and p75, basis, `market.thin` and `market.weight_basis`
    as printed, the heaviest shop and its `top_shop_share` when that is 0.5
    or more, unit cost,
    break-even, margin at the median, verdict, quota left. Remove `.lock`.
-   Print the result line with the verdict in `summary`.
+   Print the result line with the verdict in `summary`; when confidence is
+   `low`, the summary starts with "identity low:" and the object, so the
+   report and the console say it before they say the verdict.
 
 ## Outputs
 - `research/etsy.json` and `research/etsy.full.json`: the search, with `noun`,
@@ -81,19 +96,24 @@ script fails with a one-line JSON error when one is missing. Pass it on.
   {"noun": "duck", "required_any": ["charm", "mini", "miniature"],
    "excluded": ["set of", "bundle", "keychain", "articulated"],
    "materials_allowed": ["pla", "resin", "3d printed"], "materials_excluded": ["clay", "metal", "wood"],
-   "taxonomy_id": 1799, "notes": "one sentence"}
+   "taxonomy_id": 1799, "notes": "one sentence",
+   "identity": {"object": "mini duck charm", "confidence": "high",
+                "witnesses": ["filename", "thumbnails", "drafts", "analysis"],
+                "reason": "one sentence: what settled it, or what is still open"}}
   ```
+  `market_stats.py` refuses a `confidence` that is not `high`, `medium` or
+  `low`, or a witness outside the four names.
 - `comparables.json`, by `market_stats.py`: `mode: "rules"`, the rules used,
-  `n_scored`, `n_selected`, `comparables` ordered by `market_weight`
-  descending with `relevance`, `page` and a `shop` block on each,
-  `rejected_count`, `rejected_sample`.
+  `identity` copied from them, `n_scored`, `n_selected`, `comparables`
+  ordered by `market_weight` descending with `relevance`, `page` and a
+  `shop` block on each, `rejected_count`, `rejected_sample`.
 - `viability.json`, schema as printed by `market_stats.py`: `market` with
   `basis`, `weighted` and `unweighted` bands, `spread_ratio` and `thin`,
   `weight_basis` (`units_per_day`, or `legacy` for a file scored without
   the review pass) and `weight_concentration` (the heaviest listing's and
   shop's share of the weight), per-gram, unit cost, fees, margins,
-  break-even, and a `verdict` of `viable`, `thin` or `not_viable`. Paths in
-  it are relative to the work dir.
+  break-even, `identity` as in `comparables.json`, and a `verdict` of
+  `viable`, `thin` or `not_viable`. Paths in it are relative to the work dir.
 
 ## Gate
 Auto. Etsy reads only; no dapi call. The one spend is Etsy quota: one search call
@@ -123,6 +143,9 @@ variants. At most two searches per item.
   did not print. A thin band is reported from `market.thin`, never worked
   out in prose and never fixed by changing the rules.
 - Do not read `research/etsy.json` or the full file; the summary is the view.
+- Do not let the filename decide. "test2.stl" is no evidence and
+  "dragon_v3.3mf" is one witness; the pictures are the evidence, and a
+  reading the pictures do not support is `low` however the file is named.
 - Do not propose a price, search more than twice, or run the rules a third time.
 
 `$PY` is `${DAPILOT_PYTHON:-python3}`.

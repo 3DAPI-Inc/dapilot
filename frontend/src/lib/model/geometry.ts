@@ -8,6 +8,8 @@ import { BufferAttribute, BufferGeometry, type Mesh, type Object3D } from 'three
 export interface MeshArrays {
   positions: Float32Array;
   normals: Float32Array;
+  /** Linear RGB per vertex. Only a multicolour display.ply has them; they replace the single filament colour. */
+  colors?: Float32Array;
 }
 
 /**
@@ -73,9 +75,10 @@ export function flattenToArrays(root: Object3D): MeshArrays {
 }
 
 /** The pair back into something three can draw. */
-export function toGeometry({ positions, normals }: MeshArrays): BufferGeometry {
+export function toGeometry({ positions, normals, colors }: MeshArrays): BufferGeometry {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  if (colors) geometry.setAttribute('color', new BufferAttribute(colors, 3));
   return geometry;
 }

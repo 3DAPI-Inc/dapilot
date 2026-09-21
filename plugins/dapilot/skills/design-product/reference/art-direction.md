@@ -62,14 +62,23 @@ saturated colour for simple, toy-like shapes, matte black for technical parts.
 
 Each is one photo of our product in a real setting, generated from one of our
 stills (`reference`: `hero` or `angle_N`). The model keeps the product; you
-describe everything around it. Plan them as a set, each answering a different
-buyer question:
+describe everything around it. Every listing carries four (the standard, set
+in config); they are the listing's photos, and studio stills are extras. Plan
+them as a set, each answering a different buyer question:
 
 1. **In use**: where it lives. A desk, a kitchen counter, a shelf, a child's
    room, chosen from the comparables' titles.
 2. **Scale**: next to one everyday object whose size nobody doubts (a coffee
    mug, a pencil, a keyboard, a smartphone), placed so the size reads.
 3. **Mood**: the gift or the style shot, soft light, a tidy styled surface.
+4. **Detail**: close, from the angle that shows the surface, the mechanism or
+   the part a buyer will look for, in the same setting as one of the others.
+
+Describe the whole product in every scene, every part of it: a scene that
+names only one part gets a picture of only that part. For a multicolour
+product (`context.assembly.multicolour`) name each part with its colour in
+plain words, read off the stills and the thumbnails ("a walnut brown lattice
+frame with a cream star inlay"), not with the palette word for `color`.
 
 Write each scene in this order, in plain sentences, under 600 characters:
 
@@ -92,14 +101,28 @@ Rules learned from the first fal runs:
 - Choose `reference: angle_N` when that angle suits the scene better than the
   hero, for example a top-down scene from the high angle.
 
-Leave the list empty when the product is a replacement part or a technical
-component a buyer searches by fit, not by look.
+A replacement part or a technical component still gets four: show it fitted
+where it goes, next to the thing it fits, on a workbench, and close up.
 
 ## lifestyle_video
 
-A 5 second clip generated on our own depth pass, so the geometry stays true
-while Wan paints the setting. It becomes the listing video when it passes
-review; the studio turntable is the fallback.
+A short clip that animates one of the lifestyle photos (`start_from`), so it
+opens on a picture the listing also shows. It becomes the listing video when
+it passes review; the studio turntable is the fallback. Nothing locks the
+geometry, so write the scene to protect it and review it for a product that
+bends, grows parts or changes colour.
+
+With this engine the `scene` is a shot description, not a setting: the
+setting is already in the photo. Write, in order: the camera move (a slow
+push-in, an arc, a rise from table height, a rack focus from a prop to the
+product), what else moves (steam, a shadow of leaves crossing the table, light
+warming), and the sentence that protects the product: "the <product> is a
+rigid object and stays perfectly still; its <parts> keep exactly the same
+shape, count and position in every frame". One move and one or two living
+details read as a film; three moves read as a glitch. `motion` and `negative`
+belong to the older depth engine and are ignored here.
+
+The older depth engine (`design.lifestyle_video.engine: "vace"`):
 
 - `scene`: the same order as an image scene, for one setting, still
   and calm. No hands, no people, nothing moving but the product or the light.
@@ -111,8 +134,8 @@ review; the studio turntable is the fallback.
   deformed, extra objects, morphing background` and add the likely failure
   for this product (for a figure: `extra limbs`).
 
-Set it to `null` when the product is technical, or when a lifestyle clip
-would say nothing the turntable does not.
+Every listing carries one; `null` is refused. For a technical product keep the
+scene plain: a workbench or a desk, `drift`, nothing else in frame.
 
 ## reason
 

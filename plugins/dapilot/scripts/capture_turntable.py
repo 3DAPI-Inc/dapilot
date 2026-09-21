@@ -184,6 +184,8 @@ def main() -> int:
     sources = [p for p in wd.iterdir() if p.stem == "source"] if wd.is_dir() else []
     if not sources:
         return fail("no source.<ext> in workdir")
+    if (wd / "display.ply").is_file():  # assembly_3mf.py: the parts placed as assembly.json says, in their colours
+        sources = [wd / "display.ply"]
     passes = [p.strip() for p in a.passes.split(",") if p.strip() in PASSES]
     if not passes:
         return fail(f"--passes must be some of {', '.join(PASSES)}")

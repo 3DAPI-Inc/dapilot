@@ -87,6 +87,7 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `generate_image.py`, `generate_video.py`, `fal_queue.py` | lifestyle photo (image edit) and depth-conditioned clip (Wan) on fal; a request is written on submit and a rerun attaches, so nothing is paid twice |
 | `upscale_video.py` | Topaz upscale on fal; manual, not part of any stage |
 | `strip_3mf.py` | removes foreign slicer project settings (Creality Print, Orca, Prusa) from a 3mf so Bambu Studio accepts it; `--check` to test first |
+| `source_thumbnails.py` | copies the plate and top previews a 3MF carries into `thumbnails/`; run by `ledger init`, so the research worker has the designer's own pictures before any draft exists |
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `market_stats.py` | price band, fees, VAT and margin from `comparables.json`, `quote.json` and the store pricing policy; writes `viability.json` |
 | `price_candidates.py` | the two sale-price candidates (quote plus markup, market median) above the break-even floor; `--check` refuses any `price.json` below the floor, from any author |

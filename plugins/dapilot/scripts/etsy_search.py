@@ -664,6 +664,13 @@ def prefilter(listings, target, args, noun):
 
 def target_of(args):
     if args.analysis:
+        # The assembled product's size when assembly_3mf.py built one: the analysis bbox of parts spread
+        # over plates is the print layout, and a size window around it drops every real comparable.
+        shown = os.path.join(os.path.dirname(os.path.abspath(args.analysis)), "display.json")
+        if os.path.isfile(shown):
+            d = json.load(open(shown))
+            if d.get("pose") == "assembled" and d.get("bbox_mm"):
+                return sorted(d["bbox_mm"], reverse=True)
         return sorted(json.load(open(args.analysis))["bbox_mm"], reverse=True)
     if args.size_mm:
         return sorted((float(x) for x in args.size_mm.split(",")), reverse=True)

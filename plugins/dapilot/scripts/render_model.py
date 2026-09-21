@@ -52,7 +52,10 @@ def main() -> int:
     if not sources:
         print(json.dumps({"ok": False, "reason": "no source.<ext> in workdir"})); return 1
     src = sources[0]
-    if src.suffix.lower() == ".3mf":
+    display = wd / "display.ply"  # assembly_3mf.py: the parts placed as assembly.json says, in their colours
+    if display.is_file():
+        src = display
+    elif src.suffix.lower() == ".3mf":
         conv = out / "render_input.ply"
         if not conv.exists():
             sys.path.insert(0, str(HERE))

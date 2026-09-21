@@ -78,6 +78,34 @@ Spread. market.spread_ratio is max / min over the selected comparables (null
 when min is 0) and market.thin is true when n < 5, or n < 20 and spread_ratio > 3; a
 skill reads the flag, it never works it out in prose.
 
+Clones (2026-09-21). Before the band, selected listings from the same shop
+at the same price whose titles share most of their words are one
+comparable: the first by weight keeps the record, `market_weight` is the
+sum (a shop's units are already split over its listings, so the sum gives
+the shop's rate back), and `collapsed` on it lists the listing ids folded
+in. comparables.json says `n_collapsed`. The coaster run of 2026-09-21 was
+four listings of one set by one shop; after this it is one.
+
+Outliers (2026-09-21). With 5 or more priced comparables, Tukey fences on
+the log of price: with r = max(p75 / p25, 1.5) over the unweighted
+quartiles, a price above p75 x r^1.5 or below p25 / r^1.5 is an outlier.
+Outliers stay in comparables.json marked `outlier: "high"|"low"` and are
+listed under market.outliers with title, shop and materials, but they do
+not enter the band, the spread, the concentration or the demand. A gold
+filament version of the same design at 100 USD in a 5 to 15 USD band is
+reported to the model, not averaged into the median. market.iqr and
+market.iqr_ratio (p75 - p25 and p75 / p25, unweighted, after outliers) are
+written for the record.
+
+Demand and concentration (2026-09-21). market.demand sums the sales
+estimates of the band: units_per_day over the rows with an estimate, and
+how many listings carry any review at all. The verdict is `unreliable`,
+before any other reading, when one shop holds CONCENTRATION_MAX (0.6) or
+more of the weight, or when the band's total demand is under
+DEMAND_MIN_UNITS_PER_DAY (0.1) on a units_per_day basis, or when fewer
+than 2 comparables remain after clones are collapsed. market.verdict_reason
+says which. price_candidates.py then allows the markup candidate only.
+
 Every path stored in viability.json is relative to the work dir.
 
 --summary FILE writes the compact market summary the research skill shows the
@@ -95,11 +123,11 @@ block: plates for that many units, the batch cost at the policy basis, and at
 p25, median and p75 the margin per unit, the units that pay the batch back
 and the profit if every unit sells.
 
-Verdict, deterministic and unchanged: `viable` when the market median clears
-the policy markup on cost, `thin` when it is above break-even but below that,
-`not_viable` when the median is below break-even. The price itself is chosen
-later by propose-price from price_candidates.py; this script only says what
-the market allows.
+Verdict, deterministic: `unreliable` as above, else `viable` when the market
+median clears the policy markup on cost, `thin` when it is above break-even
+but below that, `not_viable` when the median is below break-even. The price
+itself is chosen later by propose-price from price_candidates.py; this
+script only says what the market allows.
 
 Exit 0 with a verdict, 2 when there are no comparables with a price, 1 on error.
 """
@@ -122,6 +150,46 @@ HIST_BUCKETS = 12
 TOP_BY_WEIGHT = 30
 SAMPLE_TITLES = 20
 REJECTED_SAMPLE = 10
+CONFIDENCE = ("high", "medium", "low")
+CONCENTRATION_MAX = 0.6          # one shop at or above this share of the weight: the band is that shop's price
+DEMAND_MIN_UNITS_PER_DAY = 0.1   # under this, on a units_per_day basis, nobody is known to buy
+MIN_COMPARABLES = 2              # after clones collapse
+OUTLIER_MIN_N = 5                # fewer priced comparables than this: no outlier test
+FENCE_POWER = 1.5                # Tukey's 1.5 x IQR, on the log of price
+FENCE_MIN_RATIO = 1.5            # a band with p75 == p25 still gets a fence of x1.84 / /1.84
+CLONE_TITLE_SIMILARITY = 0.5     # Jaccard on title words, same shop and same price
+WITNESSES = ("filename", "drafts", "thumbnails", "analysis")
+
+
+def identity_of(rules: dict, path) -> dict | None:
+    """The research skill's judgement of what the object is, checked for shape and copied as written.
+
+    rules.json may carry
+      "identity": {"object": "small desk phone stand", "confidence": "low",
+                   "witnesses": ["drafts", "analysis"], "reason": "one sentence"}
+    `confidence` is one of high, medium, low; `witnesses` lists which of
+    filename, drafts, thumbnails, analysis supported the reading. The block
+    is carried into comparables.json and viability.json so the price stage
+    and the console can show how sure the identification was. Absent means
+    a rules file written before the field existed, and the copies are null.
+    """
+    ident = rules.get("identity")
+    if ident is None:
+        return None
+    if not isinstance(ident, dict):
+        die(f"rules.json identity must be an object: {path}")
+    conf = ident.get("confidence")
+    if conf not in CONFIDENCE:
+        die(f"rules.json identity.confidence must be one of {', '.join(CONFIDENCE)}, not {conf!r}: {path}")
+    if not isinstance(ident.get("object"), str) or not ident["object"].strip():
+        die(f"rules.json identity.object must be a short phrase: {path}")
+    wit = ident.get("witnesses")
+    if wit is None:
+        wit = []
+    if not isinstance(wit, list) or any(w not in WITNESSES for w in wit):
+        die(f"rules.json identity.witnesses must list only {', '.join(WITNESSES)}: {path}")
+    return {"object": ident["object"].strip(), "confidence": conf, "witnesses": list(wit),
+            "reason": ident.get("reason") if isinstance(ident.get("reason"), str) else None}
 
 # Material classes for the summary. The model sees counts per class before it
 # writes materials_allowed / materials_excluded, so the vocabulary here is
@@ -401,7 +469,85 @@ def comparable_record(r: dict) -> dict:
     }
     if r.get("excluded_by"):
         out["excluded_by"] = r["excluded_by"]
+    if r.get("collapsed"):
+        out["collapsed"] = list(r["collapsed"])
     return out
+
+
+_TITLE_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _title_words(r: dict) -> frozenset:
+    return frozenset(w for w in _TITLE_WORD.findall((r.get("title") or "").lower()) if len(w) > 2)
+
+
+def collapse_clones(selected: list[dict]) -> list[dict]:
+    """One comparable per product a shop lists several times at one price.
+
+    Same shop name, same price to the cent, and titles sharing at least
+    CLONE_TITLE_SIMILARITY of their words (Jaccard). The heaviest record
+    stays, its market_weight becomes the group's sum, and `collapsed` lists
+    the other listing ids. Listings without a shop name never collapse.
+    Input is in weight order; output keeps that order.
+    """
+    out: list[dict] = []
+    groups: list[tuple[str, float, frozenset, dict]] = []
+    for r in selected:
+        shop = r.get("shop") if isinstance(r.get("shop"), dict) else {}
+        name, price = shop.get("name"), r.get("price")
+        words = _title_words(r)
+        if name and _is_num(price) and words:
+            for g_name, g_price, g_words, head in groups:
+                if g_name == name and abs(g_price - float(price)) < 0.005:
+                    j = len(words & g_words) / len(words | g_words)
+                    if j >= CLONE_TITLE_SIMILARITY:
+                        head["market_weight"] = float(head.get("market_weight") or 0) + float(r.get("market_weight") or 0)
+                        head.setdefault("collapsed", []).append(r.get("listing_id"))
+                        break
+            else:
+                groups.append((name, float(price), words, r))
+                out.append(r)
+        else:
+            out.append(r)
+    return out
+
+
+def mark_outliers(rows: list[dict]) -> dict | None:
+    """Tukey fences on log price over the unweighted quartiles; sets `outlier` on the rows outside.
+
+    Returns the fences, or None when there are too few rows to judge.
+    """
+    prices = [float(r["price"]) for r in rows]
+    if len(prices) < OUTLIER_MIN_N:
+        return None
+    q = quantiles(prices)
+    if q["p25"] <= 0:
+        return None
+    ratio = max(q["p75"] / q["p25"], FENCE_MIN_RATIO)
+    high = q["p75"] * ratio ** FENCE_POWER
+    low = q["p25"] / ratio ** FENCE_POWER
+    for r in rows:
+        p = float(r["price"])
+        if p > high + 1e-9:
+            r["outlier"] = "high"
+        elif p < low - 1e-9:
+            r["outlier"] = "low"
+        else:
+            r.pop("outlier", None)
+    return {"low": round(low, 2), "high": round(high, 2), "p25": q["p25"], "p75": q["p75"],
+            "rule": f"outside p25 / r^{FENCE_POWER} .. p75 x r^{FENCE_POWER} with r = max(p75 / p25, {FENCE_MIN_RATIO}), unweighted, n >= {OUTLIER_MIN_N}"}
+
+
+def demand_of(rows: list[dict]) -> dict:
+    """What the band's sales estimates add up to: units a day, and how many listings show any review."""
+    ests = [r.get("sales_est") for r in rows if isinstance(r.get("sales_est"), dict)]
+    # A collapsed record's market_weight is the sum over its clones, and on a
+    # units_per_day basis the weight is the estimate, so the weight is the demand.
+    upd = [float(r["market_weight"]) if _is_num(r.get("market_weight")) else float(r["sales_est"]["units_per_day"])
+           for r in rows if isinstance(r.get("sales_est"), dict) and _is_num(r["sales_est"].get("units_per_day"))]
+    reviewed = sum(1 for e in ests if _is_num(e.get("listing_reviews")) and e["listing_reviews"] > 0)
+    return {"units_per_day": round(sum(upd), 4) if upd else None, "listings_with_estimate": len(upd),
+            "listings_with_reviews": reviewed, "n": len(rows)}
 
 
 def build_comparables(full: dict, rules: dict, min_rel: float) -> dict:
@@ -410,6 +556,9 @@ def build_comparables(full: dict, rules: dict, min_rel: float) -> dict:
     # weight, and the order in the file is that order.
     selected = sorted((r for r in kept if r["relevance"] >= min_rel),
                       key=lambda r: (-r["market_weight"], -r["relevance"], r.get("listing_id") or 0))
+    n_before = len(selected)
+    selected = collapse_clones(selected)
+    selected.sort(key=lambda r: (-r["market_weight"], -r["relevance"], r.get("listing_id") or 0))
     # The near misses are the useful rejects: they show the model what a
     # tighter or looser rule would change.
     rejected = sorted((r for r in kept if r["relevance"] < min_rel),
@@ -417,12 +566,14 @@ def build_comparables(full: dict, rules: dict, min_rel: float) -> dict:
     return {
         "mode": "rules",
         "product": rules.get("product") or full.get("product") or rules.get("noun"),
+        "identity": identity_of(rules, "rules.json"),
         "queries": [full["query"]] if full.get("query") else [],
         "taxonomy_id": rules.get("taxonomy_id", full.get("taxonomy_id")),
         "currency": full.get("currency") or "USD",
         "rules": rules,
         "n_scored": len(kept),
         "n_selected": len(selected),
+        "n_collapsed": n_before - len(selected),
         "min_relevance": min_rel,
         "comparables": [comparable_record(r) for r in selected],
         "rejected_count": len(rejected),
@@ -586,6 +737,7 @@ def main() -> int:
         rules = load(rules_path, "rules.json")
         if not isinstance(rules, dict) or not rules.get("noun"):
             die(f"rules.json needs at least a noun: {rules_path}")
+        identity_of(rules, rules_path)
         if full_path is None:
             cand = rules_path.parent / "etsy.full.json"
             full_path = cand if cand.is_file() else wd / "research" / "etsy.full.json"
@@ -639,6 +791,17 @@ def main() -> int:
         dst.write_text(json.dumps(out, indent=2))
         print(json.dumps(out))
         return 2
+    all_rows = rows
+    fences = mark_outliers(rows)
+    outliers = [c for c in rows if c.get("outlier")]
+    rows = [c for c in rows if not c.get("outlier")]
+    if rules is not None and outliers:
+        # comparables.json keeps them, marked, so the review step and price_candidates.py see the same rows.
+        by_id = {c.get("listing_id"): c for c in comps["comparables"]}
+        for c in outliers:
+            if c.get("listing_id") in by_id:
+                by_id[c["listing_id"]]["outlier"] = c["outlier"]
+        (wd / "comparables.json").write_text(json.dumps(comps, indent=2, ensure_ascii=False))
     unweighted = quantiles([float(c["price"]) for c in rows])
     weighted = weighted_quantiles([(float(c["price"]), weight_of(c)) for c in rows])
     basis = "weighted" if weighted else "unweighted"
@@ -659,6 +822,15 @@ def main() -> int:
     # applies under 20 listings.
     market["thin"] = bool(unweighted["n"] < 5 or (unweighted["n"] < 20 and market["spread_ratio"] is not None and market["spread_ratio"] > 3))
     market["weight_basis"], market["weight_concentration"] = weight_basis_of(rows)
+    market["iqr"] = round(unweighted["p75"] - unweighted["p25"], 2)
+    market["iqr_ratio"] = round(unweighted["p75"] / unweighted["p25"], 3) if unweighted["p25"] > 0 else None
+    market["outlier_fences"] = fences
+    market["outliers"] = [{"listing_id": c.get("listing_id"), "price": c.get("price"), "side": c["outlier"],
+                           "title": c.get("title"), "shop": (c.get("shop") or {}).get("name"),
+                           "materials": c.get("materials") or [], "url": c.get("url")} for c in outliers]
+    market["n_before_outliers"] = len(all_rows)
+    market["n_collapsed"] = comps.get("n_collapsed", 0)
+    market["demand"] = demand_of(rows)
     weighed = [c for c in rows if _is_num(c.get("weight_g")) and c["weight_g"] > 0]
     market["per_gram"] = quantiles([c["price"] / c["weight_g"] for c in weighed]) if weighed else None
     market["listings_with_weight"] = len(weighed)
@@ -727,17 +899,32 @@ def main() -> int:
 
     s0 = scenarios[0]
     med = market["median"]
-    if med < s0["break_even_price"]:
+    conc = market.get("weight_concentration") or {}
+    demand = market["demand"]
+    unreliable = []
+    if unweighted["n"] < MIN_COMPARABLES:
+        unreliable.append(f"{unweighted['n']} comparable(s) after clones collapsed")
+    if _is_num(conc.get("top_shop_share")) and conc["top_shop_share"] >= CONCENTRATION_MAX:
+        unreliable.append(f"{conc.get('top_shop') or 'one shop'} holds {conc['top_shop_share']:.0%} of the weight")
+    if market["weight_basis"] == "units_per_day" and _is_num(demand.get("units_per_day")) \
+            and demand["units_per_day"] < DEMAND_MIN_UNITS_PER_DAY:
+        unreliable.append(f"total demand {demand['units_per_day']:.3f} units a day, "
+                          f"{demand['listings_with_reviews']} of {demand['n']} listings with any review")
+    if unreliable:
+        verdict = "unreliable"
+    elif med < s0["break_even_price"]:
         verdict = "not_viable"
     elif med < s0["markup_price"]:
         verdict = "thin"
     else:
         verdict = "viable"
+    market["verdict_reason"] = "; ".join(unreliable) if unreliable else None
 
     out = {
         "ok": True,
         "product": comps.get("product"),
         "n_comparables": len(rows),
+        "identity": comps.get("identity"),
         "comparables_mode": comps.get("mode", "hand"),
         "market": market,
         "cost_basis": cb["basis"],
@@ -758,14 +945,19 @@ def main() -> int:
         "scenarios": scenarios,
         "stock": stock,
         "verdict": verdict,
-        "verdict_rule": "market median vs one-off break-even (not_viable below) and vs quote plus markup (thin below, viable at or above)",
+        "verdict_reason": market["verdict_reason"],
+        "verdict_rule": "unreliable when one shop holds 0.6 of the weight, demand is under 0.1 units a day, or fewer than 2 comparables remain; "
+                        "else market median vs break-even (not_viable below) and vs quote plus markup (thin below, viable at or above)",
     }
     if rules is not None:
         out["selection"] = {"rules": rel_to(wd, wd_path(wd, args.rules)), "full": rel_to(wd, full_path),
                             "n_scored": comps["n_scored"], "n_selected": comps["n_selected"],
                             "min_relevance": comps["min_relevance"], "compact_annotated": bool(annotated)}
     dst.write_text(json.dumps(out, indent=2))
-    line = {"ok": True, "out": str(dst), "verdict": verdict, "n": len(rows), "basis": basis, "median": med,
+    line = {"ok": True, "out": str(dst), "verdict": verdict, "verdict_reason": market["verdict_reason"],
+            "n": len(rows), "n_collapsed": market["n_collapsed"], "outliers": len(outliers),
+            "demand_units_per_day": demand.get("units_per_day"), "top_shop_share": conc.get("top_shop_share"),
+            "basis": basis, "median": med,
             "unweighted_median": unweighted["median"], "unit_cost": s0["unit_cost"],
             "break_even": s0["break_even_price"], "markup_price": s0["markup_price"],
             "margin_pct_at_median": s0["at"][1]["margin_pct"]}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { captureFromQuery, captureTurntable } from '@/lib/model/capture';
 import { loadPreview } from '@/lib/model/load';
 import { STUDIO_DEFAULTS, createStudio, type Pass, type Studio as StudioScene, type StudioConfig, type StudioStats } from '@/lib/model/studio';
-import { ConsoleNav, SiteHeader } from '@/components/site/SiteHeader';
+import { ConsoleShell, PageHeader } from '@/components/site/ConsoleShell';
 import { Spinner } from '@/components/site/Spinner';
 import { cn } from '@/lib/utils';
 
@@ -37,7 +37,7 @@ const SLIDERS: { key: keyof StudioConfig; label: string; min: number; max: numbe
   { key: 'margin', label: 'margin', min: 0, max: 0.35, step: 0.01 },
 ];
 
-const label = 'font-sans text-[0.6875rem] uppercase tracking-[0.22em] text-slate/60';
+const label = 'font-sans text-xs font-medium text-slate';
 
 export default function Studio() {
   const mount = useRef<HTMLDivElement>(null);
@@ -191,15 +191,8 @@ export default function Studio() {
   const set = (patch: Partial<StudioConfig>) => setCfg((c) => ({ ...c, ...patch }));
 
   return (
-    <div className="min-h-svh bg-paper text-navy">
-      <SiteHeader><ConsoleNav /></SiteHeader>
-      <main className="mx-auto max-w-[1180px] px-5 pb-24 sm:px-10">
-        <h1 className="font-display text-4xl font-semibold tracking-tight">Studio</h1>
-        <p className="mt-3 max-w-[58ch] font-sans leading-relaxed text-slate">
-          The product scene, live. Open a model, turn the knobs, and watch what the render
-          stage would produce. The depth and normal passes are the maps a diffusion model
-          conditions on, and they come off the same scene at no extra cost.
-        </p>
+    <ConsoleShell wide>
+        <PageHeader title="Studio" note="The product scene, live. Open a model and turn the knobs to see what the design stage would photograph." />
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div>
@@ -207,7 +200,7 @@ export default function Studio() {
               ref={mount}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) open(f); }}
-              className="aspect-square w-full overflow-hidden rounded-lg border border-mist bg-mist/30"
+              className="aspect-square w-full overflow-hidden rounded-2xl border border-mist bg-mist/30"
             />
             <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-3">
               <label className="cursor-pointer font-sans text-sm text-navy underline underline-offset-4">
@@ -260,7 +253,7 @@ export default function Studio() {
             ) : null}
           </div>
 
-          <aside className="space-y-5">
+          <aside className="space-y-5 self-start rounded-2xl border border-mist bg-white p-5 shadow-card">
             <div>
               <span className={label}>Filament</span>
               <div className="mt-2 flex items-center gap-3">
@@ -328,7 +321,6 @@ export default function Studio() {
             </button>
           </aside>
         </div>
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }

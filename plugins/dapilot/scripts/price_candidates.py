@@ -17,7 +17,12 @@ Candidates, per the policy decided 2026-09-09 and the deep market read of
            When viability.json says market.basis is "weighted" this is the
            weighted p75 and the candidate's `how` says so.
 A candidate whose input is missing (no market block, no median, no p75) is
-listed under `skipped` with the reason, never raised. p75 is also skipped when
+listed under `skipped` with the reason, never raised. When viability.json's
+verdict is `unreliable` (one shop's band, no observed demand, or fewer than
+2 comparables; see market_stats.py) the median and p75 are listed under
+`rejected` with reason `unreliable_band` and only the markup candidate can
+stand: the market number exists but is not evidence, and no prompt gets to
+argue otherwise. p75 is also skipped when
 its rounded price equals the rounded price of ANY other candidate (markup or
 median); the reason names which. Each emitted candidate carries net, fees,
 margin and margin percent. A candidate below the hard floor, or under the
@@ -184,7 +189,7 @@ def p75_sellers(wd: Path, p75: float) -> tuple[dict | None, str | None]:
              if isinstance(c, dict) and _num(c.get("price")) is not None]
     if not comps:
         return None, "comparables.json has no priced comparables; (c) of the p75 rule cannot be judged"
-    at_or_above = [c for c in comps if float(c["price"]) + 1e-9 >= p75]
+    at_or_above = [c for c in comps if float(c["price"]) + 1e-9 >= p75 and not c.get("outlier")]
     names = _shop_names(wd, at_or_above)
     weights = {}
     counts = {}
@@ -257,11 +262,16 @@ def generate(wd: Path, args) -> int:
             raw.append(("p75", p75_price, f"market p75 of {n} comparables, {p75:.2f}, {basis} band, rounded"))
 
     candidates, rejected = [], []
+    unreliable = viab.get("verdict") == "unreliable"
     for label, price, how in raw:
         pt = model.point(label, price, cost, how=how,
                          vs_median=round(price / median, 2) if median else None,
                          position_in_band=_band_position(price, market))
-        if price + 1e-9 < floor:
+        if unreliable and label in ("median", "p75"):
+            pt["rejected_because"] = "unreliable_band"
+            pt["band_reason"] = market.get("verdict_reason")
+            rejected.append(pt)
+        elif price + 1e-9 < floor:
             pt["rejected_because"] = "below_floor"
             pt["below_floor_by"] = round(floor - price, 2)
             rejected.append(pt)
@@ -316,7 +326,8 @@ def generate(wd: Path, args) -> int:
                           "skipped": [s["label"] for s in skipped],
                           "p75_sellers": {k: sellers[k] for k in ("distinct_named_shops", "top_share", "unnamed_share")} if sellers else None}))
         return 0
-    out["reason"] = "no candidate clears break-even and the minimum margin"
+    out["reason"] = ("the market band is unreliable (" + str(market.get("verdict_reason")) + ") and the markup candidate "
+                     "does not clear the floor" if unreliable else "no candidate clears break-even and the minimum margin")
     dst = wd / "price.rejected.json"
     dst.write_text(json.dumps(out, indent=2))
     print(json.dumps({"ok": False, "out": str(dst), "reason": out["reason"], "floor": floor,

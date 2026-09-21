@@ -1,6 +1,6 @@
 {
   "process": "intake",
-  "comment": "Fixed order. A stage runs when every `requires` glob matches in the work dir and no `produces` glob does. Reordered 2026-09-09: cheap drafts, research and the price proposal come before the expensive media, so an item that cannot sell never costs a capture or a generation. 2026-09-13: `design` (product-designer) replaces `render`; the storefront is Etsy, so copy and publish stay disabled until they are rebuilt for it. 2026-09-17: design also requires `price.approved.json`, written when a person confirms or overrides the proposed price in the console (POST /jobs/{id}/price); nothing paid runs for a price nobody approved. A stage's `agent` overrides the department worker. Disabled stages are listed so the vocabulary is agreed before they exist.",
+  "comment": "Fixed order. A stage runs when every `requires` glob matches in the work dir and no `produces` glob does. Reordered 2026-09-09: cheap drafts, research and the price proposal come before the expensive media, so an item that cannot sell never costs a capture or a generation. 2026-09-13: `design` (product-designer) replaces `render`; the storefront is Etsy, so copy and publish stay disabled until they are rebuilt for it. 2026-09-17: design also requires `price.approved.json`, written when a person confirms or overrides the proposed price in the console (POST /jobs/{id}/price); nothing paid runs for a price nobody approved. A stage's `agent` overrides the department worker. Disabled stages are listed so the vocabulary is agreed before they exist. 2026-09-21: copy and publish are rebuilt for Etsy and enabled. `copy` (write-listing) writes the Etsy text and the social captions as one draft, which listing_copy.py checks and splits into listing.json and social/posts.json. `publish` has no judgement in it, so it is a `script` stage: run_intake.py runs publish_product.py itself and no worker is spent. It drafts, uploads media, activates the listing and sends the social posts; the person's approval of the sale price is the gate for all of it, and `publish.auto_activate` and `publish.auto_post` in store config hand either half back to a person.",
   "stages": [
     {
       "stage": "analyze",
@@ -93,29 +93,32 @@
       "stage": "copy",
       "skill": "write-listing",
       "requires": [
-        "analysis.json",
-        "quote.json",
+        "design.json",
+        "price.approved.json",
         "comparables.json",
-        "price.json",
-        "design.json"
+        "quote.json"
       ],
       "produces": [
-        "listing.json"
+        "listing.json",
+        "social/posts.json"
       ],
       "gate": "auto",
-      "enabled": false
+      "enabled": true
     },
     {
       "stage": "publish",
-      "skill": "publish-listing",
+      "skill": "publish-product",
       "requires": [
-        "listing.json"
+        "listing.json",
+        "design.json",
+        "price.approved.json"
       ],
       "produces": [
-        "publish.json"
+        "published.json"
       ],
-      "gate": "propose",
-      "enabled": false
+      "gate": "auto",
+      "enabled": true,
+      "script": "publish_product.py"
     }
   ]
 }

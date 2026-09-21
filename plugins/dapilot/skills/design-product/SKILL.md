@@ -1,6 +1,6 @@
 ---
 name: design-product
-description: Names one priced model and art-directs its Etsy listing media, studio stills, a turntable video, AI lifestyle photos and a lifestyle clip, by writing one design brief and reviewing the result once; the design script captures, generates, caps the spend and assembles design.json. Use as the design stage once price.json, comparables.json and the preview drafts exist. Not for the Etsy title, description or tags (copy), not for pricing, not for publishing.
+description: Names one priced model and art-directs its Etsy listing media, four AI lifestyle photos and a lifestyle clip as the standard with studio stills as extras, by writing one design brief, reviewing the result and redoing a rejected asset once; the design script captures, generates, caps the spend and assembles design.json. Use as the design stage once price.json, comparables.json and the preview drafts exist. Not for the Etsy title, description or tags (copy), not for pricing, not for publishing.
 allowed-tools: Read, Bash, Write
 ---
 
@@ -12,8 +12,11 @@ A brief with `stage: design`. The work dir has `source.<ext>`, `analysis.json`,
 and no `design.json`. Only items with a sale price get here.
 
 ## Inputs
-- `design/context.json`, written by step 2: product noun and query, the top
+- `design/context.json`, written by step 2: product noun and query with
+  research's `identity` (the object and how sure it was), the top
   comparable titles, size and scale word, the drafts and their yaws, the
+  3MF's own `thumbnails` when the project carried them (colour renders,
+  worth a Read before naming), the
   palette, the limits, the cost of each paid asset and the cap
 - `renders/draft_*.png`: what the object looks like, as exported
 - `design/review.png` and `design/produced.json`, written by step 5
@@ -33,16 +36,29 @@ for captures. The script fails with a one-line reason when one is missing.
    - `rotate` and `hero_yaw`: stand it the way a buyer expects, pick the side
      that reads best; yaw is the draft's yaw
    - `angles`: the other stills, each showing something the hero does not
-   - `elevation` and `color` from the palette
-   - `lifestyle_images`: up to the limit, one scene each, and which still it
-     starts from; `[]` when no scene would help a buyer
-   - `lifestyle_video`: one scene and `motion`, or `null`
+   - `elevation` and `color` from the palette. When `context.assembly` says
+     `multicolour`, the parts keep the file's own filament colours and
+     `color` only picks the backdrop: choose the palette colour nearest the
+     largest part
+   - `assembled`: leave it out. `context.assembly.required_assembly` already
+     decides whether the media shows the product put together or laid out
+     as printed. Set `false` only when the buyer receives loose parts and
+     the listing should show them so (a kit), `true` never needs setting
+   - `lifestyle_images`: exactly `limits.lifestyle_images` scenes (4), one
+     scene each, and which still it starts from. The count is the listing
+     standard, not your call
+   - `lifestyle_video`: one scene, and `start_from`: the lifestyle photo the
+     clip opens on (the clip animates that photo, so pick the scene with
+     room to move in). Required, never `null`
+   - `studio_photos`: `[]`, or the stills (`hero`, `angle_N`) worth adding
+     after the lifestyle photos because they show something no scene does
    - `reason`: one or two sentences
    Write `design/brief.json`, schema under Outputs.
 4. Run `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py check --workdir $WORKDIR`.
    Exit 1: fix only what `errors` names and run check once more. A second
-   failure: `ok:false` with the errors. An error about the cap is fixed by
-   dropping assets, never by editing config.
+   failure: `ok:false` with the errors. An error about the cap is for a
+   person: the standard is config, so do not drop assets and do not edit
+   config; `ok:false` with the error.
 5. Run, with a Bash timeout of 600000 ms:
    `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py produce --workdir $WORKDIR`
    - Exit 0: continue.
@@ -56,17 +72,28 @@ for captures. The script fails with a one-line reason when one is missing.
    to a row, in the order of `review_cells` in the output; `name@k/4` is
    frame k of a clip. Answer two questions only:
    - Is the hero usable: the whole object in frame, lit, standing as a buyer
-     expects? No: `ok:false`, reason naming what is wrong. Do not finalize.
+     expects? Every generated asset starts from it. No: `ok:false`, reason
+     naming what is wrong. Do not finalize.
    - Which generated assets misrepresent the product? Reject a lifestyle
      image or the lifestyle clip that changes its shape, parts or colour,
      adds copies, text or a mangled hand, or (clip) morphs between frames.
      Reject an angle only if it shows nothing. Never reject for taste.
-7. Run `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py finalize --workdir $WORKDIR`
-   adding `--reject id,id --reason "<one sentence>"` when step 6 rejected
-   anything. Non-zero exit: `ok:false`, reason from its JSON.
-8. Append the log paragraph: name, rotate, hero yaw, angles, colour, scenes
-   in a few words each, produce runs and steps, what was rejected and why,
-   photo count, listing video, spend. Remove `.lock`. Print the result line
+7. If step 6 rejected a lifestyle image or the clip, or `produce` listed
+   one under `failed`, make it again, once:
+   `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py redo --workdir $WORKDIR --reject id,id --reason "<what was wrong, one sentence>"`.
+   The reason goes into the next prompt, so say what to keep true ("the
+   insert has four diamonds, not eight petals"). Then run step 5 and step 6
+   once more for the ids in `redo`. Ids under `already_redone` or `over_cap`
+   are not made again.
+8. Run `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py finalize --workdir $WORKDIR`
+   adding `--reject id,id --reason "<one sentence>"` for whatever is still
+   wrong after the redo, and `--no-redo` only when `redo` answered
+   `over_cap` for it. Studio stills stand in for missing lifestyle photos and
+   `design.json` says `standard.met: false`; that is a result, not a failure.
+   Non-zero exit: `ok:false`, reason from its JSON.
+9. Append the log paragraph: name, rotate, hero yaw, angles, colour, scenes
+   in a few words each, produce runs and steps, what was rejected, redone and
+   why, photo count, listing video, whether the standard was met, spend. Remove `.lock`. Print the result line
    with outputs `["design.json"]` and a summary like
    `"Cat Fidget Clicker: 6 photos, lifestyle clip, 1.11 USD"`.
 
@@ -75,17 +102,21 @@ for captures. The script fails with a one-line reason when one is missing.
   ```json
   {"name": "Cat Fidget Clicker", "rotate": "0,0,0", "hero_yaw": 20, "angles": [110, 200, 290],
    "elevation": 30, "color": "#E8E4DC",
-   "lifestyle_images": [{"scene": "...", "reference": "hero"}, {"scene": "...", "reference": "angle_1"}],
-   "lifestyle_video": {"scene": "...", "motion": "drift", "negative": "..."},
+   "lifestyle_images": [{"scene": "...", "reference": "hero"}, {"scene": "...", "reference": "angle_1"},
+                        {"scene": "...", "reference": "hero"}, {"scene": "...", "reference": "angle_2"}],
+   "lifestyle_video": {"scene": "...", "start_from": "lifestyle_1"},
+   "studio_photos": [],
    "reason": "one or two sentences"}
   ```
 - By the script: `design/context.json`, `design/plan.json`, `design/produced.json`,
   `design/review.png`, `design/frames/`, `design/turntable.mp4`,
   `design/lifestyle_N.png`, `design/lifestyle.mp4`, their `.request.json` and
   records, `design/photos/NN_<id>.png` in listing order, `design/video.mp4`.
-- `design.json`, by `finalize`: name, colour, orientation, `photos` in order,
-  the listing `video` (the lifestyle clip when kept and within Etsy's limits,
-  else the turntable), `videos`, `rejected`, `failed`, `spend`, `warnings`.
+- `design.json`, by `finalize`: name, colour, orientation, `photos` in order
+  (lifestyle photos, stand-in stills, then `studio_photos`), the listing
+  `video` (the lifestyle clip when kept and within Etsy's limits, else the
+  turntable), `standard` (wanted, kept, `met`), `videos`, `rejected`,
+  `redone`, `failed`, `spend`, `warnings`.
   Its existence completes the stage.
 
 ## Gate
@@ -99,7 +130,8 @@ through `design_product.py`, and `check` refuses a plan above
 - fal key missing or balance empty (exit 2): `ok:false`. The studio assets
   already captured stay and are reused by the retry.
 - One lifestyle asset failed on fal: the script records it under `failed`
-  and carries on. Not a stage failure; mention it in the log.
+  and carries on. Step 7 makes it again once. Not a stage failure; mention
+  it in the log.
 - No clip fits Etsy's limits: `finalize` fails; `ok:false` with its reason.
 
 ## Do not
@@ -108,7 +140,9 @@ through `design_product.py`, and `check` refuses a plan above
 - Do not run `capture_turntable.py`, `generate_image.py` or
   `generate_video.py` yourself, and never pass `--force`.
 - Do not run `produce` again after exit 0 to get a better picture, and do
-  not rewrite the brief after `produce` started. One design pass per item.
+  not rewrite the brief after `produce` started. One design pass per item,
+  plus the one `redo` of step 7 for assets that misrepresent the product,
+  never for taste.
 - Do not write the Etsy title, tags or description. `name` is the product's
   name, not a search string.
 - Do not read `design/frames/` or the full-size photos. The review sheet is

@@ -10,7 +10,8 @@
   "usd_per_stage": {
    "research": 1.0,
    "price": 0.6,
-   "design": 1.0
+   "design": 1.0,
+   "copy": 0.6
   }
  },
  "pricing_usd_per_1k_tokens": {
@@ -48,10 +49,12 @@
  "turns_per_stage": {
   "research": 30,
   "price": 25,
-  "design": 30
+  "design": 40,
+  "copy": 20
  },
  "minutes_per_stage": {
-  "design": 40
+  "design": 40,
+  "publish": 25
  },
  "design": {
   "studio_url": "http://localhost:8081",
@@ -76,14 +79,15 @@
    "fps": 24
   },
   "lifestyle_images": {
-   "max": 3,
-   "endpoint": "fal-ai/nano-banana-2/edit",
+   "count": 4,
+   "endpoint": "fal-ai/nano-banana-pro/edit",
    "resolution": "2K",
    "aspect": "1:1",
-   "usd_each": 0.12
+   "usd_each": 0.15
   },
   "lifestyle_video": {
    "enabled": true,
+   "required": true,
    "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
    "frames": 120,
    "fps": 24,
@@ -93,9 +97,16 @@
    "guidance": 5.0,
    "usd_per_second": 0.1,
    "billed_fps": 16,
-   "drift_arc": 40
+   "drift_arc": 40,
+   "engine": "i2v",
+   "i2v": {
+    "endpoint": "minimax/h3-max/image-to-video",
+    "resolution": "1080P",
+    "seconds": 6,
+    "usd_per_second": 0.16
+   }
   },
-  "usd_cap_per_item": 2.0,
+  "usd_cap_per_item": 3.0,
   "deadline_s": 480,
   "etsy": {
    "max_photos": 10,
@@ -105,5 +116,22 @@
    "video_max_mb": 100
   },
   "_prices": "estimates, checked on fal 2026-09-13: nano-banana-2/edit 0.08 USD per image, 1.5x at 2K; wan-22-vace depth 0.10 USD per second at 720p, billed at 16 fps"
+ },
+ "social": {
+  "comment": "One entry per platform. adapter is a module in plugins/dapilot/scripts/social/ or in DAPILOT_SOCIAL_ADAPTER_DIR; account names the session file under $DAPILOT_STORE_DIR/social/sessions/<platform>/.",
+  "platforms": {
+   "instagram": {
+    "adapter": "instagram_api",
+    "account": "shop",
+    "api_version": null,
+    "enabled": true
+   }
+  }
+ },
+ "publish": {
+  "comment": "What the approval of a sale price sets off. false hands that step back to a person in the console.",
+  "auto_activate": true,
+  "auto_post": true,
+  "auto_since": null
  }
 }

@@ -19,7 +19,7 @@ type Batch = NonNullable<NonNullable<Quote['batch']>>;
 type Tier = Batch['prices'][number];
 
 const head =
-  'py-2.5 font-sans text-[0.6875rem] font-medium uppercase tracking-[0.18em] text-slate/60';
+  'py-2.5 font-sans text-xs font-medium text-slate';
 
 export function BatchTable({ batch }: { batch: Batch }) {
   const tiers: Tier[] = [...batch.prices].sort((a, b) => a.quantity - b.quantity);
@@ -33,11 +33,9 @@ export function BatchTable({ batch }: { batch: Batch }) {
   const oneOff = tiers[0].quantity === 1;
 
   return (
-    <section className="mt-14">
-      <h2 className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.22em] text-slate/60">
-        Batch pricing
-      </h2>
-      <p className="mt-3 max-w-[58ch] font-sans text-sm leading-relaxed text-slate">
+    <section>
+      <h3 className="font-display text-[0.9375rem] font-semibold tracking-tight text-navy">Batch pricing</h3>
+      <p className="mt-2 max-w-[58ch] font-sans text-sm leading-relaxed text-slate">
         {batch.max_per_plate} fit on one plate.{' '}
         {bestSaving > 0 && floorAt ? (
           <>

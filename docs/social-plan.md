@@ -120,11 +120,38 @@ never ships under dapi's name.
   manage insights.
 - Token is long-lived (60 days); `instagram_auth.py refresh` runs with the
   metrics schedule. Token at `$DAPILOT_STORE_DIR/instagram_token.json`.
-- The API fetches media from a public URL. Default: a Cloudflare R2 bucket
-  on the free tier, objects deleted after publish. Fallback: a
-  `cloudflared` quick tunnel to the job API for the length of the fetch.
+- The API fetches media from a public URL. Decided 2026-09-21: Etsy is the
+  source. Every photo and the video uploaded to a listing, a draft included,
+  get a public CDN URL (JPEG and MP4), recorded in `publish.json` by
+  `etsy_listing.py media`. No bucket, no tunnel, and social posting follows
+  Etsy publishing, which is the order we want anyway.
 - One Reel (9:16 turntable or lifestyle clip) and one carousel (photos in
   listing order) per product, on different days.
+
+## 6b. The two contracts (built 2026-09-21, `scripts/social/base.py`)
+
+`Integration` is one platform: `limits`, `check(post)` with no network,
+`submit(post, save, resume)` which checkpoints through `save` before the step
+that cannot be undone, `confirm(post, checkpoint)` which only reads, and
+`metrics`. `Session` is one account on one platform staying signed in:
+`status()` asks the platform and answers `ok`, `expiring`, `needs_login` or
+`challenge`; `refresh()` renews without a person where the platform allows
+it; `keepalive()` is status then refresh when due; `login_help()` is the
+sentence a person reads. They are separate because they run on different
+clocks: posts follow the queue, `social_post.py session keepalive` runs
+daily whether or not anything is posted.
+
+- API platforms: the session is a token file. Instagram's 60-day token is
+  renewed once it has 14 days left.
+- Browser platforms: the session is a CloakBrowser persistent profile plus a
+  small JSON beside it. `status()` opens the platform headless and looks for
+  the logged-in marker; `refresh()` is a short visit that lets the platform
+  roll its cookies; a login wall or a challenge is `needs_login` or
+  `challenge` and exits 4. No script ever types a password. The profile must
+  be launched with the same fingerprint seed, locale, timezone and IP every
+  time: a session that "will not stay connected" is usually a new device
+  fingerprint on every launch, which the platform answers by ending the
+  session. The seed is stored in the session JSON when the profile is made.
 
 ## 7. Build order
 

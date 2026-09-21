@@ -131,7 +131,12 @@ def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None,
     tool subprocesses holding the pipes, so the wait outlived the timeout by
     an hour on 2026-09-09. Returns (returncode, stdout, stderr, timed_out).
     """
-    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    # Headless workers see an empty CLAUDE_PLUGIN_ROOT (2026-09-13), so every skill's
+    # `${CLAUDE_PLUGIN_ROOT}/scripts/...` line failed and the worker went looking for
+    # the scripts by hand. Set it here; an absolute work dir spares the same hunt.
+    env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True, env=env)
     try:
         out, err = p.communicate(timeout=timeout_s)
         return p.returncode, out, err, False
@@ -156,8 +161,37 @@ def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, er
                              "stdout": out[-200000:], "stderr": err[-20000:]}, indent=2))
 
 
+def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
+    """A stage with no judgement in it: run its script, and write the result line a worker would have printed.
+
+    The script takes --workdir, prints one JSON object and exits 0 when the stage is done. No model is
+    spent, so the cost is zero and the only budget is the wall clock.
+    """
+    tag = f"{brief['item'][:8]} {brief['stage']} #{brief['attempt']}"
+    wd = Path(brief["workdir"]) if Path(brief["workdir"]).is_absolute() else root / brief["workdir"]
+    lock = wd / ".lock"
+    lock.write_text(json.dumps({"run": brief["run"], "stage": brief["stage"], "agent": "run_intake"}))
+    cmd = [os.environ.get("DAPILOT_PYTHON") or sys.executable, str(PLUGIN_ROOT / "scripts" / brief["script"]), "--workdir", str(wd)]
+    t0 = time.time()
+    rc, stdout, stderr, timed_out = run_headless(cmd, root, timeout_s)
+    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": round(time.time() - t0, 1), "launch_attempts": 1}
+    keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
+    lock.unlink(missing_ok=True)
+    out = last_json_line(stdout) or last_json_line(stderr) or {}
+    ok = rc == 0 and out.get("ok") is not False and all(list(wd.glob(g)) for g in brief["produces"])
+    reason = "" if ok else (f"{brief['script']} exceeded {timeout_s}s" if timed_out else
+                            str(out.get("reason") or out.get("error") or (stderr or stdout)[-200:] or f"exit {rc}"))
+    summary = json.dumps({k: v for k, v in out.items() if k in ("etsy", "posted", "failed", "skipped", "cached")}) if ok else reason
+    log(f"{tag}: script {'ok' if ok else 'failed: ' + reason[:120]}")
+    return {"ok": ok, "cached": bool(out.get("cached")), "run": brief["run"], "item": brief["item"], "stage": brief["stage"],
+            "agent": "run_intake", "department": brief["department"], "outputs": brief["produces"] if ok else [],
+            "needs_human": None, "reason": reason, "summary": summary[:300]}, meta
+
+
 def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
     """Return (result_line, meta). Always returns a result line the ledger can record."""
+    if brief.get("script"):
+        return run_script_stage(brief, root, timeout_s)
     tag = f"{brief['item'][:8]} {brief['stage']} #{brief['attempt']}"
     synthetic = {
         "ok": False, "cached": False, "run": brief["run"], "item": brief["item"], "stage": brief["stage"],
@@ -267,6 +301,9 @@ def main() -> int:
         briefs = nxt.get("briefs", [])
         if a.dry_run:
             for b in briefs:
+                if b.get("script"):
+                    print(f"python {b['script']} --workdir {b['workdir']}   # script stage '{b['stage']}', no worker")
+                    continue
                 print(" ".join(repr(x) if " " in x else x for x in worker_cmd(b, a, cfg)))
             print(json.dumps({"ok": True, "dry_run": True, "run": run, "briefs": len(briefs), "remaining": nxt.get("remaining")}))
             return 0

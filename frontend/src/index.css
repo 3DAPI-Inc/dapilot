@@ -37,6 +37,8 @@
     --color-navy: var(--navy);
     --color-slate: var(--slate);
     --color-ice: var(--ice);
+    --color-ok: var(--ok);
+    --color-warn: var(--warn);
 
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
@@ -87,6 +89,7 @@
     --text-statement--letter-spacing: -0.022em;
 
     --shadow-hairline: 0 1px 2px 0 oklch(0.3174 0.0673 258.82 / 0.07);
+    --shadow-card: 0 1px 2px 0 oklch(0.3174 0.0673 258.82 / 0.05), 0 8px 24px -12px oklch(0.3174 0.0673 258.82 / 0.12);
     --shadow-lift: 0 6px 20px -6px oklch(0.3174 0.0673 258.82 / 0.22);
 }
 
@@ -96,6 +99,10 @@
     --navy: oklch(0.3174 0.0673 258.82);
     --slate: oklch(0.5203 0.0246 257.4);
     --ice: oklch(0.7505 0.0816 257.91);
+    /* Console only: a verdict has to be scannable, so the app screens get a
+       quiet green and amber. The landing page never uses them. */
+    --ok: oklch(0.52 0.095 162);
+    --warn: oklch(0.6 0.115 70);
 
     --background: var(--paper);
     --foreground: oklch(0.1486 0.012 259.7);

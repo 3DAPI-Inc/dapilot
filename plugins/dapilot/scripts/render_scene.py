@@ -151,6 +151,11 @@ mat.use_nodes = True
 nt = mat.node_tree
 bsdf = nt.nodes["Principled BSDF"]
 bsdf.inputs["Base Color"].default_value = (*srgb_to_linear(hex_rgb(a.color)), 1.0)
+if getattr(obj.data, "color_attributes", None) and len(obj.data.color_attributes):
+    # A multicolour display.ply carries each part's filament colour on its vertices; it replaces --color.
+    vcol = nt.nodes.new("ShaderNodeVertexColor")
+    vcol.layer_name = obj.data.color_attributes[0].name
+    nt.links.new(vcol.outputs["Color"], bsdf.inputs["Base Color"])
 bsdf.inputs["Roughness"].default_value = 0.42
 if "Specular IOR Level" in bsdf.inputs:
     bsdf.inputs["Specular IOR Level"].default_value = 0.45

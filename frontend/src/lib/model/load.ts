@@ -104,7 +104,7 @@ async function load3mf(file: File, signal: AbortSignal): Promise<Preview> {
 export async function loadPreview(file: File, signal: AbortSignal): Promise<Preview> {
   const extension = extensionOf(file.name);
   if (extension === '.3mf') return load3mf(file, signal);
-  if (extension !== '.stl' && extension !== '.obj') {
+  if (extension !== '.stl' && extension !== '.obj' && extension !== '.ply') {
     throw new Error(`no preview for ${extension || 'a file with no extension'}`);
   }
 

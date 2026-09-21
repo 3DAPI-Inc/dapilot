@@ -2,7 +2,9 @@ import { Suspense, lazy, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ACCEPTED_EXTENSIONS, type Job, createJobs, getJob, isLive } from '@/api/jobs';
-import { ConsoleNav, SiteHeader } from '@/components/site/SiteHeader';
+import { UploadCloud } from 'lucide-react';
+import { ConsoleShell, PageHeader, Panel } from '@/components/site/ConsoleShell';
+import { JobThumb, StatusText } from '@/components/site/JobRow';
 import { Spinner } from '@/components/site/Spinner';
 import { extensionOf } from '@/lib/model/load';
 import { cn } from '@/lib/utils';
@@ -59,25 +61,17 @@ function StartedRow({ job }: { job: Job }) {
   if (j.viability?.verdict) facts.push(j.viability.verdict.replace('_', ' '));
   if (j.pricing?.proposal) facts.push(`sell at $${j.pricing.proposal.price.toFixed(2)}`);
   return (
-    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-mist py-2.5 font-sans text-sm">
-      <Link to={`/jobs/${j.id}`} className="min-w-0 truncate text-navy underline-offset-4 hover:underline">
-        {j.fileName}
+    <li className="border-b border-mist last:border-b-0">
+      <Link to={`/jobs/${j.id}`} className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-mist/30 sm:px-5">
+        <JobThumb job={j} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-sans text-[0.9375rem] font-medium text-navy">{j.fileName}</span>
+          <span className={cn('mt-0.5 block truncate font-sans text-[0.8125rem] tabular-nums', j.status === 'failed' ? 'text-destructive' : 'text-slate')}>
+            {j.status === 'failed' || j.status === 'blocked' ? j.reason : facts.join(' · ') || 'Just started'}
+          </span>
+        </span>
+        <StatusText status={j.status} stage={j.stage} className="text-[0.8125rem]" />
       </Link>
-      {j.stripped ? <span className="text-xs text-slate/70">project settings stripped</span> : null}
-      {facts.length > 0 ? <span className="tabular-nums text-navy">{facts.join(' · ')}</span> : null}
-      {j.status === 'failed' || j.status === 'blocked' ? (
-        <span className={j.status === 'failed' ? 'text-destructive' : 'text-slate'}>
-          {j.stage}: {j.reason}
-        </span>
-      ) : j.status === 'done' ? (
-        <span className="text-slate">{j.stage} done</span>
-      ) : (
-        <span className="flex items-center gap-1.5 text-slate">
-          <Spinner className="size-3 border" />
-          {j.stage}
-          {j.reason ? ` · ${j.reason}` : ''}
-        </span>
-      )}
     </li>
   );
 }
@@ -163,13 +157,8 @@ export default function Upload() {
   const busy = upload.isPending;
 
   return (
-    <div className="min-h-svh bg-paper text-navy">
-      <SiteHeader>
-        <ConsoleNav />
-      </SiteHeader>
-
-      <main className="mx-auto max-w-[940px] px-5 pb-24 sm:px-10">
-        <h1 className="font-display text-4xl font-semibold tracking-tight">Upload</h1>
+    <ConsoleShell>
+        <PageHeader title="Upload" note="Stage your model files, look them over, then hand them to the agent." />
 
         <div
           onDragEnter={(e) => {
@@ -189,15 +178,15 @@ export default function Upload() {
             setDragging(false);
             accept(e.dataTransfer.files);
           }}
-          className="mt-8"
+          className="mt-6"
         >
           <label
             className={cn(
-              'block cursor-pointer rounded-2xl border text-center transition-colors',
+              'block cursor-pointer rounded-2xl border border-dashed text-center transition-colors',
               'focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ice',
               // The box gives up its height once there is something to look at.
               staged.length > 0 ? 'px-8 py-8' : 'px-8 py-16',
-              dragging ? 'border-ice bg-ice/10' : 'border-mist bg-white hover:border-slate/25',
+              dragging ? 'border-ice bg-ice/10' : 'border-slate/25 bg-white hover:border-slate/50',
             )}
           >
             <input
@@ -217,52 +206,40 @@ export default function Upload() {
               </span>
             ) : (
               <>
-                <span className="block font-display text-2xl font-semibold tracking-tight">
+                <UploadCloud className="mx-auto size-7 text-slate/50" aria-hidden="true" />
+                <span className="mt-4 block font-display text-xl font-semibold tracking-tight">
                   Drop model files here
                 </span>
-                <span className="mt-2 block font-sans text-slate underline underline-offset-4">
-                  or choose files
-                </span>
-                <span className="mt-7 block font-sans text-[0.6875rem] uppercase tracking-[0.22em] text-slate/50">
-                  stl · 3mf · obj
+                <span className="mt-1.5 block font-sans text-sm text-slate">
+                  or <span className="text-navy underline underline-offset-4">choose files</span>. STL, 3MF or OBJ. Nothing is sent until you press Upload.
                 </span>
               </>
             )}
           </label>
         </div>
 
-        {staged.length === 0 ? (
-          <p className="mt-5 max-w-[46ch] font-sans text-sm leading-relaxed text-slate">
-            Files are keyed by content, so the same model uploaded twice under two names is
-            processed once. Nothing is sent until you press Upload.
-          </p>
-        ) : null}
-
-        {sent > 0 ? (
-          <p className="mt-5 font-sans text-[0.9375rem] text-navy">
-            {sent === 1 ? 'One run started.' : `${sent} runs started.`}{' '}
-            <Link to="/agent-runs" className="underline underline-offset-4">
-              Watch it on agent runs
-            </Link>
-            .
-          </p>
-        ) : null}
-
         {started.length > 0 ? (
-          <section className="mt-6">
-            <h2 className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.22em] text-slate/60">
-              Started
-            </h2>
-            <ul className="mt-3 border-t border-mist">
-              {started.map((job) => (
-                <StartedRow key={job.id} job={job} />
-              ))}
-            </ul>
+          <section className="mt-8">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="font-display text-[0.9375rem] font-semibold tracking-tight">
+                {sent > 0 ? (sent === 1 ? 'One run started' : `${sent} runs started`) : 'Started'}
+              </h2>
+              <Link to="/agent-runs" className="font-sans text-sm text-slate underline-offset-4 hover:text-navy hover:underline">
+                All agent runs
+              </Link>
+            </div>
+            <Panel className="mt-3 overflow-hidden">
+              <ul>
+                {started.map((job) => (
+                  <StartedRow key={job.id} job={job} />
+                ))}
+              </ul>
+            </Panel>
           </section>
         ) : null}
 
         {staged.length > 0 ? (
-          <section className="mt-10 grid gap-8 sm:grid-cols-[minmax(0,1fr)_15rem]">
+          <section className="mt-8 grid gap-6 md:grid-cols-[minmax(0,1fr)_18rem]">
             {/* Keyed on the file so switching selection remounts the viewer's
                 loading state rather than showing the last model under a new name. */}
             {selected ? (
@@ -271,12 +248,12 @@ export default function Upload() {
               </Suspense>
             ) : null}
 
-            <div className="flex flex-col">
-              <h2 className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.22em] text-slate/60">
-                Staged
+            <Panel className="flex flex-col self-start p-5">
+              <h2 className="font-display text-[0.9375rem] font-semibold tracking-tight">
+                Staged <span className="ml-1 font-sans text-sm font-normal tabular-nums text-slate">{staged.length}</span>
               </h2>
 
-              <ul className="mt-3 border-t border-mist">
+              <ul className="mt-2 border-t border-mist">
                 {staged.map((entry, index) => (
                   <li key={entry.id} className="border-b border-mist">
                     <div className="flex items-center gap-2 py-2.5">
@@ -337,12 +314,10 @@ export default function Upload() {
                 )}
               </button>
 
-              <p className="mt-3 font-sans text-xs leading-relaxed text-slate/70">
-                Uploading analyses, slices and prices each file on dapi, then researches the
-                market and proposes a sale price. Renders run only for what can sell. Nothing is
-                published.
+              <p className="mt-3 font-sans text-xs leading-relaxed text-slate">
+                Each file is sliced and priced on dapi, then researched. Nothing is published.
               </p>
-            </div>
+            </Panel>
           </section>
         ) : null}
 
@@ -368,7 +343,6 @@ export default function Upload() {
             ))}
           </ul>
         ) : null}
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }

@@ -16,5 +16,5 @@ export function formatWhen(iso: string): string {
   });
 }
 
-/** dapi prices are USD and always shown to the cent. */
-export const money = (amount: number): string => `$${amount.toFixed(2)}`;
+/** dapi prices are USD and always shown to the cent. A loss reads -$0.24, not $-0.24. */
+export const money = (amount: number): string => `${amount < 0 ? '-' : ''}$${Math.abs(amount).toFixed(2)}`;

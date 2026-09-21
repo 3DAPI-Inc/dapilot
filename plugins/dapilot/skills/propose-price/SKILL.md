@@ -20,6 +20,13 @@ A brief with `stage: price`. The work dir has `quote.json`,
   reviews; `sales_est` shows the reviews and window behind it), heaviest
   first
 - `viability.json`: `market.basis`, `market.thin`, the band, the verdict
+  with `verdict_reason`, `market.outliers` (prices fenced out of the band,
+  with what they were), `market.demand`,
+  and `identity`: what research decided the object is and how sure it was
+  (`confidence` high, medium or low). A `low` identity means the band may
+  be another product's band; the proposal still stands on it, and the
+  rationale and the summary say so first, so the person who approves reads
+  the doubt before the number
 - `renders/draft_00.png` to `draft_07.png`: what ours looks like
 - the comparables' `images` URLs, only if a Read of them is needed to settle
   finish or complexity
@@ -50,6 +57,13 @@ with a message when it is missing; pass it on.
        `unnamed_share` is under 0.2. A null `p75_sellers` means (c) is
        unknown and fails.
    Which case applies is read from the candidates, in this order:
+   - `verdict` is `unreliable`: the script has already put `median` and
+     `p75` under `rejected` with `unreliable_band` and `band_reason`, so
+     `markup` is the only candidate there can be. Propose it with position
+     `cost_anchored` and a rationale that repeats `band_reason`: the band
+     was one shop's price, or nobody is known to buy, or too few listings
+     remained once clones were folded. No `markup` candidate means the
+     script wrote `price.rejected.json`; step 2 covers it.
    - `market.thin` is true: `markup` when it is a candidate. Otherwise the
      `median` when it is one, otherwise the sole candidate. The rationale
      says the band is thin, as printed. A thin band never picks `p75` over

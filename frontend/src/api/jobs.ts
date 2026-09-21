@@ -29,6 +29,24 @@ export interface MarketBand {
   /** The script's call that the band is too small or too wide to trust. */
   thin?: boolean;
   weight_concentration?: { top_shop: string | null; top_shop_share: number; top_listing_share: number } | null;
+  /** Interquartile range of the unweighted band after outliers, as a difference and a ratio. */
+  iqr?: number;
+  iqr_ratio?: number | null;
+  /** Prices fenced out of the band (Tukey on log price), kept for the reader with what they were. */
+  outliers?: MarketOutlier[];
+  outlier_fences?: { low: number; high: number } | null;
+  n_collapsed?: number;
+  demand?: { units_per_day: number | null; listings_with_estimate: number; listings_with_reviews: number; n: number };
+}
+
+export interface MarketOutlier {
+  listing_id: number | null;
+  price: number;
+  side: 'high' | 'low';
+  title: string | null;
+  shop: string | null;
+  materials: string[];
+  url: string | null;
 }
 
 /** What the design stage made: design.json, with file paths turned into URLs. */
@@ -45,8 +63,19 @@ export interface Design {
   warnings: string[];
 }
 
+/** What research decided the object is, and how sure it was. The filename is a witness, not the verdict. */
+export interface Identity {
+  object: string;
+  confidence: 'high' | 'medium' | 'low';
+  witnesses: Array<'filename' | 'drafts' | 'thumbnails' | 'analysis'>;
+  reason: string | null;
+}
+
 export interface Viability {
-  verdict: 'viable' | 'thin' | 'not_viable' | 'no_market';
+  verdict: 'viable' | 'thin' | 'not_viable' | 'no_market' | 'unreliable';
+  /** Why the band is not evidence: one shop's price, no observed demand, too few listings. */
+  verdictReason?: string | null;
+  identity?: Identity | null;
   product?: string;
   n?: number;
   market?: MarketBand;
@@ -124,7 +153,13 @@ export interface Pricing {
   rejectedCandidates: PriceCandidate[];
   /** Candidates the script did not offer, with the reason (p75 rounding onto another price, no band). */
   skipped: { label: string; reason: string }[];
-  p75Sellers: { distinct_named_shops: number; top_share: number; unnamed_share: number } | null;
+  /** Who sells at or above the p75. Older files carry the summary fields, newer ones the shop list. */
+  p75Sellers: {
+    distinct_named_shops?: number;
+    top_share?: number;
+    unnamed_share?: number;
+    shops?: { name: string; weight_share: number }[];
+  } | null;
   currency: string;
   proposal: PriceProposal | null;
   /** The script's reason when no candidate was allowed. */
@@ -167,9 +202,11 @@ export interface Job {
   analysis?: { bbox_mm: number[]; volume_mm3: number; bodies: number; watertight_bodies: number; triangles: number };
   // Only on GET /jobs/{id}:
   viability?: Viability;
-  comparables?: { product: string; queries: string[]; n: number; rejected: number; top: Comparable[] };
+  comparables?: { product: string; identity?: Identity | null; queries: string[]; n: number; rejected: number; top: Comparable[] };
   pricing?: Pricing;
   renders?: { drafts: string[]; hero: string | null; angles: string[]; video: string | null };
+  /** The 3MF's own previews (plate and top view), served the moment the file is registered. */
+  thumbnails?: string[];
   design?: Design;
   log?: string;
 }
@@ -248,6 +285,14 @@ export const listRuns = (): Promise<Run[]> => api<Run[]>('/runs');
 export const listUnfinished = (): Promise<{ items: string[]; count: number }> => api('/runs/unfinished');
 export const resumeRuns = (): Promise<{ ok: boolean; run: string | null; items: string[] }> =>
   api('/runs/resume', { method: 'POST' });
+
+/**
+ * The first preview draft, by the path the server files it under. The list
+ * route carries no renders, so a row asks for the picture directly once the
+ * preview stage is behind it.
+ */
+export const draftThumbnail = (job: Job): string | null =>
+  job.stagesDone.includes('preview') ? `/api/jobs/${encodeURIComponent(job.id)}/files/renders/draft_00.png` : null;
 
 /** True while the server may still change this job without being asked. */
 export const isLive = (job: Job | undefined): boolean =>

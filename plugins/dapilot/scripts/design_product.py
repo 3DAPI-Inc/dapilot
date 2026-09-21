@@ -4,12 +4,22 @@
   design_product.py context  --workdir DIR    facts for the brief -> design/context.json
   design_product.py check    --workdir DIR    validate design/brief.json, price the plan -> design/plan.json
   design_product.py produce  --workdir DIR [--deadline S]   capture, generate -> design/produced.json, design/review.png
+  design_product.py redo     --workdir DIR --reject id,id --reason "..."    set rejected paid assets aside; produce makes them again
   design_product.py finalize --workdir DIR [--reject id,id --reason "..."]  -> design/photos/, design/video.mp4, design.json
 
 The skill (design-product) writes design/brief.json between `context` and
 `check`, and chooses what to reject between `produce` and `finalize`. Every
 other decision is here: angles and frame counts, what a lifestyle asset costs,
 the spend cap, photo order, which clip becomes the listing video, Etsy's limits.
+
+The listing standard (decided 2026-09-21) is config, not judgement: every
+listing carries `lifestyle_images.count` lifestyle photos (4) and one lifestyle
+clip (`lifestyle_video.required`). The brief must plan exactly that. Studio
+stills are always captured, because every generated asset starts from one, but
+they enter the listing only when the brief names them in `studio_photos`, or
+when a lifestyle photo is missing and a still fills its place. A rejected or
+failed paid asset is made again `redo_per_asset` times (1) inside the cap,
+with the rejection in its prompt; the first attempt is kept as <asset>.rN.
 
 Assets, all under DIR/design/:
   frames/stills/beauty/     the studio stills at the brief's yaws (browser studio)
@@ -50,11 +60,16 @@ DEFAULTS = {
                 "#F2C230": "yellow", "#4E9A5B": "green", "#F08BB4": "pink", "#8A5CC7": "purple"},
     "stills": {"count": 4, "size": 2048, "elevation": 18},
     "turntable": {"frames": 240, "size": 1080, "fps": 24},
-    "lifestyle_images": {"max": 3, "endpoint": "fal-ai/nano-banana-2/edit", "resolution": "2K",
-                         "aspect": "1:1", "usd_each": 0.12},
-    "lifestyle_video": {"enabled": True, "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth", "frames": 120,
+    "lifestyle_images": {"count": 4, "endpoint": "fal-ai/nano-banana-pro/edit", "resolution": "2K",
+                         "aspect": "1:1", "usd_each": 0.15},
+    # engine i2v animates a lifestyle photo (the brief's start_from); engine vace paints over our depth pass.
+    "lifestyle_video": {"enabled": True, "required": True, "engine": "i2v",
+                        "i2v": {"endpoint": "minimax/h3-max/image-to-video", "resolution": "1080P", "seconds": 6,
+                                "usd_per_second": 0.16},
+                        "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth", "frames": 120,
                         "fps": 24, "size": 720, "resolution": "720p", "steps": 50, "guidance": 5.0,
                         "usd_per_second": 0.10, "billed_fps": 16, "drift_arc": 40},
+    "redo_per_asset": 1,
     "usd_cap_per_item": 2.0,
     "deadline_s": 480,
     "etsy": {"max_photos": 10, "photo_min_px": 2000, "video_min_s": 5.0, "video_max_s": 15.0, "video_max_mb": 100},
@@ -154,6 +169,38 @@ def scale_phrase(longest_mm: float) -> str:
     return "large, floor or shelf-sized"
 
 
+def image_count(cfg: dict) -> int:
+    """Lifestyle photos every listing carries. `max` is the key's old name."""
+    li = cfg["lifestyle_images"]
+    return int(li.get("count") or li.get("max") or 0)
+
+
+def clip_required(cfg: dict) -> bool:
+    lv = cfg["lifestyle_video"]
+    return bool(lv["enabled"] and lv.get("required"))
+
+
+def video_usd(cfg: dict, frames: int | None = None, request: dict | None = None) -> float:
+    """What one clip costs. `request` is a recorded fal request, so spend follows what was actually asked for."""
+    lv = cfg["lifestyle_video"]
+    if request is not None:
+        if "duration" in request:  # an i2v request records seconds, a vace request frames
+            return round(request["duration"] * lv["i2v"]["usd_per_second"], 2)
+        frames = request.get("num_frames")
+    elif lv.get("engine") == "i2v":
+        return round(lv["i2v"]["seconds"] * lv["i2v"]["usd_per_second"], 2)
+    return round((frames or lv["frames"]) / lv["billed_fps"] * lv["usd_per_second"], 2)
+
+
+def assembly_facts(wd: Path) -> dict | None:
+    doc = read(wd / "assembly.json")
+    if not doc:
+        return None
+    return {"required_assembly": bool(doc.get("required_assembly")), "multicolour": bool(doc.get("multicolour")),
+            "parts": [{"name": i.get("name"), "colour": i.get("colour")} for i in doc.get("items") or []],
+            "note": "brief.assembled overrides required_assembly for this item's media; leave it out to follow the file"}
+
+
 # ------------------------------------------------------------------ context
 
 def cmd_context(a, cfg: dict) -> int:
@@ -166,7 +213,9 @@ def cmd_context(a, cfg: dict) -> int:
     rules = read(wd / "research" / "rules.json") or {}
     comps = read(wd / "comparables.json") or {}
     render = read(wd / "renders" / "render.json") or {}
-    bbox = analysis.get("bbox_mm") or [0, 0, 0]
+    # An assembled display model is the product's real size; the analysis bbox is the print layout.
+    shown = read(wd / "display.json") or {}
+    bbox = (shown.get("bbox_mm") if shown.get("pose") == "assembled" else None) or analysis.get("bbox_mm") or [0, 0, 0]
     longest = max(bbox) if bbox else 0
 
     drafts = [{"file": f"renders/{o['file']}", "yaw": o["yaw"]} for o in render.get("draft", {}).get("outputs", [])]
@@ -175,17 +224,22 @@ def cmd_context(a, cfg: dict) -> int:
                   for i, p in enumerate(sorted((wd / "renders").glob("draft_*.png")))]
 
     li, lv = cfg["lifestyle_images"], cfg["lifestyle_video"]
-    video_usd = round(lv["frames"] / lv["billed_fps"] * lv["usd_per_second"], 2)
     ctx = {
         "ok": True,
         "file": meta.get("file"),
         "product": {"noun": rules.get("noun") or comps.get("product"), "query": (comps.get("queries") or [None])[0],
-                    "taxonomy_id": rules.get("taxonomy_id") or comps.get("taxonomy_id"), "notes": rules.get("notes")},
+                    "taxonomy_id": rules.get("taxonomy_id") or comps.get("taxonomy_id"), "notes": rules.get("notes"),
+                    "identity": comps.get("identity") or rules.get("identity")},
+        # The designer's own renders out of the 3MF, when the project carried them: in colour, as arranged on the bed.
+        "thumbnails": [f"thumbnails/{p.name}" for p in sorted((wd / "thumbnails").glob("*.png"))],
         "comparable_titles": [c.get("title") for c in (comps.get("comparables") or [])[:8]],
         "price": {k: price.get(k) for k in ("price", "currency", "position")},
         "size": {"bbox_mm": [round(v) for v in bbox], "longest_cm": round(longest / 10, 1),
                  "scale": scale_phrase(longest), "bodies": analysis.get("bodies"),
                  "multi_part": bool((analysis.get("bodies") or 1) > 1 and (analysis.get("largest_body_frac") or 1) < 0.9)},
+        # assembly_3mf.py: how a multi-part file goes together and the designer's filament colour per part.
+        # When present the renders show display.ply: assembled when required_assembly, painted when multicolour.
+        "assembly": assembly_facts(wd),
         "drafts": drafts,
         "draft_color": render.get("draft", {}).get("color"),
         "previous_choice": read(wd / "renders" / "choice.json"),
@@ -193,12 +247,14 @@ def cmd_context(a, cfg: dict) -> int:
         "limits": {
             "name_max_chars": NAME_MAX,
             "angles": cfg["stills"]["count"] - 1,
-            "lifestyle_images_max": li["max"],
-            "lifestyle_video": bool(lv["enabled"]),
+            "lifestyle_images": image_count(cfg),
+            "lifestyle_video": "required" if clip_required(cfg) else ("optional" if lv["enabled"] else "disabled"),
+            "studio_photos": "optional extras, any of hero and angle_N",
+            "redo_per_asset": cfg["redo_per_asset"],
             "scene_max_chars": SCENE_MAX,
             "elevation_range": [5, 60],
         },
-        "costs_usd": {"lifestyle_image": li["usd_each"], "lifestyle_video": video_usd,
+        "costs_usd": {"lifestyle_image": li["usd_each"], "lifestyle_video": video_usd(cfg),
                       "cap_per_item": cfg["usd_cap_per_item"], "spent": spend(wd, cfg)["usd"]},
         "brief_path": "design/brief.json",
     }
@@ -215,7 +271,9 @@ HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 def validate_brief(b: dict, cfg: dict) -> list[str]:
     e: list[str] = []
     allowed = {"name", "rotate", "hero_yaw", "angles", "elevation", "color", "lifestyle_images",
-               "lifestyle_video", "reason"}
+               "lifestyle_video", "studio_photos", "assembled", "reason"}
+    if "assembled" in b and not isinstance(b["assembled"], bool):
+        e.append("assembled: true or false, or leave it out to follow assembly.json")
     extra = set(b) - allowed
     if extra:
         e.append(f"unknown fields: {sorted(extra)}")
@@ -254,11 +312,14 @@ def validate_brief(b: dict, cfg: dict) -> list[str]:
         e.append("color: '#RRGGBB'")
     elif color.upper() not in {c.upper() for c in cfg["palette"]}:  # keys of the palette
         e.append(f"color: {color} is not in the palette")
+    refs = {"hero"} | {f"angle_{i + 1}" for i in range(want)}
+    extras = b.get("studio_photos", [])
+    if not isinstance(extras, list) or len(set(map(str, extras))) != len(extras) or any(x not in refs for x in extras):
+        e.append(f"studio_photos: a list without repeats from {sorted(refs)}; [] for a listing of lifestyle photos only")
     li = b.get("lifestyle_images", [])
-    if not isinstance(li, list) or len(li) > cfg["lifestyle_images"]["max"]:
-        e.append(f"lifestyle_images: a list of at most {cfg['lifestyle_images']['max']}")
+    if not isinstance(li, list) or len(li) != image_count(cfg):
+        e.append(f"lifestyle_images: exactly {image_count(cfg)} scenes, the listing standard")
     else:
-        refs = {"hero"} | {f"angle_{i + 1}" for i in range(want)}
         for i, item in enumerate(li):
             if not isinstance(item, dict) or not isinstance(item.get("scene"), str) or not item["scene"].strip():
                 e.append(f"lifestyle_images[{i}]: needs a scene")
@@ -270,6 +331,8 @@ def validate_brief(b: dict, cfg: dict) -> list[str]:
             if set(item) - {"scene", "reference"}:
                 e.append(f"lifestyle_images[{i}]: only scene and reference")
     lv = b.get("lifestyle_video")
+    if lv is None and clip_required(cfg):
+        e.append("lifestyle_video: required, the listing standard; one scene and a motion")
     if lv is not None:
         if not cfg["lifestyle_video"]["enabled"]:
             e.append("lifestyle_video: disabled in config; set it to null")
@@ -282,33 +345,32 @@ def validate_brief(b: dict, cfg: dict) -> list[str]:
                 e.append("lifestyle_video.motion: drift or turn")
             if not isinstance(lv.get("negative", ""), str) or len(lv.get("negative", "")) > 500:
                 e.append("lifestyle_video.negative: string, max 500 chars")
-            if set(lv) - {"scene", "motion", "negative"}:
-                e.append("lifestyle_video: only scene, motion and negative")
+            if set(lv) - {"scene", "motion", "negative", "start_from"}:
+                e.append("lifestyle_video: only scene, motion, negative and start_from")
+            starts = {f"lifestyle_{i + 1}" for i in range(image_count(cfg))}
+            if lv.get("start_from", "lifestyle_1") not in starts:
+                e.append(f"lifestyle_video.start_from: one of {sorted(starts)}, the photo the clip opens on")
     if not isinstance(b.get("reason"), str) or not b["reason"].strip():
         e.append("reason: one or two sentences")
     return e
 
 
 def plan_cost(b: dict, cfg: dict) -> dict:
-    li, lv = cfg["lifestyle_images"], cfg["lifestyle_video"]
     images = len(b.get("lifestyle_images") or [])
     video = 1 if b.get("lifestyle_video") else 0
-    video_usd = lv["frames"] / lv["billed_fps"] * lv["usd_per_second"]
     return {"images": images, "video": video,
-            "usd": round(images * li["usd_each"] + video * video_usd, 2)}
+            "usd": round(images * cfg["lifestyle_images"]["usd_each"] + video * video_usd(cfg), 2)}
 
 
 def spend(wd: Path, cfg: dict) -> dict:
     """Committed spend: every paid asset whose request fal accepted, done or not."""
-    li, lv = cfg["lifestyle_images"], cfg["lifestyle_video"]
     items = []
-    for req in sorted((wd / "design").glob("*.request.json")):
+    for req in sorted((wd / "design").glob("*.request.json")):  # a redone attempt keeps its request as <asset>.rN.*
         if req.name.startswith("lifestyle_") and ".png" in req.name:
-            items.append({"asset": req.name.split(".")[0], "usd": li["usd_each"]})
-        elif req.name.startswith("lifestyle.mp4"):
+            items.append({"asset": req.name.split(".")[0], "usd": cfg["lifestyle_images"]["usd_each"]})
+        elif req.name.startswith("lifestyle.") and ".mp4" in req.name:
             r = read(req) or {}
-            frames = (r.get("request") or {}).get("num_frames") or lv["frames"]
-            items.append({"asset": "lifestyle_video", "usd": round(frames / lv["billed_fps"] * lv["usd_per_second"], 2)})
+            items.append({"asset": "lifestyle_video", "usd": video_usd(cfg, request=r.get("request") or {})})
     return {"usd": round(sum(i["usd"] for i in items), 2), "items": items,
             "basis": "estimated from config prices for every request fal accepted"}
 
@@ -325,8 +387,8 @@ def cmd_check(a, cfg: dict) -> int:
     # the larger of the two, never their sum.
     total = round(max(cost["usd"], spent["usd"]), 2)
     if total > cfg["usd_cap_per_item"]:
-        errors.append(f"plan costs about {total} USD against a cap of {cfg['usd_cap_per_item']}; "
-                      "drop lifestyle images or the video")
+        errors.append(f"plan costs about {total} USD against a cap of {cfg['usd_cap_per_item']}; the standard is "
+                      "config, so a person raises design.usd_cap_per_item or lowers the standard")
     plan = {"ok": not errors, "errors": errors, "cost": cost, "committed_usd": spent["usd"],
             "total_usd": total, "cap_usd": cfg["usd_cap_per_item"], "checked": now()}
     write(wd / "design" / "plan.json", plan)
@@ -365,11 +427,32 @@ def cmd_produce(a, cfg: dict) -> int:
     steps: list[dict] = []
     produced = read(dz / "produced.json") or {"assets": {}}
     assets = produced["assets"]
+    redone = read(dz / "redo.json") or {}
+
+    def again(aid: str, prompt: str) -> tuple[str, int]:
+        """The prompt and seed offset for an asset that was rejected before: say why, and draw differently."""
+        r = redone.get(aid)
+        if not r:
+            return prompt, 0
+        return (f"{prompt} An earlier attempt was rejected: {r['reasons'][-1]} "
+                "Keep the product exactly as it is in the reference."), 100 * r["count"]
 
     def pending_exit(step: str) -> int:
         write(dz / "produced.json", {**produced, "updated": now()})
         return emit({"ok": False, "pending": True, "step": step, "steps": steps,
                      "reason": f"deadline of {deadline:g}s reached before {step}; run produce again"}, 3)
+
+    # 0. the model the studio shows: parts placed as assembled or as printed, in their filament colours
+    if (wd / "assembly.json").exists():
+        cmd = [PY, str(HERE / "assembly_3mf.py"), "build", "--workdir", str(wd)]
+        if isinstance(b.get("assembled"), bool):
+            cmd += ["--pose", "assembled" if b["assembled"] else "as_printed"]
+        code, res = run_json(cmd)
+        if code != 0:
+            return fail(f"display model failed: {res.get('reason')}", step="display")
+        if produced.get("pose") not in (None, res.get("pose")):
+            return fail("the pose changed after captures were made; a person clears design/frames to redo them", step="display")
+        produced["pose"], produced["multicolour"] = res.get("pose"), res.get("multicolour")
 
     # 1. studio stills
     yaws = still_yaws(b)
@@ -413,9 +496,13 @@ def cmd_produce(a, cfg: dict) -> int:
             if left() < 30:
                 return pending_exit(aid)
             ref = assets[item.get("reference", "hero")]["file"]
+            # The chosen still first, then two more sides of the same object, so the model sees it in the round.
+            others = [assets[k]["file"] for k in ids if assets[k]["file"] != ref][:2]
+            prompt, seed = again(aid, item["scene"])
             code, res = run_json([PY, str(HERE / "generate_image.py"), "--reference", str(wd / ref),
-                                  "--prompt", item["scene"], "--out", str(out), "--endpoint", li["endpoint"],
-                                  "--aspect", li["aspect"], "--resolution", li["resolution"], "--seed", str(i + 1),
+                                  *[x for o in others for x in ("--reference", str(wd / o))],
+                                  "--prompt", prompt, "--out", str(out), "--endpoint", li["endpoint"],
+                                  "--aspect", li["aspect"], "--resolution", li["resolution"], "--seed", str(i + 1 + seed),
                                   "--deadline", str(max(left() - 10, 20))])
             if code == 3:
                 return pending_exit(aid)
@@ -432,7 +519,35 @@ def cmd_produce(a, cfg: dict) -> int:
 
     # 4. lifestyle video, paid
     lvb, lv = b.get("lifestyle_video"), cfg["lifestyle_video"]
-    if lvb and lv["enabled"]:
+    if lvb and lv["enabled"] and lv.get("engine") == "i2v":
+        out = dz / "lifestyle.mp4"
+        failed = dz / "lifestyle.mp4.failed.json"
+        start = assets.get(lvb.get("start_from", "lifestyle_1")) or {}
+        if not out.exists() and not failed.exists():
+            if not start.get("file"):
+                write(failed, {"reason": f"{lvb.get('start_from', 'lifestyle_1')} was not produced, so the clip has no first frame", "at": now()})
+            else:
+                if left() < 30:
+                    return pending_exit("lifestyle_video")
+                prompt, seed = again("lifestyle_video", lvb["scene"])
+                code, res = run_json([PY, str(HERE / "generate_video.py"), "--workdir", str(wd), "--engine", "i2v",
+                                      "--endpoint", lv["i2v"]["endpoint"], "--image", str(wd / start["file"]),
+                                      "--out", str(out), "--prompt", prompt, "--duration", str(lv["i2v"]["seconds"]),
+                                      "--i2v-resolution", lv["i2v"]["resolution"], "--seed", str(1 + seed),
+                                      "--deadline", str(max(left() - 10, 20))])
+                if code == 3:
+                    return pending_exit("lifestyle_video")
+                if code == 2:
+                    return fail(f"lifestyle_video: {res.get('reason')}", 2, step="lifestyle_video")
+                if code != 0:
+                    write(failed, {"reason": res.get("reason"), "at": now()})
+                steps.append({"step": "lifestyle_video", "ok": code == 0, "seconds": res.get("wall_s")})
+        if out.exists():
+            assets["lifestyle_video"] = {"file": "design/lifestyle.mp4", "kind": "video", **probe(out),
+                                         "bytes": out.stat().st_size, "start_from": lvb.get("start_from", "lifestyle_1")}
+        else:
+            assets["lifestyle_video"] = {"file": None, "kind": "video", "failed": (read(failed) or {}).get("reason")}
+    elif lvb and lv["enabled"]:
         cond = dz / "frames" / "conditioning"
         out = dz / "lifestyle.mp4"
         failed = dz / "lifestyle.mp4.failed.json"
@@ -451,8 +566,9 @@ def cmd_produce(a, cfg: dict) -> int:
                 steps.append({"step": "conditioning", "seconds": res.get("capture_s")})
             if left() < 30:
                 return pending_exit("lifestyle_video")
+            prompt, seed = again("lifestyle_video", lvb["scene"])
             cmd = [PY, str(HERE / "generate_video.py"), "--workdir", str(wd), "--source", "depth",
-                   "--frames-root", str(cond), "--out", str(out), "--prompt", lvb["scene"],
+                   "--frames-root", str(cond), "--out", str(out), "--prompt", prompt, "--seed", str(1 + seed),
                    "--frames", str(lv["frames"]), "--fps", str(lv["fps"]), "--resolution", lv["resolution"],
                    "--steps", str(lv["steps"]), "--guidance", str(lv["guidance"]), "--endpoint", lv["endpoint"],
                    "--deadline", str(max(left() - 10, 20))]
@@ -474,7 +590,8 @@ def cmd_produce(a, cfg: dict) -> int:
 
     # 5. one review sheet: every photo, and four frames of every clip
     order = review_sheet(dz, assets)
-    produced = {"ok": True, "assets": assets, "review": "design/review.png", "review_cells": order,
+    produced = {"ok": True, "pose": produced.get("pose"), "multicolour": produced.get("multicolour"),
+                "assets": assets, "review": "design/review.png", "review_cells": order,
                 "spend": spend(wd, cfg), "updated": now()}
     write(dz / "produced.json", produced)
     return emit({"ok": True, "steps": steps, "review": "design/review.png", "review_cells": order,
@@ -521,6 +638,51 @@ def review_sheet(dz: Path, assets: dict) -> list[str]:
     return [label for label, _ in cells]
 
 
+# ------------------------------------------------------------------ redo
+
+def cmd_redo(a, cfg: dict) -> int:
+    """Set rejected paid assets aside so the next produce makes them again. Nothing is deleted."""
+    wd = Path(a.workdir).resolve()
+    dz = wd / "design"
+    if (wd / "design.json").exists():
+        return fail("design.json exists; the stage is finished")
+    produced = read(dz / "produced.json")
+    if not produced or not produced.get("ok"):
+        return fail("run produce first: design/produced.json is missing or not ok")
+    ids = [r.strip() for r in (a.reject or "").split(",") if r.strip()]
+    paid = [k for k, v in produced["assets"].items() if v["kind"] == "lifestyle" or k == "lifestyle_video"]
+    if not ids or any(i not in paid for i in ids):
+        return fail(f"--reject takes paid assets only: {sorted(paid)}")
+    if not (a.reason or "").strip():
+        return fail("--reason is required: it goes into the next attempt's prompt")
+
+    redone = read(dz / "redo.json") or {}
+    budget = cfg["usd_cap_per_item"] - spend(wd, cfg)["usd"]
+    accepted, used_up, over_cap = [], [], []
+    for aid in sorted(ids, key=lambda i: i == "lifestyle_video"):  # photos first: they are the cheaper fix
+        cost = video_usd(cfg) if aid == "lifestyle_video" else cfg["lifestyle_images"]["usd_each"]
+        if redone.get(aid, {}).get("count", 0) >= cfg["redo_per_asset"]:
+            used_up.append(aid)
+        elif cost > budget + 1e-9:
+            over_cap.append(aid)
+        else:
+            budget -= cost
+            accepted.append(aid)
+    for aid in accepted:
+        entry = redone.setdefault(aid, {"count": 0, "reasons": []})
+        entry["count"] += 1
+        entry["reasons"].append(a.reason.strip())
+        stem, ext = ("lifestyle", ".mp4") if aid == "lifestyle_video" else (aid, ".png")
+        for f in sorted(dz.glob(f"{stem}{ext}*")):  # the output, its record, its request, a failure note
+            f.rename(f.with_name(f"{stem}.r{entry['count']}{f.name[len(stem):]}"))
+    write(dz / "redo.json", redone)
+    if accepted:
+        write(dz / "produced.json", {**produced, "ok": False, "redo_pending": accepted, "updated": now()})
+    return emit({"ok": True, "redo": accepted, "already_redone": used_up, "over_cap": over_cap,
+                 "next": "run produce again, review, then finalize; reject there whatever is in already_redone "
+                         "or over_cap" if accepted else "nothing to redo; finalize with --reject"})
+
+
 # ------------------------------------------------------------------ finalize
 
 def image_size(path: Path) -> tuple[int | None, int | None]:
@@ -546,10 +708,26 @@ def cmd_finalize(a, cfg: dict) -> int:
     if rejected_ids and not (a.reason or "").strip():
         return fail("--reason is required with --reject")
 
+    redo_left = [r for r in rejected_ids + [k for k, v in assets.items() if v.get("failed")]
+                 if (assets[r]["kind"] == "lifestyle" or r == "lifestyle_video")
+                 and (read(dz / "redo.json") or {}).get(r, {}).get("count", 0) < cfg["redo_per_asset"]]
+    if redo_left and not a.no_redo:
+        return fail(f"{redo_left} can still be made again: run redo --reject {','.join(redo_left)} --reason \"...\", "
+                    "then produce; pass --no-redo only when redo answered over_cap")
+
     etsy = cfg["etsy"]
     warnings: list[str] = []
-    order = ["hero"] + [k for k in assets if assets[k]["kind"] == "lifestyle"] + \
-            [k for k in assets if k.startswith("angle_")]
+    # The listing is lifestyle photos; a studio still enters it when the brief asked for it, or to stand in
+    # for a lifestyle photo that was rejected or failed, so a listing never goes short of pictures.
+    lifestyle_ids = [k for k in assets if assets[k]["kind"] == "lifestyle"]
+    kept = [k for k in lifestyle_ids if k not in rejected_ids and assets[k].get("file")]
+    stills = ["hero"] + sorted(k for k in assets if k.startswith("angle_"))
+    extras = [k for k in (b.get("studio_photos") or []) if k in assets]
+    short = max(image_count(cfg) - len(kept), 0)
+    fill = [k for k in stills if k not in extras and k not in rejected_ids][:short]
+    if short:
+        warnings.append(f"{len(kept)} of {image_count(cfg)} lifestyle photos kept; studio stills {fill} stand in")
+    order = kept + fill + extras
     photos_dir = dz / "photos"
     if photos_dir.exists():
         for stale in photos_dir.glob("*.png"):  # finalize owns this folder until design.json exists
@@ -571,6 +749,15 @@ def cmd_finalize(a, cfg: dict) -> int:
             warnings.append(f"{aid} is {w}x{h}, under Etsy's {etsy['photo_min_px']} px recommendation")
         photos.append({"id": aid, "file": str(dst.relative_to(wd)), "kind": asset["kind"],
                        "yaw": asset.get("yaw"), "px": [w, h]})
+
+    # The size card: a straight-down still with the true dimensions drawn on it. No model made it, so it is
+    # never rejected; it goes last. Built by hand for now (out of display.json), wired in when it has a script.
+    card = dz / "size_card.png"
+    if card.exists() and len(photos) < etsy["max_photos"]:
+        dst = photos_dir / f"{len(photos) + 1:02d}_size_card.png"
+        shutil.copy2(card, dst)
+        w, h = image_size(dst)
+        photos.append({"id": "size_card", "file": str(dst.relative_to(wd)), "kind": "size_card", "yaw": None, "px": [w, h]})
 
     def fits(v: dict | None) -> str | None:
         if not v or not v.get("file"):
@@ -599,10 +786,16 @@ def cmd_finalize(a, cfg: dict) -> int:
     shutil.copy2(wd / video["source"], dz / "video.mp4")
     video["file"] = "design/video.mp4"
 
+    redone = read(dz / "redo.json") or {}
+    standard = {"lifestyle_images": {"want": image_count(cfg), "kept": len(kept)},
+                "lifestyle_video": {"want": clip_required(cfg), "kept": video["id"] == "lifestyle_video"}}
+    standard["met"] = not short and (standard["lifestyle_video"]["kept"] or not clip_required(cfg))
     manifest = {
         "ok": True, "name": b["name"], "color": b["color"], "rotate": b.get("rotate", "0,0,0"),
         "hero_yaw": b["hero_yaw"], "reason": b["reason"],
-        "photos": photos, "video": video,
+        "pose": produced.get("pose"), "multicolour": produced.get("multicolour"),
+        "photos": photos, "video": video, "standard": standard,
+        "redone": [{"id": k, **v} for k, v in redone.items()],
         "videos": {k: assets[k]["file"] for k in ("turntable", "lifestyle_video") if assets.get(k, {}).get("file")},
         "rejected": [{"id": r, "reason": a.reason} for r in rejected_ids],
         "failed": [{"id": k, "reason": v["failed"]} for k, v in assets.items() if v.get("failed")],
@@ -610,25 +803,29 @@ def cmd_finalize(a, cfg: dict) -> int:
     }
     write(wd / "design.json", manifest)
     return emit({"ok": True, "design": "design.json", "name": b["name"], "photos": len(photos),
-                 "video": video["id"], "spend_usd": manifest["spend"]["usd"], "warnings": warnings})
+                 "video": video["id"], "standard_met": standard["met"], "spend_usd": manifest["spend"]["usd"],
+                 "warnings": warnings})
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("context", "check", "produce", "finalize"):
+    for name in ("context", "check", "produce", "redo", "finalize"):
         p = sub.add_parser(name)
         p.add_argument("--workdir", required=True)
         if name == "produce":
             p.add_argument("--deadline", type=float, default=None, help="seconds before exiting 3; default design.deadline_s")
-        if name == "finalize":
+        if name in ("redo", "finalize"):
             p.add_argument("--reject", default=None, help="asset ids from design/produced.json, comma-separated")
             p.add_argument("--reason", default=None)
+        if name == "finalize":
+            p.add_argument("--no-redo", action="store_true", help="finalize although a rejected asset has a redo left")
     a = ap.parse_args()
     if not Path(a.workdir).is_dir():
         return fail(f"no work dir at {a.workdir}", 2)
     cfg = load_config()
-    return {"context": cmd_context, "check": cmd_check, "produce": cmd_produce, "finalize": cmd_finalize}[a.cmd](a, cfg)
+    return {"context": cmd_context, "check": cmd_check, "produce": cmd_produce, "redo": cmd_redo,
+            "finalize": cmd_finalize}[a.cmd](a, cfg)
 
 
 if __name__ == "__main__":

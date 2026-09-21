@@ -132,8 +132,14 @@ class _Bytes:
         return chunk.tobytes()
 
 
-def load_3mf(path: str) -> trimesh.Trimesh:
-    """Return one processed Trimesh holding every built object, in millimetres."""
+def load_3mf_parts(path: str, placements: dict | None = None) -> list[dict]:
+    """One entry per build item, in millimetres: {object_id, instance, vertices, faces}.
+
+    `placements` maps (object_id, instance) to a 4x4 that replaces that item's
+    build transform: how assembly_3mf.py puts the parts where Bambu's assemble
+    block says they belong instead of where the plate layout left them.
+    `instance` counts the build items of one object in file order.
+    """
     with zipfile.ZipFile(path) as zf:
         names = set(zf.namelist())
         if MODEL_PATH not in names:
@@ -155,6 +161,7 @@ def load_3mf(path: str) -> trimesh.Trimesh:
         root = get_model(None)
         scale = UNIT_MM.get(root.unit, 1.0)
 
+        parts: list[dict] = []
         chunks_v: list[np.ndarray] = []
         chunks_f: list[np.ndarray] = []
         offset = 0
@@ -179,17 +186,27 @@ def load_3mf(path: str) -> trimesh.Trimesh:
                 for ref_id, ref_path, ref_xf in payload[0]:
                     resolve(ref_path or model_key, ref_id, xf @ ref_xf, depth + 1)
 
-        if root.build:
-            for obj_id, obj_path, xf in root.build:
-                resolve(obj_path, obj_id, xf)
-        else:
-            for obj_id in root.objects:
-                resolve(None, obj_id, np.eye(4))
-
-    if not chunks_f:
+        items = root.build or [(obj_id, None, np.eye(4)) for obj_id in root.objects]
+        seen: dict[str, int] = {}
+        for obj_id, obj_path, xf in items:
+            instance = seen.get(obj_id, 0)
+            seen[obj_id] = instance + 1
+            chunks_v, chunks_f, offset = [], [], 0
+            resolve(obj_path, obj_id, (placements or {}).get((obj_id, instance), xf))
+            if chunks_f:
+                parts.append({"object_id": obj_id, "instance": instance,
+                              "vertices": np.vstack(chunks_v) * scale, "faces": np.vstack(chunks_f)})
+    if not parts:
         raise ValueError("3mf contains no triangles")
-    vertices = np.vstack(chunks_v) * scale
-    faces = np.vstack(chunks_f)
+    return parts
+
+
+def load_3mf(path: str) -> trimesh.Trimesh:
+    """Return one processed Trimesh holding every built object, in millimetres."""
+    parts = load_3mf_parts(path)
+    offsets = np.cumsum([0] + [len(p["vertices"]) for p in parts[:-1]])
+    vertices = np.vstack([p["vertices"] for p in parts])
+    faces = np.vstack([p["faces"] + o for p, o in zip(parts, offsets)])
     # process=True merges duplicate vertices; split() needs that to find bodies.
     return trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
 
