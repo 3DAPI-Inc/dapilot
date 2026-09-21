@@ -47,6 +47,9 @@ UP to the policy ending. It applies to every author of price.json, model or
 person. --check exits 3 when price < floor, no exceptions. --check exits 4
 when the price is none of the candidates and price.json carries no
 `override: {"by": "<person>", "reason": "..."}` block. Exit 0 when it passes.
+When generation rejected every candidate (price.rejected.json, no candidates
+file) the check runs against an empty list, so only an override above the
+floor passes.
 
 Generation exits 0 with at least one candidate, 2 when every candidate is
 below the floor (writes price.rejected.json instead), 1 on error, including
@@ -325,8 +328,14 @@ def check(wd: Path, args) -> int:
     model, quote, viab, unit = build(wd, args)
     ppath = Path(args.check) if args.check and args.check != "-" else wd / "price.json"
     chosen = load(ppath, "price.json")
+    # When every candidate was rejected there is no candidates file, only
+    # price.rejected.json. A person may still set a price above the floor, so
+    # the check then runs against an empty candidate list: override required.
     cands_path = wd / "price.candidates.json"
-    cands = load(cands_path, "price.candidates.json")
+    if not cands_path.is_file() and (wd / "price.rejected.json").is_file():
+        cands = {**load(wd / "price.rejected.json", "price.rejected.json"), "candidates": []}
+    else:
+        cands = load(cands_path, "price.candidates.json")
     price = chosen.get("price")
     if not isinstance(price, (int, float)) or price <= 0:
         die("price.json has no positive `price`")

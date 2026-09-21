@@ -165,6 +165,9 @@ def unfinished(wd: Path, stages: dict) -> bool:
             return False
         if st["stage"] == "analyze" and (wd / "analysis.error.json").exists():
             return False
+        # waiting on a person's approval file is a stop, not pending work
+        if any(r.endswith(".approved.json") and not exists(wd, r) for r in st["requires"]):
+            return False
         return True
     return False
 

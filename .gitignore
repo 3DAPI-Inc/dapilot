@@ -36,5 +36,6 @@ dist/
 /store/.env
 /store/reference/
 /store/etsy_token.json
+/store/products/
 /intake/
 test-runs/

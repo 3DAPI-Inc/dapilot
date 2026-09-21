@@ -114,6 +114,19 @@ Read before building anything:
   shark the weighted median moved from 7.00 to 4.99 and the p75 from
   13.99 to 10.00; the eval fixtures carry legacy weights until rerun.
   Details in `docs/market-research.md` section 7c.
+- **The price gate and the catalogue are live (2026-09-17).** The design
+  stage requires `price.approved.json`, written when a person approves or
+  overrides the proposed price on the job page (`POST /jobs/{id}/price`;
+  the server runs `price_candidates.py --check`, so the floor holds for
+  people too, and an all-rejected item can be priced by override).
+  Approval files the product through `product_record.py` into
+  `$DAPILOT_STORE_DIR/products/<sha256>.json` (gitignored), shows it on
+  the Catalogue page and starts a director for design and what follows.
+  The record carries the quote `publicId` that `createOrder` needs (dapi
+  builds the design and SKU from the quote at order time) and a
+  `dapi_listing` block in the shape of dapi's product save, unsent: the
+  public API still has no product route. Placing orders from the
+  catalogue is not built. Details in `docs/market-research.md` 4.5 and 4.8.
 - **Pricing policy decided 2026-09-09**, in `store/reference/pricing-policy.json`
   (private). Cost basis is dapi's quote as charged, commission included and
   never backed out: whoever produces on the platform pays it. Two candidates
@@ -184,7 +197,8 @@ Read before building anything:
   derived from files against `stages.json`, never stored.
   `frontend/src/api/jobs.ts` defines the stage vocabulary (`intake analyze
   slice preview research price design copy publish`). The browser no longer
-  calls dapi. Review, catalogue and approve are placeholders.
+  calls dapi. Review is a placeholder; approve and catalogue are real since
+  2026-09-17.
 
 ## Scope
 
@@ -363,6 +377,7 @@ plugins/
       strip_3mf.py                    foreign 3mf project -> geometry-only 3mf
       etsy_search.py etsy_auth.py market_stats.py   research stage: Etsy search, OAuth, viability
       pricing.py price_candidates.py  the sale-price formula and the two candidates; --check is the break-even hard floor
+      product_record.py               the product record for an approved price; copies, decides nothing
 docs/
   agents.md                       roles and orchestration rules
   skills.md                       skill authoring guideline
@@ -423,8 +438,8 @@ root pointing at `./plugins/dapilot`. Nothing about the skills changes.
 .venv/bin/python plugins/dapilot/scripts/design_product.py produce  --workdir work/<hash>   # exit 3: run again
 .venv/bin/python plugins/dapilot/scripts/design_product.py finalize --workdir work/<hash> [--reject lifestyle_2 --reason "..."]
 
-cd frontend && npm run dev        # :8081, 8080 is dapi's
-.venv/bin/uvicorn server.app:app --port 3100 --reload   # the frontend's job API; holds the dapi key
+cd frontend && npm run dev        # :8081 (8080 is dapi's); starts the job API on :3100 too if nothing answers there
+.venv/bin/uvicorn server.app:app --port 3100 --reload   # the job API by hand; Vite then leaves it alone. Routes are served at / and /api
 ```
 
 The frontend talks only to `server/app.py` on :3100 (Vite proxies `/api`

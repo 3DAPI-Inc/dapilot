@@ -79,7 +79,7 @@ files in `work/<sha256>/`.
 | 3. candidates | `price_candidates.py` (price stage) | `quote.json`, `viability.json`, `comparables.json`, policy, fees | `price.candidates.json`, or `price.rejected.json` |
 | 4. choice | the model, `propose-price` | the candidates, the comparables, the drafts | `price.json` |
 | 5. check | `price_candidates.py --check` | `price.json`, the candidates | exit code only |
-| 6. confirmation | a person, at publish | `price.json` with its rationale | an `override` block if they change it |
+| 6. approval | a person, in the console | `price.json` with its rationale | `price.approved.json`, an `override` block if they change it, the product record |
 
 Two store-private files drive every number:
 `$DAPILOT_STORE_DIR/reference/pricing-policy.json` (required; the scripts
@@ -207,9 +207,32 @@ policy and compares:
 
 On any failure the skill deletes `price.json` and returns `ok: false` with
 the errors; it does not adjust the price to pass. The model never writes an
-override block. The gate on the stage is auto because nothing here touches
-dapi or Etsy: the price is a proposal, confirmed by a person at publish
-together with the copy and the media.
+override block.
+
+**The gate (2026-09-17).** The price is a recommendation until a person
+approves it in the console, and the design stage requires
+`price.approved.json`, so no capture or paid generation runs for a price
+nobody confirmed. On the job page the person approves the recommendation,
+picks another candidate, or types a price; what a typed price earns comes
+from `GET /jobs/{id}/price/preview` (`pricing.py`, no arithmetic in the
+browser). `POST /jobs/{id}/price` then:
+
+1. for any price other than the recommendation, rewrites `price.json` with
+   an `override: {by, reason, at}` block, the model's proposal kept under
+   `proposed`, and runs `--check` on it first. Exit 3 or 4 comes back as
+   HTTP 422 with the script's words and nothing is written. A price that
+   is not a candidate needs a reason. Returning to the recommended price
+   restores the model's proposal with no override left behind;
+2. writes `price.approved.json`: price, who, when, `proposal` or
+   `override`, floor, unit cost, margin;
+3. files the product (`product_record.py`, section 4.8) so it shows in the
+   catalogue at once;
+4. starts a director for the item, which queues design and what follows.
+
+An item whose candidates were all rejected can be priced the same way:
+`--check` then runs against an empty candidate list, so only an override at
+or above the floor passes. An item waiting for approval shows as
+`price · needs you` and is not picked up by `--resume`.
 
 ### 4.6 Worked example: the cat clicker
 
@@ -243,6 +266,27 @@ on (a), (b) and (c), not on the 2.89 USD of extra margin.
   current numbers the 50 percent markup rarely survives: on the fidget it
   clears break-even by 0.25 USD and is rejected at 3 percent margin. See
   section 8.
+
+### 4.8 The product record
+
+`product_record.py --workdir work/<hash> [--verify-key]` writes
+`$DAPILOT_STORE_DIR/products/<sha256>.json` once a price is approved, and
+again when the design stage finishes (the server refreshes a record older
+than `design.json`). It copies and decides nothing. The record holds the
+name, the approved price with its margin, the dapi quote, the media in
+listing order, a `storefront` block for the Etsy listing, the API key it
+belongs to (`GET /me` through `dapi.py`), and `order_item`: the quote
+`publicId` and filament slot count that dapi's `createOrder` needs. dapi
+builds the design and the SKU from the quote when an order is placed, so an
+order for an end customer needs nothing else to exist on dapi first.
+
+`dapi_listing` in the record is the same product in the shape dapi's
+product save expects (`listing`, `manufacture`, `designs`, `skus`, `images`,
+`extraFiles`, `complianceFiles`, `materialConfigs`, `imageAssignments`).
+It is not sent anywhere: the public API has no product route, files carry
+`tempKey: null` and are listed under `pending_uploads`, and `skus` is empty
+because a SKU names platform material ids. When that route exists the
+record is its request body plus the uploads.
 
 Platform fees, verified 2026-09-09:
 

@@ -85,12 +85,14 @@ with a message when it is missing; pass it on.
 ## Outputs
 - `price.candidates.json`, by the script, unchanged.
 - `price.json`, schema above, only when a candidate was chosen and the check
-  passed. Its existence is what lets render, copy and publish run.
+  passed. With a person's `price.approved.json` it is what lets design, copy
+  and publish run.
 - `price.rejected.json`, by the script, when nothing is allowed.
 
 ## Gate
-Auto to write the proposal. The price is confirmed by a person at publish
-together with the copy and renders. Nothing here touches dapi or Etsy.
+Auto to write the proposal. A person approves or overrides it afterwards,
+which writes `price.approved.json`; the design stage requires that file, so
+the proposal alone starts nothing. Nothing here touches dapi or Etsy.
 
 ## Failure
 - Missing `DAPILOT_STORE_DIR` or the policy file: script exits 1; `ok:false`.

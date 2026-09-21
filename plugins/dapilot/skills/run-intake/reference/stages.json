@@ -1,6 +1,6 @@
 {
   "process": "intake",
-  "comment": "Fixed order. A stage runs when every `requires` glob matches in the work dir and no `produces` glob does. Reordered 2026-09-09: cheap drafts, research and the price proposal come before the expensive media, so an item that cannot sell never costs a capture or a generation. 2026-09-13: `design` (product-designer) replaces `render`; the storefront is Etsy, so copy and publish stay disabled until they are rebuilt for it. A stage's `agent` overrides the department worker. Disabled stages are listed so the vocabulary is agreed before they exist.",
+  "comment": "Fixed order. A stage runs when every `requires` glob matches in the work dir and no `produces` glob does. Reordered 2026-09-09: cheap drafts, research and the price proposal come before the expensive media, so an item that cannot sell never costs a capture or a generation. 2026-09-13: `design` (product-designer) replaces `render`; the storefront is Etsy, so copy and publish stay disabled until they are rebuilt for it. 2026-09-17: design also requires `price.approved.json`, written when a person confirms or overrides the proposed price in the console (POST /jobs/{id}/price); nothing paid runs for a price nobody approved. A stage's `agent` overrides the department worker. Disabled stages are listed so the vocabulary is agreed before they exist.",
   "stages": [
     {
       "stage": "analyze",
@@ -80,6 +80,7 @@
         "analysis.json",
         "renders/draft_00.png",
         "price.json",
+        "price.approved.json",
         "comparables.json"
       ],
       "produces": [

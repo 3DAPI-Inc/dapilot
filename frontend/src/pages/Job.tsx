@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { getJob, getJobEvents, isLive, type Job as JobRecord, type JobEvent } from '@/api/jobs';
 import { BatchTable } from '@/components/site/BatchTable';
+import { PriceDecision } from '@/components/site/PriceDecision';
 import { StageRail } from '@/components/site/JobRow';
 import { ConsoleNav, SiteHeader } from '@/components/site/SiteHeader';
 import { Spinner } from '@/components/site/Spinner';
@@ -53,27 +54,49 @@ function DesignSection({ job }: { job: JobRecord }) {
   const d = job.design;
   if (!d) return null;
   const [hero, ...rest] = d.photos;
+  // The listing video is the lifestyle clip when it was kept; the turntable is still worth seeing beside it.
+  const extraTurntable = d.turntable && d.video?.id !== 'turntable' ? d.turntable : null;
   return (
     <section className="mt-14">
-      <h2 className={h2}>Design</h2>
+      <h2 className={h2}>Photos and video</h2>
       <p className="mt-3 font-display text-2xl font-semibold tracking-tight text-navy">{d.name}</p>
       <p className="mt-2 max-w-[62ch] font-sans text-sm leading-relaxed text-slate">{d.reason}</p>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        {hero ? <img src={hero.url} alt={`${d.name}, main photo`} className="w-full rounded-2xl border border-mist bg-white" /> : null}
+        {hero ? (
+          <a href={hero.url} target="_blank" rel="noreferrer">
+            <img src={hero.url} alt={`${d.name}, main photo`} className="w-full rounded-2xl border border-mist bg-white" />
+          </a>
+        ) : null}
         {d.video ? (
-          <video src={d.video.url} controls muted loop playsInline className="w-full rounded-2xl border border-mist bg-white" />
+          <figure>
+            <video src={d.video.url} controls muted loop playsInline className="w-full rounded-2xl border border-mist bg-white" />
+            <figcaption className="mt-1.5 font-sans text-xs text-slate/80">
+              Listing video, {d.video.id === 'turntable' ? 'studio turntable' : 'lifestyle clip'}
+              {d.video.seconds ? `, ${d.video.seconds} s` : ''}
+            </figcaption>
+          </figure>
         ) : null}
       </div>
-      {rest.length > 0 ? (
-        <div className="mt-3 flex gap-2 overflow-x-auto">
-          {rest.map((p) => (
-            <img key={p.id} src={p.url} alt={`${d.name}, ${p.kind} photo`} className="size-28 shrink-0 rounded-lg border border-mist bg-white" />
+      {rest.length > 0 || extraTurntable ? (
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {rest.map((p, i) => (
+            <figure key={p.id}>
+              <a href={p.url} target="_blank" rel="noreferrer">
+                <img src={p.url} alt={`${d.name}, ${p.kind} photo`} loading="lazy" className="aspect-square w-full rounded-xl border border-mist bg-white object-cover" />
+              </a>
+              <figcaption className="mt-1 font-sans text-xs text-slate/80">{i + 2}. {p.kind}</figcaption>
+            </figure>
           ))}
+          {extraTurntable ? (
+            <figure>
+              <video src={extraTurntable} controls muted loop playsInline className="aspect-square w-full rounded-xl border border-mist bg-white object-cover" />
+              <figcaption className="mt-1 font-sans text-xs text-slate/80">studio turntable</figcaption>
+            </figure>
+          ) : null}
         </div>
       ) : null}
       <p className="mt-3 font-sans text-xs text-slate/80">
-        {d.photos.length} photos{d.video ? `, listing video from the ${d.video.id === 'turntable' ? 'studio turntable' : 'lifestyle clip'}` : ''}
-        {' · '}about {money(d.spendUsd)} on generation
+        {d.photos.length} photos in listing order · about {money(d.spendUsd)} on generation
         {d.rejected.length > 0 ? ` · rejected: ${d.rejected.map((r) => r.id).join(', ')}` : ''}
         {d.failed.length > 0 ? ` · failed on fal: ${d.failed.map((r) => r.id).join(', ')}` : ''}
       </p>
@@ -118,6 +141,19 @@ function Market({ job }: { job: JobRecord }) {
           note={v.atMedian?.margin != null ? `${money(v.atMedian.margin)} margin at the median` : undefined}
         />
       </dl>
+      <p className="mt-4 max-w-[62ch] font-sans text-xs leading-relaxed text-slate/80">
+        {m.basis === 'weighted' ? 'Band weighted by estimated units sold per day, so the median is where half the sales happen.' : 'Unweighted band: what sellers ask, not what buyers pay.'}
+        {m.thin ? <span className="text-destructive"> Thin market: too few or too scattered listings for the median to mean much.</span> : null}
+        {m.weight_concentration && m.weight_concentration.top_shop_share >= 0.5
+          ? ` ${m.weight_concentration.top_shop ?? 'One shop'} holds ${Math.round(m.weight_concentration.top_shop_share * 100)}% of the sales.`
+          : ''}
+      </p>
+      {v.stock ? (
+        <p className="mt-2 max-w-[62ch] font-sans text-xs leading-relaxed text-slate/80">
+          A stock run of {v.stock.units} is {v.stock.plates} plate{v.stock.plates === 1 ? '' : 's'} and {money(v.stock.batch_cost)} at {money(v.stock.unit_cost)} each
+          {v.stock.payback.map((b) => (b.units_to_pay_back != null ? `; paid back after ${b.units_to_pay_back} sales at the ${b.label}` : `; never paid back at the ${b.label}`)).join('')}.
+        </p>
+      ) : null}
       {c?.top?.length ? (
         <ul className="mt-6 border-t border-mist font-sans text-sm">
           {c.top.map((x) => (
@@ -126,67 +162,8 @@ function Market({ job }: { job: JobRecord }) {
                 {x.title}
               </a>
               <span className="tabular-nums text-navy">{money(x.price)}</span>
-              <span className="w-24 text-right tabular-nums text-slate/70">{x.sold != null ? `${x.sold} sold` : ''}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  );
-}
-
-/* The one decision a person confirms at publish: the proposed sale price and the case for it. */
-function SalePrice({ job }: { job: JobRecord }) {
-  const p = job.pricing;
-  if (!p) return null;
-  const prop = p.proposal;
-  return (
-    <section className="mt-14">
-      <h2 className={h2}>Sale price</h2>
-      {prop ? (
-        <div className="mt-5 flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-12">
-          <div className="shrink-0">
-            <div className="font-display text-[2.75rem] font-semibold leading-none tabular-nums tracking-tight text-navy">
-              {money(prop.price)}
-            </div>
-            <div className={cn(eyebrow, 'mt-2')}>{prop.position} · {prop.candidate} candidate</div>
-          </div>
-          <div className="min-w-0">
-            <p className="max-w-[58ch] font-sans text-sm leading-relaxed text-navy">{prop.rationale}</p>
-            {prop.runner_up ? (
-              <p className="mt-2 max-w-[58ch] font-sans text-xs leading-relaxed text-slate">
-                Runner-up {prop.runner_up.candidate} at {money(prop.runner_up.price)}: {prop.runner_up.why_not}
-              </p>
-            ) : null}
-            {prop.override ? (
-              <p className="mt-2 font-sans text-xs text-slate">Overridden by {prop.override.by}: {prop.override.reason}</p>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <p className="mt-3 max-w-[58ch] font-sans text-sm leading-relaxed text-destructive">
-          {p.rejected ?? 'No price chosen yet.'}
-        </p>
-      )}
-      <dl className="mt-6 grid grid-cols-2 gap-x-8 gap-y-7 sm:grid-cols-4">
-        {p.floor != null ? <Stat label="floor" value={money(p.floor)} note="break-even, the hard rule for any author" /> : null}
-        {p.minMarginPct != null ? <Stat label="min margin" value={`${Math.round(p.minMarginPct * 100)}%`} note="the model proposes nothing under it" /> : null}
-      </dl>
-      {p.candidates.length + p.rejectedCandidates.length > 0 ? (
-        <ul className="mt-6 border-t border-mist font-sans text-sm">
-          {[...p.candidates, ...p.rejectedCandidates].map((c) => (
-            <li key={c.label} className="grid grid-cols-[6rem_5rem_1fr] items-baseline gap-x-4 border-b border-mist py-2.5 sm:grid-cols-[6rem_5rem_8rem_1fr]">
-              <span className="text-navy">{c.label}</span>
-              <span className="tabular-nums text-navy">{money(c.price)}</span>
-              <span className="tabular-nums text-slate">
-                {c.margin_pct != null ? `${Math.round(c.margin_pct * 100)}% margin` : ''}
-              </span>
-              <span className={cn('col-span-3 sm:col-span-1', c.rejected_because ? 'text-destructive' : 'text-slate')}>
-                {c.rejected_because
-                  ? c.rejected_because === 'below_floor'
-                    ? `rejected: ${money(c.below_floor_by ?? 0)} below the floor`
-                    : 'rejected: under the minimum margin'
-                  : c.position_in_band.replace(/_/g, ' ')}
+              <span className="w-28 text-right tabular-nums text-slate/70">
+                {x.unitsPerDay != null ? `${x.unitsPerDay.toFixed(2)} a day` : x.sold != null ? `${x.sold} sold` : ''}
               </span>
             </li>
           ))}
@@ -407,7 +384,7 @@ export default function Job() {
             ) : null}
 
             <Market job={job.data} />
-            <SalePrice job={job.data} />
+            <PriceDecision job={job.data} />
             <DesignSection job={job.data} />
             <Renders job={job.data} />
 

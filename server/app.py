@@ -13,7 +13,17 @@ GET  /runs/unfinished              work dirs with a stage still to run and no ru
 POST /runs/resume                  start one director over all of those (also at boot when
                                    store/config.json has resume_on_start: true)
 GET  /runs/{run}/report            the run's report.md
-POST /jobs/{id}/approve            501 until a publish gate exists
+GET  /jobs/{id}/price/preview      what a price earns: net, fees, margin, against the floor (pricing.py)
+POST /jobs/{id}/price              a person confirms the proposed price or overrides it; the script's
+                                   --check is the judge, the floor holds for people too. Writes
+                                   price.approved.json, files the product, queues the rest of intake
+GET  /products                     the catalogue: every item with an approved price
+
+Every route is also served under /api, which is what the console calls
+through the Vite proxy; the media and report URLs the server mints carry
+that prefix. The console's dev server starts this app itself when nothing
+answers on :3100 (frontend/vite.config.ts), so `npm run dev` is the whole
+setup; `scripts/dev/up.sh` still starts it first when it runs the checks.
 
 Stage and status are never stored. They are read off the work dir against the
 same stage table the ledger uses (run-intake/reference/stages.json), so the
@@ -36,7 +46,8 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, HTTPException, UploadFile
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse
 
 ROOT = Path(os.environ.get("DAPILOT_PROJECT_DIR") or Path(__file__).resolve().parents[1])
@@ -66,6 +77,9 @@ def load_env() -> None:
 load_env()
 PY = os.environ.get("DAPILOT_PYTHON") or sys.executable
 app = FastAPI(title="dapilot job API")
+# Every route lives on this router, served at / and again under /api: the
+# console calls /api/... through the Vite proxy, scripts and up.sh call /...
+api = APIRouter()
 DIRECTORS: dict[str, dict] = {}   # run id -> {proc, items, started, folder}
 LOCK = threading.Lock()
 
@@ -234,7 +248,7 @@ def runs_for(item: str) -> list[str]:
     return sorted(run for run, st in runs_on_disk().items() if item in st.get("items", {}))
 
 
-@app.post("/jobs")
+@api.post("/jobs")
 async def create_jobs(files: list[UploadFile]) -> JSONResponse:
     if not files:
         raise HTTPException(400, "no files")
@@ -303,6 +317,8 @@ def status_of(item: str, wd: Path, meta: dict) -> dict:
         if stage == "price" and (wd / "price.rejected.json").exists():
             r = read_json(wd / "price.rejected.json") or {}
             return {"stage": stage, "status": "blocked", "reason": f"no sellable price: floor {r.get('floor')} against market median {r.get('market', {}).get('median')}", "done": done_stages}
+        if stage == "design" and (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
+            return {"stage": "price", "status": "blocked", "reason": "waiting for a person to approve the price", "done": done_stages}
         if lock and (lock.get("stage") == stage or not lock.get("stage")):
             return {"stage": "slice" if stage == "quote" else stage, "status": "running", "reason": None, "done": done_stages}
         if lock:
@@ -346,16 +362,26 @@ def detail(item: str) -> dict:
         j["viability"] = {"verdict": v.get("verdict"), "product": v.get("product"), "n": v.get("n_comparables"),
                           "market": v.get("market"), "breakEven": s0.get("break_even_price"), "markupPrice": s0.get("markup_price"),
                           "unitCost": s0.get("unit_cost"), "atMedian": next((a for a in s0.get("at", []) if a.get("label") == "median"), None),
-                          "policy": v.get("policy")}
+                          "policy": v.get("policy"), "stock": v.get("stock"), "costBasis": v.get("cost_basis"),
+                          "ours": {k: (v.get("ours") or {}).get(k) for k in ("quote_unit_price_one_off", "quote_unit_price_full_plate",
+                                                                             "max_per_plate", "plate_discount_pct")}}
     elif v:
         j["viability"] = {"verdict": "no_market", "reason": v.get("reason")}
     c = read_json(wd / "comparables.json")
     if c:
-        comps = sorted(c.get("comparables", []), key=lambda x: (x.get("shop") or {}).get("sold") or 0, reverse=True)
-        j["comparables"] = {"product": c.get("product"), "queries": c.get("queries"), "n": len(c.get("comparables", [])),
-                            "rejected": len(c.get("rejected", [])),
-                            "top": [{"title": x.get("title"), "url": x.get("url"), "price": x.get("price"), "sold": (x.get("shop") or {}).get("sold"),
-                                     "favorers": x.get("num_favorers"), "reason": x.get("reason"), "image": (x.get("images") or [None])[0]} for x in comps[:6]]}
+        # The rules shape is already ordered by market weight; the hand-written
+        # shape has no weight, so it keeps the old order by shop sales.
+        rows = c.get("comparables", [])
+        if not any(isinstance(x.get("market_weight"), (int, float)) for x in rows):
+            rows = sorted(rows, key=lambda x: (x.get("shop") or {}).get("sold") or 0, reverse=True)
+        j["comparables"] = {"product": c.get("product"), "queries": c.get("queries"), "n": len(rows),
+                            "rejected": c.get("rejected_count", len(c.get("rejected", []))),
+                            "top": [{"title": x.get("title"), "url": x.get("url"), "price": x.get("price"),
+                                     "sold": (x.get("shop") or {}).get("sold", x.get("sold")),
+                                     "shop": (x.get("shop") or {}).get("name"),
+                                     "favorers": x.get("favorers", x.get("num_favorers")),
+                                     "unitsPerDay": (x.get("sales_est") or {}).get("units_per_day"),
+                                     "reason": x.get("reason"), "image": (x.get("images") or [None])[0]} for x in rows[:6]]}
     cand = read_json(wd / "price.candidates.json")
     rej = read_json(wd / "price.rejected.json")
     chosen = read_json(wd / "price.json")
@@ -363,7 +389,10 @@ def detail(item: str) -> dict:
         src = cand or rej or {}
         j["pricing"] = {"floor": src.get("floor"), "minMarginPct": src.get("min_margin_pct"),
                         "candidates": src.get("candidates", []), "rejectedCandidates": src.get("rejected", []),
-                        "proposal": chosen, "rejected": rej.get("reason") if rej else None}
+                        "skipped": src.get("skipped", []), "p75Sellers": src.get("p75_sellers"),
+                        "costBases": src.get("cost_bases"), "currency": src.get("currency") or "USD",
+                        "proposal": chosen, "rejected": rej.get("reason") if rej and not chosen else None,
+                        "approved": read_json(wd / "price.approved.json")}
     renders = wd / "renders"
     if renders.exists():
         j["renders"] = {"drafts": [f"/api/jobs/{item}/files/renders/{p.name}" for p in sorted(renders.glob("draft_*.png"))],
@@ -386,7 +415,7 @@ def detail(item: str) -> dict:
     return j
 
 
-@app.get("/jobs")
+@api.get("/jobs")
 def list_jobs() -> list[dict]:
     if not WORK.exists():
         return []
@@ -394,12 +423,12 @@ def list_jobs() -> list[dict]:
     return sorted(jobs, key=lambda j: j.get("createdAt") or "", reverse=True)
 
 
-@app.get("/jobs/{item}")
+@api.get("/jobs/{item}")
 def get_job(item: str) -> dict:
     return detail(item)
 
 
-@app.get("/jobs/{item}/events")
+@api.get("/jobs/{item}/events")
 def get_events(item: str) -> list[dict]:
     wd = WORK / item
     if not (wd / "meta.json").exists():
@@ -421,7 +450,7 @@ def get_events(item: str) -> list[dict]:
     return sorted(events, key=lambda e: e["at"] or "")
 
 
-@app.get("/jobs/{item}/files/{path:path}")
+@api.get("/jobs/{item}/files/{path:path}")
 def get_file(item: str, path: str) -> FileResponse:
     wd = (WORK / item).resolve()
     target = (wd / path).resolve()
@@ -447,7 +476,7 @@ def run_summary(run: str) -> dict | None:
             "notes": state.get("notes", [])[-5:]}
 
 
-@app.get("/runs")
+@api.get("/runs")
 def list_runs(limit: int = 30) -> list[dict]:
     if not RUNS.exists():
         return []
@@ -455,18 +484,18 @@ def list_runs(limit: int = 30) -> list[dict]:
     return sorted(runs, key=lambda r: r["started"] or "", reverse=True)[:limit]
 
 
-@app.get("/runs/unfinished")
+@api.get("/runs/unfinished")
 def list_unfinished() -> dict:
     items = unfinished_items()
     return {"items": items, "count": len(items)}
 
 
-@app.post("/runs/resume")
+@api.post("/runs/resume")
 def post_resume() -> dict:
     return resume_all()
 
 
-@app.get("/runs/{run}/report")
+@api.get("/runs/{run}/report")
 def run_report(run: str):
     p = RUNS / run / "report.md"
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", run) or not p.exists():
@@ -474,15 +503,189 @@ def run_report(run: str):
     return FileResponse(p, media_type="text/markdown")
 
 
-@app.post("/jobs/{item}/approve")
-def approve(item: str) -> None:
-    raise HTTPException(501, "nothing to approve yet: no publish gate exists until the design route lands")
+# ------------------------------------------------------------------ the price gate
+
+sys.path.insert(0, str(SCRIPTS))
+from pricing import Model, PricingError, load_fees, load_policy, unit_cost_basis  # noqa: E402
 
 
-@app.get("/health")
+def price_model(wd: Path) -> tuple[Model, float, float]:
+    """(formula, unit cost, floor) for one item, exactly as price_candidates.py builds them."""
+    quote = read_json(wd / "quote.json")
+    if not quote:
+        raise HTTPException(409, "not quoted yet")
+    try:
+        policy, _ = load_policy()
+        fees, _ = load_fees(policy)
+        model = Model(policy, fees)
+        cost = model.cost(unit_cost_basis(quote, policy)["unit_price"])
+        return model, cost, model.round_price(model.break_even(cost), "up")
+    except PricingError as e:
+        raise HTTPException(500, str(e))
+
+
+@api.get("/jobs/{item}/price/preview")
+def price_preview(item: str, price: float) -> dict:
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    if not price > 0:
+        raise HTTPException(400, "price must be positive")
+    model, cost, floor = price_model(wd)
+    cands = (read_json(wd / "price.candidates.json") or {}).get("candidates", [])
+    match = next((c["label"] for c in cands if abs(c["price"] - price) < 0.005), None)
+    return {**model.point(match or "custom", price, cost), "floor": floor, "aboveFloor": price + 1e-9 >= floor,
+            "candidate": match}
+
+
+class PriceDecision(BaseModel):
+    price: float | None = None     # omitted: approve the proposal as it stands
+    by: str | None = None
+    reason: str | None = None
+
+
+@api.post("/jobs/{item}/price")
+def decide_price(item: str, body: PriceDecision) -> dict:
+    """A person approves the proposed price or sets another. price_candidates.py --check decides whether it stands."""
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    if (wd / ".lock").exists():
+        raise HTTPException(409, "a worker holds this item; try again when its stage ends")
+    proposal = read_json(wd / "price.json")
+    source = read_json(wd / "price.candidates.json") or read_json(wd / "price.rejected.json")
+    if not source:
+        raise HTTPException(409, "the price stage has not run yet")
+    by = (body.by or "").strip() or "console"
+    price = body.price if body.price is not None else (proposal or {}).get("price")
+    if not isinstance(price, (int, float)) or price <= 0:
+        raise HTTPException(400, "no price given and no proposal to approve")
+    price = round(float(price), 2)
+    same = proposal is not None and abs(proposal.get("price", 0) - price) < 0.005 and not proposal.get("override")
+    first = (proposal or {}).get("proposed")
+    if not same and first and abs(first.get("price", 0) - price) < 0.005:
+        # Back to what the model recommended: its proposal returns as it was, no override left behind.
+        (wd / "price.json").write_text(json.dumps(first, indent=2))
+        proposal, same = first, True
+    if not same:
+        label = next((c["label"] for c in source.get("candidates", []) if abs(c["price"] - price) < 0.005), None)
+        if not label and not (body.reason or "").strip():
+            raise HTTPException(400, "a price that is not one of the candidates needs a reason")
+        # The model's proposal is kept inside the file it is replaced in.
+        first = (proposal or {}).get("proposed") or ({k: v for k, v in proposal.items() if k != "override"} if proposal else None)
+        chosen = {"price": price, "currency": source.get("currency") or "USD", "candidate": label or "override",
+                  "position": (proposal or {}).get("position") if label and proposal and proposal.get("candidate") == label else None,
+                  "rationale": (body.reason or "").strip() or f"{by} chose the {label} candidate over the proposal.",
+                  "runner_up": None, "floor": source.get("floor"), "verdict": source.get("verdict"),
+                  "override": {"by": by, "reason": (body.reason or "").strip() or f"chose the {label} candidate", "at": now()},
+                  "proposed": first}
+        pending = wd / "price.pending.json"
+        pending.write_text(json.dumps(chosen, indent=2))
+        r = subprocess.run([PY, str(SCRIPTS / "price_candidates.py"), "--workdir", str(wd), "--check", str(pending)],
+                           capture_output=True, text=True, cwd=ROOT)
+        try:
+            verdict = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            verdict = {"errors": [r.stderr.strip()[-300:] or "the check produced no result"]}
+        if r.returncode != 0:
+            pending.unlink(missing_ok=True)
+            raise HTTPException(422, "; ".join(verdict.get("errors") or ["the check refused this price"]))
+        pending.replace(wd / "price.json")
+    model, cost, floor = price_model(wd)
+    if price + 1e-9 < floor:   # belt and braces for the approve-as-is path, which skips --check
+        raise HTTPException(422, f"price {price:.2f} is below the floor {floor:.2f}")
+    point = model.point("approved", price, cost)
+    (wd / "price.approved.json").write_text(json.dumps(
+        {"price": price, "currency": source.get("currency") or "USD", "by": by, "at": now(),
+         "source": "proposal" if same else "override", "floor": floor, "unit_cost": point["unit_cost"],
+         "margin": point["margin"], "margin_pct": point["margin_pct"]}, indent=2))
+    product = file_product(item)
+    queued = None
+    if item in unfinished_items():
+        queued = "approved-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
+        start_director(queued, [item])
+    return {"job": detail(item), "product": product, "run": queued}
+
+
+# ------------------------------------------------------------------ the catalogue
+
+def products_dir() -> Path:
+    return Path(os.environ["DAPILOT_STORE_DIR"]) / "products"
+
+
+def file_product(item: str, verify_key: bool = True) -> dict | None:
+    """Write or refresh the product record. product_record.py copies; nothing is decided here."""
+    cmd = [PY, str(SCRIPTS / "product_record.py"), "--workdir", str(WORK / item)]
+    if verify_key:
+        cmd.append("--verify-key")
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    if r.returncode != 0:
+        print(f"[server] product record for {item[:8]} failed: {r.stderr.strip()[-300:]}")
+        return None
+    return product_view(item)
+
+
+def product_view(item: str) -> dict | None:
+    rec = read_json(products_dir() / f"{item}.json")
+    if not rec:
+        return None
+    url = lambda rel: f"/api/jobs/{item}/files/{rel}"  # noqa: E731
+    media = rec.get("media") or {}
+    photos = [{**p, "url": url(p["file"])} for p in media.get("photos", [])]
+    drafts = sorted((WORK / item / "renders").glob("draft_*.png"))
+    s = status_of(item, WORK / item, read_json(WORK / item / "meta.json") or {}) if (WORK / item / "meta.json").exists() else {}
+    return {**{k: rec.get(k) for k in ("id", "status", "created_at", "updated_at", "owner", "name", "source_file", "price",
+                                       "quote", "order_item", "storefront", "size_mm")},
+            "photos": photos,
+            "video": {**media["video"], "url": url(media["video"]["file"])} if media.get("video") else None,
+            # Until the design stage has run, the draft is the only picture there is.
+            "thumbnail": photos[0]["url"] if photos else (url(f"renders/{drafts[0].name}") if drafts else None),
+            "pipeline": {"stage": s.get("stage"), "status": s.get("status"), "reason": s.get("reason")},
+            "pendingUploads": len(rec.get("pending_uploads") or [])}
+
+
+@api.get("/products")
+def list_products() -> list[dict]:
+    d = products_dir()
+    if not d.exists():
+        return []
+    out = []
+    for f in d.glob("*.json"):
+        item = f.stem
+        design = WORK / item / "design.json"
+        # The record is made at approval, before any media exists; refresh it once the design stage has written.
+        if design.exists() and design.stat().st_mtime > f.stat().st_mtime:
+            file_product(item, verify_key=False)
+        v = product_view(item)
+        if v:
+            out.append(v)
+    return sorted(out, key=lambda v: v.get("created_at") or "", reverse=True)
+
+
+@api.get("/products/{item}")
+def get_product(item: str) -> dict:
+    if not re.fullmatch(r"[0-9a-f]{64}", item):
+        raise HTTPException(404, "no such product")
+    rec = read_json(products_dir() / f"{item}.json")
+    if not rec:
+        raise HTTPException(404, "no such product")
+    return rec
+
+
+@api.post("/jobs/{item}/approve")
+def approve(item: str) -> dict:
+    """Kept for the old client call: approve the proposal as it stands."""
+    return decide_price(item, PriceDecision())
+
+
+@api.get("/health")
 def health() -> dict:
     with LOCK:
         alive = [r for r, d in DIRECTORS.items() if d["proc"].poll() is None]
     return {"ok": True, "dapi": bool(os.environ.get("DAPI_API_KEY") and os.environ.get("DAPI_API_URL")),
             "etsy": bool(os.environ.get("ETSY_KEYSTRING")), "store": os.environ.get("DAPILOT_STORE_DIR"),
             "work_items": len(list(WORK.iterdir())) if WORK.exists() else 0, "directors_alive": alive}
+
+
+app.include_router(api)
+app.include_router(api, prefix="/api")
