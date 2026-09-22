@@ -29,6 +29,12 @@ for captures. The script fails with a one-line reason when one is missing.
 1. If `design.json` exists, print a `cached:true` result and stop.
 2. Run `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py context --workdir $WORKDIR`.
    Non-zero exit: `ok:false`, reason from its JSON.
+   If `design/brief.json` already exists, an earlier attempt wrote it and
+   captures may already follow it: keep it. Run step 4; if `check` passes,
+   go to step 5 without reading the drafts or touching the brief. A new
+   angle, pose, elevation or colour throws away every frame already
+   captured. Rewrite it only when `check` fails or `previous` names the
+   brief itself as the problem.
 3. Judge: write the brief. Read `design/context.json` and drafts 00, 02, 04
    and 06 (the others only if those leave the front unclear). Decide, with
    `reference/art-direction.md`:
