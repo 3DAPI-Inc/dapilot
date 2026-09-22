@@ -29,6 +29,7 @@ Needs: a running studio page (npm run dev in frontend/), Chrome, and ffmpeg.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -224,10 +225,12 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     # every angle of the sequence, as the studio page computes them (lib/model/capture.ts)
     all_yaws = yaws or [(a.start_yaw - a.arc / 2 + a.arc * i / max(a.frames - 1, 1) + 360) % 360 for i in range(a.frames)]
-    src = sources[0].stat()
+    # By content, not mtime: produce rebuilds display.ply on every call, and an mtime key threw away
+    # every frame each time (2026-09-22, the shark restarted at frame 0 roughly every 60 frames).
+    digest = hashlib.sha256(sources[0].read_bytes()).hexdigest()
     settings = {"frames": a.frames, "size": a.size, "passes": passes, "yaws": [round(y, 6) for y in all_yaws],
                 "rotate": a.rotate, "elevation": a.elevation, "color": a.color,
-                "source": [sources[0].name, src.st_size, int(src.st_mtime)]}
+                "source": [sources[0].name, digest]}
     manifest = out / "capture.json"
     todo = list(range(a.frames))
     if a.resume and manifest.exists() and json.loads(manifest.read_text() or "{}") == settings:
