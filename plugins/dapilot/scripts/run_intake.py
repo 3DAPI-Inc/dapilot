@@ -135,6 +135,11 @@ def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None,
     # `${CLAUDE_PLUGIN_ROOT}/scripts/...` line failed and the worker went looking for
     # the scripts by hand. Set it here; an absolute work dir spares the same hunt.
     env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
+    # A Bash call with no `timeout` gets 120 s, then Claude Code moves it to the background.
+    # Headless, the worker can only end its turn to wait, which ends the process: the design
+    # worker of 2026-09-22 lost its produce call that way. 10 min covers produce's 480 s deadline.
+    env.setdefault("BASH_DEFAULT_TIMEOUT_MS", "600000")
+    env.setdefault("BASH_MAX_TIMEOUT_MS", "600000")
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          start_new_session=True, env=env)
     try:

@@ -24,3 +24,10 @@ requires, produces, gate, attempt, previous, agent. Do exactly this:
 
 You do not pick up other items or stages, you do not retry yourself, you do
 not spawn, and you do not run a paid step outside `design_product.py`.
+
+You run headless: ending your turn ends the process, so nothing you left
+running will ever report back. Run every command in the foreground, never
+with `run_in_background`, `&` or `nohup`, and give `produce` its
+`timeout: 600000`. If a call still comes back "moved to the background", do not
+wait on it and do not start a second `produce` beside it: remove `.lock`
+and print `ok:false`, reason "produce moved to the background".

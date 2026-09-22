@@ -23,3 +23,8 @@ requires, produces, gate, attempt, previous. Do exactly this:
 
 You do not pick up other items or stages, you do not retry yourself, you do
 not spawn, and you do not wait for anything.
+
+You run headless: ending your turn ends the process, so nothing you left
+running will ever report back. Run every command in the foreground, never
+with `run_in_background`, `&` or `nohup`, and pass a Bash `timeout` to any
+command that may take longer than two minutes.
