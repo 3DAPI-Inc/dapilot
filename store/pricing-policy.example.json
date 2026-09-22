@@ -1,0 +1,27 @@
+{
+ "comment": "Template for $DAPILOT_STORE_DIR/reference/pricing-policy.json; scripts/dev/shop.sh setup copies it there when missing. The values are dapi's own shop as decided 2026-09-09 and 2026-09-11. Review seller_region, currency, vat.rate, vat.purchase_reclaimable, markup_pct and cost_basis for your shop before pricing anything. The hard rule, enforced by price_candidates.py --check and never by a prompt: the sale price is never below break-even (cost plus platform fees plus VAT owed).",
+ "cost_basis": "full_plate",
+ "markup_pct": 50,
+ "platform": "etsy",
+ "seller_region": "EU",
+ "currency": "USD",
+ "vat": {
+  "rate": 0.21,
+  "rate_note": "Romania standard rate since 2025-08-01",
+  "in_sale_price": true,
+  "in_sale_price_note": "Conservative: treats every sale as VAT-inclusive as for EU buyers. US buyers pay sales tax on top through Etsy, so for a US-heavy shop this understates net by up to 21%. Flip to false once the buyer mix is known.",
+  "purchase_reclaimable": true,
+  "purchase_reclaimable_note": "Our own shop buys from our own platform; no VAT leaks. An external EU seller without a VAT number sets this false."
+ },
+ "rounding": "0.99",
+ "hard_rules": [
+  "price >= break_even, always, for any author of price.json",
+  "the model picks only from candidates; a price that is not a candidate needs a human override block",
+  "the model never writes an override block; only a person does"
+ ],
+ "min_margin_pct": 0.1,
+ "min_margin_note": "Soft rule for the model only: candidates whose margin on net revenue is below this are listed under rejected and not proposed. A person may still pick one with an override block, as long as it is above break-even.",
+ "cost_basis_note": "full_plate: the unit price at max_per_plate from the batch curve. Decided 2026-09-11: the shop buys in batches (about stock_units at a time) and sells from stock, so the plate price is the real unit cost. one_off is what print-to-order would cost and is reported beside it.",
+ "stock_units": 100,
+ "stock_units_note": "Units bought per production run. Drives the stock block in viability.json: plates, batch cost, payback units per candidate. Not a cap on anything."
+}

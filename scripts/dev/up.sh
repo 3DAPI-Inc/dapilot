@@ -22,7 +22,7 @@ say() { printf '  %-14s %s\n' "$1" "$2"; }
 need() { if [ -n "$2" ]; then say "$1" "$2"; else say "$1" "MISSING: $3"; ok=0; fi; }
 
 echo "dapilot at $ROOT"
-[ -x "$PY" ] && need python "$($PY --version 2>&1)" || need python "" "create .venv (python3.12 -m venv .venv; pip install trimesh scipy networkx fastapi uvicorn python-multipart)"
+[ -x "$PY" ] && need python "$($PY --version 2>&1)" || need python "" "run scripts/dev/shop.sh setup"
 need claude "$(command -v claude || true)" "install the Claude Code CLI"
 need blender "$( [ -x "${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}" ] && echo "${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}" || true)" "install Blender or set BLENDER in store/.env"
 need node "$(command -v node || true)" "install node for the frontend"

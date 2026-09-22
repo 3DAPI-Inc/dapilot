@@ -1,0 +1,15 @@
+{
+ "comment": "Template for $DAPILOT_STORE_DIR/reference/etsy-listing.json: shop-wide choices every Etsy listing gets. scripts/dev/shop.sh setup writes it after the Etsy sign-in, filling the ids when the shop has exactly one of each; otherwise list them with etsy_listing.py profiles and fill them in. Activating a physical listing needs shipping_profile_id, return_policy_id and readiness_state_id.",
+ "who_made": "i_did",
+ "when_made": "made_to_order",
+ "is_supply": false,
+ "type": "physical",
+ "quantity": 100,
+ "should_auto_renew": true,
+ "is_taxable": true,
+ "is_customizable": false,
+ "shipping_profile_id": null,
+ "return_policy_id": null,
+ "readiness_state_id": null,
+ "production_partner_ids": []
+}
