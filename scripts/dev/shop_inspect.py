@@ -123,6 +123,15 @@ def last_json(text: str) -> dict:
         return {}
 
 
+def which_all(name: str) -> list[str]:
+    seen = []
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        f = os.path.join(d, name)
+        if os.access(f, os.X_OK) and f not in seen:
+            seen.append(f)
+    return seen
+
+
 def version(cmd: list[str]) -> str:
     code, out = run(cmd, timeout=20)
     line = out.splitlines()[0] if out else ""
@@ -196,8 +205,12 @@ def check(offline: bool) -> int:
            f"{claude} ({version([claude, '--version'])})" if claude else "install Claude Code; every worker is claude -p", ["all"])
     blender = next((b for b in (os.environ.get("BLENDER"), "/Applications/Blender.app/Contents/MacOS/Blender", shutil.which("blender"),
                                 "/snap/bin/blender", "/opt/blender/blender") if b and os.access(b, os.X_OK)), None)
-    ck.add("tools", "blender", "ok" if blender else "missing",
-           f"{blender} ({version([blender, '--version'])})" if blender else "install Blender or set BLENDER", ["preview"])
+    bv = version([blender, "--version"]) if blender else ""
+    bm = re.match(r"Blender (\d+)\.", bv)
+    ck.add("tools", "blender", "ok" if bm and int(bm[1]) >= 4 else "missing",
+           f"{blender} ({bv})" if bm and int(bm[1]) >= 4
+           else f"{blender} ({bv}): the preview render needs Blender 4.0+; scripts/dev/shop.sh setup installs 4.5 LTS" if blender
+           else "scripts/dev/shop.sh setup installs it, or set BLENDER", ["preview"])
     chrome = next((b for b in (os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                                *(shutil.which(n) for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")))
                    if b and os.access(b, os.X_OK)), None)
@@ -211,7 +224,9 @@ def check(offline: bool) -> int:
     m = re.match(r"v(\d+)\.(\d+)", nv)
     node_ok = bool(m) and ((int(m[1]) == 20 and int(m[2]) >= 19) or (int(m[1]) == 22 and int(m[2]) >= 12) or int(m[1]) > 22)
     ck.add("tools", "node", "ok" if node_ok else "missing",
-           f"{node} ({nv})" if node_ok else f"{node} ({nv}): vite 8 needs 20.19+ or 22.12+" if node else "scripts/dev/shop.sh setup offers the install", ["design"])
+           f"{node} ({nv})" if node_ok else f"{node} ({nv}): vite 8 needs 20.19+ or 22.12+; scripts/dev/shop.sh setup installs one"
+           + (f" (other node on PATH: {', '.join(others)})" if (others := [o for o in which_all('node') if o != node]) else "") if node
+           else "scripts/dev/shop.sh setup installs it", ["design"])
     nm = (ROOT / "frontend" / "node_modules").is_dir()
     ck.add("tools", "frontend deps", "ok" if nm else "missing", "frontend/node_modules" if nm else "cd frontend && npm install", ["design"])
 
