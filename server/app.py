@@ -61,6 +61,15 @@ SUPPORTED = {".stl", ".3mf", ".obj", ".step", ".stp"}
 SERVABLE = {".png", ".jpg", ".mp4", ".json", ".md"}
 
 
+def env_value(raw: str) -> str:
+    """A .env value the way bash's `source` reads it: quoted up to its closing quote, else cut at ` #`.
+    A trailing comment on FAL_API_KEY went to fal as part of the key (2026-09-22); bash had dropped it."""
+    v = raw.strip()
+    if v[:1] in "\"'" and v[:1] and v.find(v[0], 1) > 0:
+        return v[1:v.find(v[0], 1)]
+    return re.split(r"\s#", v, maxsplit=1)[0].strip()
+
+
 def load_env() -> None:
     store = Path(os.environ.get("DAPILOT_STORE_DIR") or ROOT / "store")
     env = store / ".env"
@@ -69,7 +78,7 @@ def load_env() -> None:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                os.environ.setdefault(k.strip().removeprefix("export ").strip(), env_value(v))
     os.environ.setdefault("DAPILOT_STORE_DIR", str(store))
     os.environ.setdefault("DAPILOT_PROJECT_DIR", str(ROOT))
 
@@ -233,13 +242,17 @@ def run_is_live(run: str, state: dict | None = None) -> bool:
         return False
     budget = worker_budget_minutes() * 60 + 60
     for item in state.get("items", {}).values():
+        # A worker writes the item's .lock within seconds of starting. Past that, a "running" stage
+        # with no lock is a director that was killed before it could record (2026-09-22: a killed
+        # run held both its items for 40 minutes and /runs/resume started nothing).
+        locked = bool(item.get("workdir")) and (ROOT / item["workdir"] / ".lock").exists()
         for rec in item.get("stages", {}).values():
             if rec.get("status") == "running" and rec.get("dispatched"):
                 try:
                     age = (datetime.now(timezone.utc) - datetime.fromisoformat(rec["dispatched"])).total_seconds()
                 except ValueError:
                     continue
-                if age < budget:
+                if age < budget and (locked or age < 120):
                     return True
     return False
 

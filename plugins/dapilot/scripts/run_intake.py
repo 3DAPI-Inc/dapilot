@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import shutil
 import signal
@@ -48,6 +49,15 @@ def project_root() -> Path:
     return Path(os.environ.get("DAPILOT_PROJECT_DIR") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
 
 
+def env_value(raw: str) -> str:
+    """A .env value the way bash's `source` reads it: quoted up to its closing quote, else cut at ` #`.
+    A trailing comment on FAL_API_KEY went to fal as part of the key (2026-09-22); bash had dropped it."""
+    v = raw.strip()
+    if v[:1] in "\"'" and v[:1] and v.find(v[0], 1) > 0:
+        return v[1:v.find(v[0], 1)]
+    return re.split(r"\s#", v, maxsplit=1)[0].strip()
+
+
 def load_env(root: Path) -> None:
     """store/.env: KEY=VALUE lines. Never overrides what the shell already set."""
     store = Path(os.environ.get("DAPILOT_STORE_DIR") or root / "store")
@@ -59,7 +69,7 @@ def load_env(root: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        k, v = k.strip(), v.strip().strip('"').strip("'")
+        k, v = k.strip().removeprefix("export ").strip(), env_value(v)
         if v and k not in os.environ:
             os.environ[k] = v
 
