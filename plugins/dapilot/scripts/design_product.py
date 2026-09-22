@@ -479,7 +479,11 @@ def cmd_produce(a, cfg: dict) -> int:
         t = cfg["turntable"]
         code, res = run_json(capture + ["--frames", str(t["frames"]), "--size", str(t["size"]), "--fps", str(t["fps"]),
                                         "--passes", "beauty", "--start-yaw", f"{(yaws[0] + 180) % 360:g}", "--arc", "360",
-                                        "--elevation", elevation, "--out", str(tt), "--timeout", str(max(left(), 120))])
+                                        "--elevation", elevation, "--out", str(tt), "--resume",
+                                        "--timeout", str(max(left() - 30, 90))])
+        if code == 3 and res.get("partial"):   # a slow machine (software WebGL on a server): frames kept, next call goes on
+            steps.append({"step": "turntable", "frames_done": res.get("frames_done"), "frames": res.get("frames")})
+            return pending_exit(f"turntable ({res.get('frames_done')}/{res.get('frames')} frames)")
         if code != 0:
             return fail(f"turntable capture failed: {res.get('reason')}", step="turntable")
         (tt / "turntable.mp4").replace(tt_mp4)

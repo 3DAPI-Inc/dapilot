@@ -256,6 +256,27 @@ def director_alive_for(item: str) -> str | None:
     return None
 
 
+def director_failed_for(item: str) -> str | None:
+    """Why the newest director this server started for the item exited with an error, from the end of its log."""
+    with LOCK:
+        mine = [(d["started"], run, d) for run, d in DIRECTORS.items() if item in d["items"]]
+    for _, run, d in sorted(mine, reverse=True)[:1]:   # only the newest: an older failure is history
+        code = d["proc"].poll()
+        if code is None or code == 0:
+            continue
+        try:
+            lines = [l.strip() for l in Path(d["log"]).read_text().splitlines() if l.strip()]
+        except OSError:
+            lines = []
+        last = lines[-1] if lines else ""
+        try:
+            last = json.loads(last).get("reason") or last
+        except (ValueError, AttributeError):
+            pass
+        return f"the director for run {run} exited with code {code}: {last or 'no output'} (runs/{run}/director.log)"
+    return None
+
+
 def runs_for(item: str) -> list[str]:
     return sorted(run for run, st in runs_on_disk().items() if item in st.get("items", {}))
 
@@ -311,7 +332,8 @@ async def create_jobs(files: list[UploadFile]) -> JSONResponse:
 
 def status_of(item: str, wd: Path, meta: dict) -> dict:
     """Stage and status the way the ledger sees them, plus the reason when there is one."""
-    lock = read_json(wd / ".lock") if (wd / ".lock").exists() else None
+    # a worker writes its .lock as JSON, plain text or nothing at all; it is held whatever it holds
+    lock = (read_json(wd / ".lock") or {}) if (wd / ".lock").exists() else None
     run = director_alive_for(item)
     done_stages = []
     for st in stages():
@@ -336,12 +358,15 @@ def status_of(item: str, wd: Path, meta: dict) -> dict:
             return {"stage": stage, "status": "blocked", "reason": f"no sellable price: floor {r.get('floor')} against market median {r.get('market', {}).get('median')}", "done": done_stages}
         if stage == "design" and (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
             return {"stage": "price", "status": "blocked", "reason": "waiting for a person to approve the price", "done": done_stages}
-        if lock and (lock.get("stage") == stage or not lock.get("stage")):
+        if lock is not None and (lock.get("stage") == stage or not lock.get("stage")):
             return {"stage": "slice" if stage == "quote" else stage, "status": "running", "reason": None, "done": done_stages}
-        if lock:
+        if lock is not None:
             return {"stage": "slice" if lock.get("stage") == "quote" else lock.get("stage"), "status": "running", "reason": None, "done": done_stages}
         if run:
             return {"stage": "slice" if stage == "quote" else stage, "status": "queued", "reason": f"next in run {run}", "done": done_stages}
+        died = director_failed_for(item)
+        if died:
+            return {"stage": "slice" if stage == "quote" else stage, "status": "failed", "reason": died, "done": done_stages}
         return {"stage": "slice" if stage == "quote" else stage, "status": "queued", "reason": "no run active for this item", "done": done_stages}
     last = done_stages[-1] if done_stages else "intake"
     return {"stage": "slice" if last == "quote" else last, "status": "done", "reason": None, "done": done_stages}

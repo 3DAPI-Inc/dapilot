@@ -263,7 +263,14 @@ def main() -> int:
     if not dept:
         print(json.dumps({"ok": False, "reason": f"unknown department {a.department}"})); return 2
     if not shutil.which("claude"):
-        print(json.dumps({"ok": False, "reason": "claude CLI not on PATH"})); return 2
+        # Claude's installer puts it in ~/.local/bin, which a service or a fresh tmux shell may not have on PATH;
+        # workers inherit whatever this finds
+        for d in (Path.home() / ".local" / "bin", Path.home() / ".claude" / "local"):
+            if (d / "claude").exists():
+                os.environ["PATH"] = f"{d}{os.pathsep}{os.environ.get('PATH', '')}"
+                break
+    if not shutil.which("claude"):
+        print(json.dumps({"ok": False, "reason": f"claude CLI not on PATH ({os.environ.get('PATH')}) nor in ~/.local/bin"})); return 2
     if a.billing == "subscription":
         os.environ.pop("ANTHROPIC_API_KEY", None)
     if a.billing == "api" and not os.environ.get("ANTHROPIC_API_KEY"):

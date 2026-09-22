@@ -339,7 +339,7 @@ def exists(wd: Path, pattern: str) -> bool:
 
 def item_status(wd: Path) -> tuple[list[tuple[str, str]], str]:
     """[(stage, mark)], one line saying where the item is. Mirrors server/app.py status_of."""
-    lock = read(wd / ".lock") if (wd / ".lock").exists() else None
+    lock = (read(wd / ".lock") or {}) if (wd / ".lock").exists() else None   # JSON, plain text or empty: held either way
     rows, where = [], None
     for st in stages():
         s = st["stage"]
@@ -360,7 +360,7 @@ def item_status(wd: Path) -> tuple[list[tuple[str, str]], str]:
             mark, why = "blocked", f"no sellable price: floor {r.get('floor')} vs market median {(r.get('market') or {}).get('median')}"
         elif s == "design" and (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
             mark, why = "waiting", "a person approves the price: scripts/dev/shop.sh approve " + wd.name[:12]
-        elif lock and lock.get("stage") == s:
+        elif lock is not None and lock.get("stage") in (s, None) and all(exists(wd, p) for p in st["requires"]):
             mark, why = "running", f"worker since {lock.get('started') or lock.get('at') or '?'}"
         elif all(exists(wd, p) for p in st["requires"]):
             mark, why = "ready", "inputs present, next run picks it up"

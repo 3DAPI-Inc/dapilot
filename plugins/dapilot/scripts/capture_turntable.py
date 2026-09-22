@@ -65,9 +65,11 @@ class Collector(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, out: Path, source: Path):
+    def __init__(self, out: Path, source: Path, index_map: list[int] | None = None):
         super().__init__(("127.0.0.1", 0), Handler)
         self.out = out
+        # the page numbers the frames it was asked for from 0; on a resume those are only the missing ones
+        self.index_map = index_map
         # Served by us, not by the dev server: Vite refuses paths outside the
         # repo, and a work dir can live anywhere.
         self.source = source
@@ -98,7 +100,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(int(self.headers.get("content-length", 0)))
             target = server.out / name
             target.mkdir(parents=True, exist_ok=True)
-            (target / f"frame_{int(index):04d}.png").write_bytes(body)
+            n = server.index_map[int(index)] if server.index_map is not None else int(index)
+            (target / f"frame_{n:04d}.png").write_bytes(body)
             server.counts[name] += 1
             server.last = time.time()
         except Exception as exc:                      # a bad frame must stop the run
@@ -180,6 +183,9 @@ def main() -> int:
     ap.add_argument("--studio", default=os.environ.get("DAPILOT_STUDIO_URL", "http://localhost:8081"))
     ap.add_argument("--no-video", action="store_true", help="frames only, skip ffmpeg")
     ap.add_argument("--timeout", type=float, default=900.0)
+    ap.add_argument("--resume", action="store_true",
+                    help="keep frames already captured with the same settings, capture only the missing ones, "
+                         "and exit 3 (partial) instead of failing when --timeout runs out")
     a = ap.parse_args()
 
     wd = Path(a.workdir).resolve()
@@ -216,18 +222,34 @@ def main() -> int:
 
     out = Path(a.out).resolve() if a.out else wd / "renders"
     out.mkdir(parents=True, exist_ok=True)
-    for name in passes:
-        for stale in (out / name).glob("frame_*.png"):
-            stale.unlink()                            # a rerun must not blend two sequences
+    # every angle of the sequence, as the studio page computes them (lib/model/capture.ts)
+    all_yaws = yaws or [(a.start_yaw - a.arc / 2 + a.arc * i / max(a.frames - 1, 1) + 360) % 360 for i in range(a.frames)]
+    src = sources[0].stat()
+    settings = {"frames": a.frames, "size": a.size, "passes": passes, "yaws": [round(y, 6) for y in all_yaws],
+                "rotate": a.rotate, "elevation": a.elevation, "color": a.color,
+                "source": [sources[0].name, src.st_size, int(src.st_mtime)]}
+    manifest = out / "capture.json"
+    todo = list(range(a.frames))
+    if a.resume and manifest.exists() and json.loads(manifest.read_text() or "{}") == settings:
+        todo = [i for i in todo if not all((out / n / f"frame_{i:04d}.png").exists() for n in passes)]
+        print(f"resuming: {a.frames - len(todo)} of {a.frames} frames already captured", file=sys.stderr)
+    else:
+        for name in passes:
+            for stale in (out / name).glob("frame_*.png"):
+                stale.unlink()                        # a rerun must not blend two sequences
+        manifest.write_text(json.dumps(settings))
+    resumed = len(todo) < a.frames
 
-    server = Collector(out, sources[0])
+    server = Collector(out, sources[0], todo if resumed else None)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     model_url = f"http://127.0.0.1:{server.port}/model{sources[0].suffix}"
+    if resumed:   # ask only for the missing angles, exactly as they were computed the first time
+        yaws = [all_yaws[i] for i in todo]
     page = f"{base}/studio?" + urllib.parse.urlencode({
-        "model": model_url, "capture": "1", "frames": a.frames, "size": a.size,
+        "model": model_url, "capture": "1", "frames": len(todo), "size": a.size,
         "passes": ",".join(passes), "startYaw": a.start_yaw, "arc": a.arc,
-        **({"yaws": ",".join(f"{y:g}" for y in yaws)} if yaws else {}),
+        **({"yaws": ",".join(f"{y:.6f}".rstrip("0").rstrip(".") for y in yaws)} if yaws else {}),
         **({"rotate": a.rotate} if a.rotate else {}),
         **({"elevation": a.elevation} if a.elevation is not None else {}),
         **({"color": a.color} if a.color else {}),
@@ -241,14 +263,22 @@ def main() -> int:
         linux = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
         if os.geteuid() == 0:
             linux.append("--no-sandbox")   # Chrome refuses to start as root otherwise
-    proc = subprocess.Popen(
+    proc = None if not todo else subprocess.Popen(
         [browser, "--headless=new", "--disable-gpu-sandbox", "--hide-scrollbars", *linux,
          "--window-size=1400,1400", f"--user-data-dir={profile}", page],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
 
-    expected = a.frames * len(passes)
+    expected = len(todo) * len(passes)
     t0 = time.time()
+
+    def partial(why: str) -> int:
+        """Out of time on a resumable run: what is on disk stays, and the next call picks up from there."""
+        have = sum(all((out / n / f"frame_{i:04d}.png").exists() for n in passes) for i in range(a.frames))
+        print(json.dumps({"ok": False, "partial": True, "reason": why, "frames_done": have, "frames": a.frames,
+                          "captured": server.counts}))
+        return 3
+
     try:
         while server.total < expected:
             if proc.poll() is not None:
@@ -261,16 +291,19 @@ def main() -> int:
                 return fail("the page never fetched the model; is /studio built and reachable?")
             # Two clocks: a hard cap, and a stall guard once frames start arriving.
             if waited > a.timeout:
+                if a.resume:
+                    return partial(f"timed out after {waited:.0f}s")
                 return fail(f"timed out after {waited:.0f}s", captured=server.counts)
             if server.total and time.time() - server.last > 120:
                 return fail("no frame for 120s; the page stopped sending", captured=server.counts)
             time.sleep(0.25)
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        if proc is not None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
         server.shutdown()
         shutil.rmtree(profile, ignore_errors=True)
 
@@ -279,7 +312,7 @@ def main() -> int:
         "ok": True, "frames": a.frames, "size": a.size, "fps": a.fps, "passes": passes,
         "start_yaw": a.start_yaw, "arc": a.arc, "yaws": yaws or None, "rotate": a.rotate or "0,0,0",
         "elevation": a.elevation, "color": a.color,
-        "captured": server.counts, "capture_s": wall,
+        "captured": server.counts, "capture_s": wall, "resumed_from": a.frames - len(todo) if resumed else 0,
         "seconds": round(a.frames / a.fps, 2), "renderer": "webgl",
     }
 
