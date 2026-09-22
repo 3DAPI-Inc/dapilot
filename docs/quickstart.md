@@ -15,11 +15,15 @@ time; steps that are already done are skipped.
 
 Setup works through these steps:
 
-1. **Tools.** Claude Code CLI, node and npm, ffmpeg and ffprobe, Blender and
-   Chrome. When one is missing it prints the install command and offers to
-   run it (Homebrew, or Claude's installer).
-2. **Python.** Creates `.venv` from python 3.10 to 3.13 (the macOS system
-   3.14 has no trimesh wheels) and installs `requirements.txt`. It installs
+1. **Tools.** Installs whatever is missing of curl, the Claude Code CLI, node
+   and npm, ffmpeg and ffprobe, Blender and Chrome: Homebrew on macOS, apt or
+   dnf on Linux, Claude's own installer for the CLI. `sudo` asks for your
+   password once; as root no sudo is used. `SHOP_NO_INSTALL=1` only reports
+   what is missing.
+2. **Python.** Installs python 3.12 when there is no 3.10 to 3.13 (the macOS
+   system 3.14 has no trimesh wheels), creates `.venv` (installing Debian's
+   separate `python3.X-venv` package when needed) and installs
+   `requirements.txt`. It installs
    again only when that file changes.
 3. **Frontend.** Runs `npm install` in `frontend/` when `package-lock.json` is
    newer than `node_modules`.
@@ -32,7 +36,9 @@ Setup works through these steps:
    from it.
 5. **Sign-ins.** Claude (`claude auth login`, unless `CLAUDE_CODE_OAUTH_TOKEN`
    or `ANTHROPIC_API_KEY` is set). Etsy, through a browser, when there is no
-   token or it lacks `listings_w`; the old token is kept as a backup. The Etsy
+   token or it lacks `listings_w`; the old token is kept as a backup. With no
+   display (a server) it prints the link and takes the pasted address instead;
+   see "On a Linux server". The Etsy
    app must list `http://localhost:3003/oauth/redirect` as a callback.
    Instagram, from `INSTAGRAM_ACCESS_TOKEN`, when a social platform is enabled.
 6. **Store reference.** Fetches Etsy's seller and buyer taxonomies into
@@ -43,9 +49,36 @@ Setup works through these steps:
    exactly one of each, and asks which one when there are several.
 7. **Check.** See below.
 
-Setup asks before it installs anything or opens a sign-in. With no terminal
-(piped or scheduled) it logs each question it skipped, so the Etsy sign-in
-waits for a run in a terminal.
+Setup installs without asking. It asks only before opening a sign-in and
+when choosing a return policy. With no terminal (piped or scheduled) it
+logs each question it skipped, and each install that needed a sudo
+password, so the Etsy sign-in waits for a run in a terminal.
+
+### On a Linux server
+
+The same command works on Linux. Tools come from apt (Debian, Ubuntu) or
+dnf (Fedora, RHEL) instead of Homebrew:
+- Node from NodeSource, because apt's own node is too old for Vite 8, which
+  needs 20.19+ or 22.12+.
+- Google Chrome's `.deb` or `.rpm` on x86_64, Chromium on ARM.
+- Blender and ffmpeg from the distribution.
+- On Ubuntu 22.04, python3.12 comes from `ppa:deadsnakes/ppa`, which setup adds.
+
+A server has no browser and no GPU, and neither is needed. Blender renders
+with Cycles on the CPU. Chrome captures headless, with WebGL through
+SwiftShader. Run as root, Chrome gets `--no-sandbox`; a service user is safer.
+Two sign-ins need handling:
+- **Claude.** Put `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token` on a
+  laptop) or `ANTHROPIC_API_KEY` in `store/.env`.
+- **Etsy.** Setup prints a sign-in link instead of opening a browser. Open
+  it on your own computer, in a browser signed in to the shop, and approve.
+  The browser then lands on `http://localhost:3003/oauth/redirect?code=...`
+  and shows an error page, which is expected. Copy that whole address from
+  the address bar and paste it into the server's terminal within a few
+  minutes. An SSH tunnel (`ssh -L 3003:localhost:3003 user@server`) works
+  too; whichever arrives first is used.
+
+The console is reachable the same way, with `-L 8081:localhost:8081`.
 
 To check without changing anything:
 

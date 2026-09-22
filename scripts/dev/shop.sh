@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The whole shop process, one step at a time, with the terminal saying where it is.
 #
-#   scripts/dev/shop.sh setup                     everything a fresh checkout needs: tools, .venv, frontend packages,
-#                                                 store files, Etsy/Instagram/Claude sign-ins, then check. Safe to rerun.
+#   scripts/dev/shop.sh setup                     everything a fresh checkout needs: installs missing tools (brew, apt, dnf;
+#                                                 sudo asks once), .venv, frontend packages, store files, Etsy/Instagram/Claude
+#                                                 sign-ins, then check. Safe to rerun. SHOP_NO_INSTALL=1 only reports.
 #   scripts/dev/shop.sh check [--offline]         is the setup ready: env, files, tools, live credentials, per stage
 #   scripts/dev/shop.sh run <file|folder> [--no-approve] [--dry-run]
 #                                                 setup -> check -> services -> intake up to the price -> price gate
@@ -43,6 +44,7 @@ INSPECT="$ROOT/scripts/dev/shop_inspect.py"
 SCRIPTS="$ROOT/plugins/dapilot/scripts"
 ETSY_SCOPES="listings_r listings_w shops_r"   # publish drafts and activates listings
 STAMP=$(date -u +%Y%m%dT%H%M%S)
+OS=$(uname -s)   # Darwin or Linux
 mkdir -p "$ROOT/runs"
 LOG="$ROOT/runs/shop-$STAMP.log"
 STEP="-"
@@ -101,7 +103,7 @@ header() {
   log "shop.sh $*"
   log "log file $LOG"
   logq "git $(git rev-parse --short HEAD 2>/dev/null) on $(git branch --show-current 2>/dev/null), $(git status --porcelain 2>/dev/null | wc -l | tr -d ' ') uncommitted paths"
-  logq "host $(uname -srm), macOS $(sw_vers -productVersion 2>/dev/null || echo -), bash $BASH_VERSION, user $(whoami)"
+  logq "host $(uname -srm), $(os_name), bash $BASH_VERSION, user $(whoami)$([ "$(id -u)" = 0 ] && echo ' (root)')"
   logq "root $ROOT, store $STORE, python $PY, studio $STUDIO"
   logq "store/.env sets: $(grep -oE '^[A-Z_]+=' "$STORE/.env" 2>/dev/null | tr -d = | tr '\n' ' ')"
   if [ -n "${SHOP_TRACE:-}" ]; then
@@ -111,26 +113,96 @@ header() {
 
 up() { curl -sf -o /dev/null --max-time 3 "$1"; }
 
-# ------------------------------------------------------------------ setup
-
-# a missing tool: say how to get it, and offer to run that when it can run here
-offer() {
-  local name="$1" cmd="$2"
-  log "${Y}$name is missing${N}; to install: $cmd"
-  case "$cmd" in brew\ *) command -v brew > /dev/null || return 1;; curl\ *|claude\ *) ;; *) return 1;; esac
-  ask "run that now? [y/N]" && [ "$REPLY" = y ] && run_logged "$name" bash -c "$cmd"
+os_name() {
+  if [ "$OS" = Darwin ]; then echo "macOS $(sw_vers -productVersion 2>/dev/null)"
+  else ( . /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-$OS}" ); fi
 }
 
-blender_bin() { local b; for b in "${BLENDER:-}" /Applications/Blender.app/Contents/MacOS/Blender "$(command -v blender)"; do [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }; done; return 1; }
-chrome_bin() { local b; for b in "${CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$(command -v google-chrome)" "$(command -v chromium)"; do [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }; done; return 1; }
+sha256() { if command -v sha256sum > /dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-64; }
+
+# vite 8 needs node ^20.19 or >=22.12
+node_ok() { node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit((a === 20 && b >= 19) || (a === 22 && b >= 12) || a > 22 ? 0 : 1)' 2>/dev/null; }
+
+# ------------------------------------------------------------------ setup
+
+# how to install a tool on this machine: Homebrew on macOS, apt or dnf on Linux; empty when unknown
+APT="sudo env DEBIAN_FRONTEND=noninteractive apt-get"
+install_cmd() {
+  local arch; arch=$(uname -m)
+  if [ "$OS" = Darwin ]; then
+    command -v brew > /dev/null || return 0
+    case "$1" in
+      python)  echo "brew install python@3.12" ;;
+      node)    echo "brew install node" ;;
+      ffmpeg)  echo "brew install ffmpeg" ;;
+      blender) echo "brew install --cask blender" ;;
+      chrome)  echo "brew install --cask google-chrome" ;;
+    esac
+  elif command -v apt-get > /dev/null; then
+    case "$1" in
+      curl)    echo "$APT update && $APT install -y curl ca-certificates" ;;
+      # Debian 12 and Ubuntu 24.04 ship a usable python3; Ubuntu 22.04 needs deadsnakes for 3.12
+      python)  echo "$APT update && { apt-cache show python3.12 > /dev/null 2>&1 || { $APT install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa && $APT update; }; } && $APT install -y python3.12 python3.12-venv" ;;
+      venv)    echo "$APT install -y $2-venv" ;;
+      node)    echo "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && $APT install -y nodejs" ;;   # apt's own node is too old for vite 8
+      ffmpeg)  echo "$APT update && $APT install -y ffmpeg" ;;
+      blender) echo "$APT update && $APT install -y blender" ;;
+      chrome)  if [ "$arch" = x86_64 ]; then echo "curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && $APT install -y /tmp/chrome.deb"
+               else echo "$APT update && $APT install -y chromium"; fi ;;
+    esac
+  elif command -v dnf > /dev/null; then
+    case "$1" in
+      curl)    echo "sudo dnf install -y curl" ;;
+      python)  echo "sudo dnf install -y python3.12" ;;
+      node)    echo "sudo dnf install -y nodejs" ;;
+      ffmpeg)  echo "sudo dnf install -y ffmpeg" ;;   # Fedora ships ffmpeg-free; RHEL needs RPM Fusion
+      blender) echo "sudo dnf install -y blender" ;;
+      chrome)  [ "$arch" = x86_64 ] && echo "sudo dnf install -y https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm" || echo "sudo dnf install -y chromium" ;;
+    esac
+  fi
+}
+
+# install a missing tool. SHOP_NO_INSTALL=1 only reports. Root runs the command without sudo;
+# anyone else is asked for the sudo password once, on the terminal.
+install_tool() {
+  local name="$1" cmd="$2"
+  if [ -z "$cmd" ]; then log "${R}$name is missing${N} and there is no package manager setup knows here (brew, apt, dnf); install it by hand"; return 1; fi
+  [ "$(id -u)" = 0 ] && { cmd=${cmd//sudo -E /}; cmd=${cmd//sudo /}; }
+  if [ -n "${SHOP_NO_INSTALL:-}" ]; then log "${Y}$name is missing${N}; SHOP_NO_INSTALL is set, so not running: $cmd"; return 1; fi
+  case "$cmd" in *sudo*)
+    if ! sudo -n true 2> /dev/null && [ ! -t 0 ]; then log "${R}$name is missing${N}; installing needs the sudo password and there is no terminal. Run: $cmd"; return 1; fi ;;
+  esac
+  log "${Y}$name is missing; installing${N}"
+  run_logged "install $name" bash -c "$cmd"
+}
+
+blender_bin() { local b; for b in "${BLENDER:-}" /Applications/Blender.app/Contents/MacOS/Blender "$(command -v blender)" /snap/bin/blender /opt/blender/blender; do [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }; done; return 1; }
+chrome_bin() { local b; for b in "${CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$(command -v google-chrome)" "$(command -v google-chrome-stable)" "$(command -v chromium)" "$(command -v chromium-browser)"; do [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }; done; return 1; }
 
 setup_tools() {
   local b
-  if command -v claude > /dev/null; then log "claude $(claude --version 2>/dev/null) at $(command -v claude)"; else offer "the Claude Code CLI" "curl -fsSL https://claude.ai/install.sh | bash"; fi
-  if command -v node > /dev/null && command -v npm > /dev/null; then log "node $(node --version), npm $(npm --version) at $(command -v node)"; else offer node "brew install node"; fi
-  if command -v ffmpeg > /dev/null && command -v ffprobe > /dev/null; then log "ffmpeg at $(command -v ffmpeg): $(ffmpeg -version 2>/dev/null | head -1)"; else offer ffmpeg "brew install ffmpeg"; fi
-  if b=$(blender_bin); then log "blender at $b"; logq "  $("$b" --version 2>/dev/null | head -1)"; else offer Blender "brew install --cask blender"; fi
-  if b=$(chrome_bin); then log "chrome at $b: $("$b" --version 2>/dev/null)"; else offer "Google Chrome" "brew install --cask google-chrome"; fi
+  command -v curl > /dev/null || install_tool curl "$(install_cmd curl)" || die "curl is needed for the rest of setup"
+  if ! command -v claude > /dev/null; then
+    install_tool "the Claude Code CLI" "curl -fsSL https://claude.ai/install.sh | bash"
+    export PATH="$HOME/.local/bin:$PATH"   # where the installer puts it
+  fi
+  command -v claude > /dev/null && log "claude $(claude --version 2>/dev/null) at $(command -v claude)"
+  log "system: $(os_name), $(uname -m)$([ "$(id -u)" = 0 ] && echo ', running as root')"
+  if ! { command -v node > /dev/null && command -v npm > /dev/null && node_ok; }; then
+    install_tool "node 20.19+ or 22.12+$(command -v node > /dev/null && echo " (found $(node --version), too old for vite 8)")" "$(install_cmd node)"
+    hash -r
+  fi
+  command -v node > /dev/null && log "node $(node --version), npm $(npm --version 2>/dev/null) at $(command -v node)"
+  command -v ffmpeg > /dev/null && command -v ffprobe > /dev/null || install_tool ffmpeg "$(install_cmd ffmpeg)"
+  command -v ffmpeg > /dev/null && log "ffmpeg at $(command -v ffmpeg): $(ffmpeg -version 2>/dev/null | head -1)"
+  blender_bin > /dev/null || install_tool Blender "$(install_cmd blender)"
+  if b=$(blender_bin); then log "blender at $b: $("$b" --version 2>/dev/null | head -1)"; fi
+  chrome_bin > /dev/null || install_tool "Chrome or Chromium" "$(install_cmd chrome)"
+  if b=$(chrome_bin); then log "chrome at $b: $("$b" --version 2>/dev/null)"; fi
+  if [ "$OS" = Linux ]; then
+    [ "$(id -u)" = 0 ] && log "running as root: the design stage starts Chrome with --no-sandbox (a service user is safer)"
+    [ -z "${DISPLAY:-}" ] && logq "no DISPLAY: fine, Blender renders with Cycles on the CPU and Chrome captures headless with SwiftShader WebGL"
+  fi
   command -v brew > /dev/null && logq "brew $(brew --version 2>/dev/null | head -1) at $(command -v brew)"
   return 0
 }
@@ -138,8 +210,9 @@ setup_tools() {
 # the system python on macOS is 3.14 and has no trimesh wheels; any 3.10 to 3.13 will do
 base_python() {
   local p
-  for p in python3.12 python3.13 python3.11 python3.10 /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12; do
-    command -v "$p" > /dev/null 2>&1 && { command -v "$p"; return 0; }
+  for p in python3.12 python3.13 python3.11 python3.10 /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12 python3; do
+    command -v "$p" > /dev/null 2>&1 || continue
+    "$p" -c 'import sys; sys.exit(not ((3, 10) <= sys.version_info[:2] <= (3, 13)))' 2>/dev/null && { command -v "$p"; return 0; }
   done
   return 1
 }
@@ -148,13 +221,17 @@ setup_python() {
   local base want stamp
   if [ ! -x "$PY" ]; then
     [ "$PY" = "$ROOT/.venv/bin/python" ] || die "DAPILOT_PYTHON=$PY is not an executable; fix store/.env or remove the line"
-    base=$(base_python) || { offer "python 3.12" "brew install python@3.12"; base=$(base_python) || die "no python 3.10 to 3.13 found"; }
-    run_logged "create .venv with $base ($("$base" --version 2>&1))" "$base" -m venv "$ROOT/.venv" || die "could not create .venv"
+    base=$(base_python) || { install_tool "python 3.10 to 3.13" "$(install_cmd python)"; hash -r; base=$(base_python) || die "no python 3.10 to 3.13 found"; }
+    if ! run_logged "create .venv with $base ($("$base" --version 2>&1))" "$base" -m venv "$ROOT/.venv"; then
+      rm -rf "$ROOT/.venv"   # a failed venv leaves a python without pip behind; this run created it
+      # Debian and Ubuntu ship the venv module as its own package
+      [ "$OS" = Linux ] && command -v apt-get > /dev/null && install_tool "$(basename "$base")-venv" "$(install_cmd venv "$(basename "$base")")"         && run_logged "create .venv again" "$base" -m venv "$ROOT/.venv" || { rm -rf "$ROOT/.venv"; die "could not create .venv"; }
+    fi
   fi
   log "python: $("$PY" --version 2>&1) at $PY"
   "$PY" -c 'import sys; sys.exit(not ((3, 10) <= sys.version_info[:2] <= (3, 13)))' \
     || log "${Y}$PY is not python 3.10 to 3.13; trimesh may have no wheels for it${N}"
-  want=$(shasum -a 256 "$ROOT/requirements.txt" | cut -c1-64)
+  want=$(sha256 "$ROOT/requirements.txt")
   stamp="$(dirname "$(dirname "$PY")")/.dapilot-requirements"
   if [ "$(cat "$stamp" 2>/dev/null)" = "$want" ] && "$PY" -c 'import trimesh, scipy, networkx, jsonschema, fastapi, uvicorn, fal_client' 2>/dev/null; then
     log "python packages match requirements.txt"
@@ -169,6 +246,7 @@ setup_python() {
 setup_frontend() {
   local nm="$ROOT/frontend/node_modules"
   command -v npm > /dev/null || { log "${Y}no npm: the console and studio cannot run, so the design stage cannot either${N}"; return 0; }
+  node_ok || { log "${Y}node $(node --version) is too old for vite 8 (needs 20.19+ or 22.12+); skipping npm install${N}"; return 0; }
   if [ -f "$nm/.package-lock.json" ] && [ ! "$ROOT/frontend/package-lock.json" -nt "$nm/.package-lock.json" ] && [ ! "$ROOT/frontend/package.json" -nt "$nm/.package-lock.json" ]; then
     log "frontend packages match package-lock.json"
   else
@@ -292,10 +370,13 @@ setup_signins() {
     log "etsy token present, scope: $scope"
   else
     if [ -f "$tok" ]; then log "${Y}etsy token scope is '$scope'; publishing needs $ETSY_SCOPES${N}"; else log "${Y}no Etsy token yet${N}"; fi
-    log "the sign-in opens a browser; the app at https://www.etsy.com/developers/your-apps must list http://localhost:3003/oauth/redirect as a callback"
+    log "the sign-in prints a link: open it in a browser signed in to the shop (any computer), approve, then paste back the address the browser ends on"
+    log "the app at https://www.etsy.com/developers/your-apps must list http://localhost:3003/oauth/redirect as a callback"
     if ask "sign in to Etsy now? [y/N]" && [ "$REPLY" = y ]; then
       [ -f "$tok" ] && cp "$tok" "$STORE/etsy_token.bak-$STAMP.json" && log "kept the old token as etsy_token.bak-$STAMP.json"
-      run_logged "etsy sign-in" "$PY" "$SCRIPTS/etsy_auth.py" --env "$STORE/.env" login --scopes "$ETSY_SCOPES"
+      local nb=()   # no display: nothing to open a browser on, so print the link and take the pasted address
+      [ "$OS" = Linux ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && nb=(--no-browser)
+      run_logged "etsy sign-in" "$PY" "$SCRIPTS/etsy_auth.py" --env "$STORE/.env" login --scopes "$ETSY_SCOPES" ${nb[@]+"${nb[@]}"}
     fi
   fi
   # Instagram: only when a platform is enabled for posting

@@ -194,19 +194,24 @@ def check(offline: bool) -> int:
     claude = shutil.which("claude")
     ck.add("tools", "claude CLI", "ok" if claude else "missing",
            f"{claude} ({version([claude, '--version'])})" if claude else "install Claude Code; every worker is claude -p", ["all"])
-    blender = next((b for b in (os.environ.get("BLENDER"), "/Applications/Blender.app/Contents/MacOS/Blender", shutil.which("blender"))
-                    if b and os.access(b, os.X_OK)), None)
+    blender = next((b for b in (os.environ.get("BLENDER"), "/Applications/Blender.app/Contents/MacOS/Blender", shutil.which("blender"),
+                                "/snap/bin/blender", "/opt/blender/blender") if b and os.access(b, os.X_OK)), None)
     ck.add("tools", "blender", "ok" if blender else "missing",
            f"{blender} ({version([blender, '--version'])})" if blender else "install Blender or set BLENDER", ["preview"])
     chrome = next((b for b in (os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                               shutil.which("google-chrome"), shutil.which("chromium")) if b and os.access(b, os.X_OK)), None)
+                               *(shutil.which(n) for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")))
+                   if b and os.access(b, os.X_OK)), None)
     ck.add("tools", "chrome", "ok" if chrome else "missing",
            f"{chrome} ({version([chrome, '--version'])})" if chrome else "install Chrome or set CHROME", ["design"])
     for tool in ("ffmpeg", "ffprobe"):
         path = shutil.which(tool)
-        ck.add("tools", tool, "ok" if path else "missing", f"{path} ({version([path, '-version'])})" if path else "brew install ffmpeg", ["design"])
+        ck.add("tools", tool, "ok" if path else "missing", f"{path} ({version([path, '-version'])})" if path else "scripts/dev/shop.sh setup offers the install", ["design"])
     node = shutil.which("node")
-    ck.add("tools", "node", "ok" if node else "missing", f"{node} ({version([node, '--version'])})" if node else "install node", ["design"])
+    nv = version([node, "--version"]) if node else ""
+    m = re.match(r"v(\d+)\.(\d+)", nv)
+    node_ok = bool(m) and ((int(m[1]) == 20 and int(m[2]) >= 19) or (int(m[1]) == 22 and int(m[2]) >= 12) or int(m[1]) > 22)
+    ck.add("tools", "node", "ok" if node_ok else "missing",
+           f"{node} ({nv})" if node_ok else f"{node} ({nv}): vite 8 needs 20.19+ or 22.12+" if node else "scripts/dev/shop.sh setup offers the install", ["design"])
     nm = (ROOT / "frontend" / "node_modules").is_dir()
     ck.add("tools", "frontend deps", "ok" if nm else "missing", "frontend/node_modules" if nm else "cd frontend && npm install", ["design"])
 

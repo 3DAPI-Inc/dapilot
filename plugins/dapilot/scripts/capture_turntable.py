@@ -51,7 +51,9 @@ def chrome() -> str | None:
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/Applications/Chromium.app/Contents/MacOS/Chromium",
         shutil.which("google-chrome"),
+        shutil.which("google-chrome-stable"),
         shutil.which("chromium"),
+        shutil.which("chromium-browser"),
     ):
         if cand and Path(cand).exists():
             return cand
@@ -233,8 +235,14 @@ def main() -> int:
     })
 
     profile = out / ".chrome-capture"
+    linux = []
+    if sys.platform.startswith("linux"):
+        # A server has no GPU: WebGL falls back to SwiftShader, which Chrome only allows when asked.
+        linux = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+        if os.geteuid() == 0:
+            linux.append("--no-sandbox")   # Chrome refuses to start as root otherwise
     proc = subprocess.Popen(
-        [browser, "--headless=new", "--disable-gpu-sandbox", "--hide-scrollbars",
+        [browser, "--headless=new", "--disable-gpu-sandbox", "--hide-scrollbars", *linux,
          "--window-size=1400,1400", f"--user-data-dir={profile}", page],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

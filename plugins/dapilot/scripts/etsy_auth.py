@@ -9,13 +9,19 @@ the environment or --env.
 Moved from the repo's scripts/ on 2026-09-09 when research-comparables started
 depending on it; the copy there is the development original.
 
-    scripts/etsy_auth.py login  --env store/.env [--scopes "listings_r shops_r"] [--port 3003]
+    scripts/etsy_auth.py login  --env store/.env [--scopes "listings_r shops_r"] [--port 3003] [--no-browser]
     scripts/etsy_auth.py token  --env store/.env       # print a valid access token, refreshing if needed
     scripts/etsy_auth.py whoami --env store/.env       # GET /users/me with the token
     scripts/etsy_auth.py refresh --env store/.env
 
 Before `login`, register exactly this callback URL on your app at
 https://www.etsy.com/developers/your-apps :   http://localhost:<port>/oauth/redirect
+
+On a machine without a browser (a server), `login --no-browser` prints the sign-in
+URL. Open it on any computer, approve, and paste the address the browser ends on
+(http://localhost:<port>/oauth/redirect?code=..., which fails to load there) back
+into this terminal. The callback on :<port> keeps listening too, so an SSH tunnel
+(ssh -L <port>:localhost:<port>) works as well; whichever arrives first is used.
 """
 import argparse
 import base64
@@ -137,8 +143,31 @@ def login(args):
     t.start()
 
     print(f"Callback URL that must be registered on the app: {redirect}", file=sys.stderr)
-    print("Opening the browser. If it does not open, visit:\n" + url, file=sys.stderr)
-    webbrowser.open(url)
+    if args.no_browser:
+        print("Open this in a browser signed in to the Etsy shop, on any computer:", file=sys.stderr)
+    else:
+        print("Opening the browser. If it does not open, visit:", file=sys.stderr)
+    print(url, file=sys.stderr)
+    if sys.stdin.isatty():
+        # the pasted address carries the code and state; the PKCE verifier never left this process
+        print(f"After approving, the browser lands on {redirect}?code=... and may show an error page. "
+              "Copy that whole address and paste it here, then press Enter:", file=sys.stderr, flush=True)
+
+        def read_paste():
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(line).query))
+                if "code" in q or "error" in q:
+                    got.update(q)
+                    return
+                print("That address has no code in it; paste the full address from the browser's address bar:",
+                      file=sys.stderr, flush=True)
+
+        threading.Thread(target=read_paste, daemon=True).start()
+    if not args.no_browser:
+        webbrowser.open(url)
 
     deadline = time.time() + args.timeout
     while "code" not in got and "error" not in got and time.time() < deadline:
@@ -212,7 +241,8 @@ def main():
     l = sub.add_parser("login")
     l.add_argument("--scopes", default=DEFAULT_SCOPES, help="space-separated Etsy scopes")
     l.add_argument("--port", type=int, default=3003)
-    l.add_argument("--timeout", type=int, default=300)
+    l.add_argument("--timeout", type=int, default=600)
+    l.add_argument("--no-browser", action="store_true", help="do not open a browser here; print the URL and take the pasted redirect")
     sub.add_parser("token")
     sub.add_parser("refresh")
     sub.add_parser("whoami")
