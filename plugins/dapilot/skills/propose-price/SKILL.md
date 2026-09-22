@@ -110,9 +110,12 @@ the proposal alone starts nothing. Nothing here touches dapi or Etsy.
 
 ## Failure
 - Missing `DAPILOT_STORE_DIR` or the policy file: script exits 1; `ok:false`.
-- `viability.json` with `ok:false` (no comparables): the script exits 1;
-  return `ok:false`, reason "no market band; research found no
-  comparables". The ledger retries once and then reports it.
+- `viability.json` with `ok:false` (no comparables): not a failure. Research
+  found no competing listings, so `price.candidates.json` has `no_market:
+  true`, and `margin` (the lowest price at the minimum margin) stands where
+  the market candidates would. With nothing to compare, choose the lowest
+  candidate listed, say "no comparables on Etsy; priced on cost" in
+  `reason`, and continue; the person approving the price sees the same.
 - `viability.json` without `market.thin`: a band written before the flag
   existed. Read it as not thin and say so in the log.
 - The check fails on the model's own output: `ok:false` as in step 4. The

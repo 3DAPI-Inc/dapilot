@@ -56,9 +56,13 @@ When generation rejected every candidate (price.rejected.json, no candidates
 file) the check runs against an empty list, so only an override above the
 floor passes.
 
+A viability.json with ok false (research found no comparables) is no
+competition, not an error: median and p75 are skipped, and a `margin`
+candidate joins markup: the lowest price at the policy's min_margin_pct,
+rounded up to the ending (decided 2026-09-22). `no_market: true` in the output.
+
 Generation exits 0 with at least one candidate, 2 when every candidate is
-below the floor (writes price.rejected.json instead), 1 on error, including
-a viability.json with ok false.
+below the floor (writes price.rejected.json instead), 1 on error.
 """
 from __future__ import annotations
 
@@ -229,9 +233,11 @@ def _band_position(price: float, market: dict) -> str | None:
 
 def generate(wd: Path, args) -> int:
     model, quote, viab, unit = build(wd, args)
-    if not viab.get("ok"):
-        die(f"viability.json is not usable: {viab.get('reason')}")
-    market = viab.get("market") if isinstance(viab.get("market"), dict) else {}
+    # No comparables is no competition, not no demand: price on cost alone. Only the market candidates drop
+    # out, and the markup one faces the same floor and margin as ever. Exiting 1 here (before 2026-09-22)
+    # failed the price worker and left the item "queued for pricing" for every resume to retry.
+    no_market = not viab.get("ok")
+    market = {} if no_market else (viab.get("market") if isinstance(viab.get("market"), dict) else {})
     basis = market.get("basis") or "unweighted"
     n = market.get("n")
     median, p75 = _num(market.get("median")), _num(market.get("p75"))
@@ -241,14 +247,24 @@ def generate(wd: Path, args) -> int:
     skipped = []
     raw = [("markup", model.round_price(model.markup_price(cost), "up"),
             f"quote {unit:.2f} plus {model.markup * 100:.0f}% markup, rounded up")]
-    if not market:
+    if no_market:
+        # With nothing to compare against, the lowest price that clears the minimum margin (and so the floor).
+        # Decided 2026-09-22: markup_pct alone lands on break-even once VAT and Etsy fees are counted.
+        m_price = model.round_price(model.price_for_margin_pct(cost, model.min_margin), "up")
+        if abs(m_price - raw[0][1]) >= 0.005:
+            raw.append(("margin", m_price, f"no comparables: the lowest price at the {model.min_margin * 100:.0f}% "
+                                           f"minimum margin on a unit cost of {cost:.2f}, rounded up"))
+        skipped.append({"label": "median", "reason": f"no market: {viab.get('reason')}"})
+    elif not market:
         skipped.append({"label": "median", "reason": "viability.json has no market block"})
     elif median is None:
         skipped.append({"label": "median", "reason": "viability.json market has no median"})
     else:
         raw.append(("median", model.round_price(median, "nearest"),
                     f"market median of {n} comparables, {median:.2f}, {basis} band, rounded"))
-    if not market:
+    if no_market:
+        skipped.append({"label": "p75", "reason": f"no market: {viab.get('reason')}"})
+    elif not market:
         skipped.append({"label": "p75", "reason": "viability.json has no market block"})
     elif p75 is None:
         skipped.append({"label": "p75", "reason": "viability.json market has no p75"})
@@ -315,7 +331,8 @@ def generate(wd: Path, args) -> int:
         "p75_sellers": sellers,
         "p75_sellers_note": sellers_note,
         "policy": model.describe(),
-        "verdict": viab.get("verdict"),
+        "verdict": "no_market" if no_market else viab.get("verdict"),
+        "no_market": no_market,
     }
     if candidates:
         dst = Path(args.out) if args.out else wd / "price.candidates.json"
