@@ -283,6 +283,10 @@ export interface Run {
 
 export const listRuns = (): Promise<Run[]> => api<Run[]>('/runs');
 export const listUnfinished = (): Promise<{ items: string[]; count: number }> => api('/runs/unfinished');
+/** Clears the stage's failed or blocked marker and starts a director over the item. */
+export const retryJob = (id: string): Promise<{ job: Job; cleared: string[]; run: string }> =>
+  api(`/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+
 export const resumeRuns = (): Promise<{ ok: boolean; run: string | null; items: string[] }> =>
   api('/runs/resume', { method: 'POST' });
 

@@ -116,7 +116,8 @@ export function JobRow({ job }: { job: Job }) {
       <JobThumb job={job} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-sans text-[0.9375rem] font-medium text-navy">{job.fileName}</span>
-        {job.reason && job.status !== 'queued' ? (
+        {/* Queued rows say it too: "queued" with nothing running is the case a person most needs to see. */}
+        {job.reason ? (
           <span className={cn('mt-0.5 block truncate font-sans text-[0.8125rem] first-letter:uppercase', job.status === 'failed' ? 'text-destructive' : 'text-slate')}>
             {job.reason}
           </span>

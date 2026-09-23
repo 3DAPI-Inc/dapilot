@@ -169,8 +169,11 @@ def start_director(run: str, items: list[str], folder: Path | None = None, resum
         cmd.append("--resume")
     elif not folder and items:
         cmd += ["--items", ",".join(items)]
+    # Its own session: a ctrl-c or a Vite restart that stops this server must not take the director with
+    # it. Workers already survive that way (run_headless), so a design stage finished while the director
+    # that would dispatch copy was dead, and the item sat "queued for copy" with nothing running.
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=open(log, "a"), stderr=subprocess.STDOUT,
-                            env={**os.environ, "DAPILOT_PROJECT_DIR": str(ROOT)})
+                            start_new_session=True, env={**os.environ, "DAPILOT_PROJECT_DIR": str(ROOT)})
     with LOCK:
         DIRECTORS[run] = {"proc": proc, "items": items, "started": now(), "folder": str(folder) if folder else None,
                           "log": str(log), "resume": resume}
@@ -371,16 +374,31 @@ def status_of(item: str, wd: Path, meta: dict) -> dict:
             return {"stage": stage, "status": "blocked", "reason": f"no sellable price: floor {r.get('floor')} against market median {r.get('market', {}).get('median')}", "done": done_stages}
         if stage == "design" and (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
             return {"stage": "price", "status": "blocked", "reason": "waiting for a person to approve the price", "done": done_stages}
+        # The ledger's marker: the stage ended failed or blocked in some run, and no run touches it until it is cleared.
+        for kind in ("failed", "blocked"):
+            m = read_json(wd / f"{stage}.{kind}.json") if (wd / f"{stage}.{kind}.json").exists() else None
+            if m is not None:
+                why = m.get("question") or m.get("reason") or f"{kind} in run {m.get('run')}"
+                return {"stage": "slice" if stage == "quote" else stage, "status": kind,
+                        "reason": f"{why} (run {m.get('run')}; Try again clears it)", "held": f"{stage}.{kind}.json", "done": done_stages}
+        # The reason says what "queued" and "running" mean for this item, because the row shows it: a
+        # queued item with no director behind it is not queued anywhere, and the console said so only
+        # in a field it hid (2026-09-23).
         if lock is not None and (lock.get("stage") == stage or not lock.get("stage")):
-            return {"stage": "slice" if stage == "quote" else stage, "status": "running", "reason": None, "done": done_stages}
+            return {"stage": "slice" if stage == "quote" else stage, "status": "running",
+                    "reason": f"a {lock.get('agent') or 'worker'} holds this item" + (f" in run {run}" if run else ""), "done": done_stages}
         if lock is not None:
-            return {"stage": "slice" if lock.get("stage") == "quote" else lock.get("stage"), "status": "running", "reason": None, "done": done_stages}
+            held = lock.get("stage")
+            return {"stage": "slice" if held == "quote" else held, "status": "running",
+                    "reason": f"a {lock.get('agent') or 'worker'} holds this item at {held}" + (f" in run {run}" if run else ""), "done": done_stages}
         if run:
-            return {"stage": "slice" if stage == "quote" else stage, "status": "queued", "reason": f"next in run {run}", "done": done_stages}
+            return {"stage": "slice" if stage == "quote" else stage, "status": "queued",
+                    "reason": f"run {run} is live; {stage} is next", "done": done_stages}
         died = director_failed_for(item)
         if died:
             return {"stage": "slice" if stage == "quote" else stage, "status": "failed", "reason": died, "done": done_stages}
-        return {"stage": "slice" if stage == "quote" else stage, "status": "queued", "reason": "no run active for this item", "done": done_stages}
+        return {"stage": "slice" if stage == "quote" else stage, "status": "queued",
+                "reason": f"nothing is running; {stage} waits for a Resume on Agent runs", "done": done_stages}
     last = done_stages[-1] if done_stages else "intake"
     return {"stage": "slice" if last == "quote" else last, "status": "done", "reason": None, "done": done_stages}
 
@@ -667,6 +685,30 @@ def decide_price(item: str, body: PriceDecision) -> dict:
         queued = "approved-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
         start_director(queued, [item])
     return {"job": detail(item), "product": product, "run": queued}
+
+
+@api.post("/jobs/{item}/retry")
+def retry(item: str) -> dict:
+    """A person clears the stage's failed or blocked marker and a director takes the item up again."""
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    if (wd / ".lock").exists():
+        raise HTTPException(409, "a worker holds this item; try again when its stage ends")
+    if director_alive_for(item):
+        raise HTTPException(409, "a director already holds this item")
+    cleared = []
+    for st in stages():
+        for kind in ("failed", "blocked"):
+            m = wd / f"{st['stage']}.{kind}.json"
+            if m.exists():
+                m.unlink()
+                cleared.append(m.name)
+    if not cleared:
+        raise HTTPException(409, "nothing is held on this item; Resume on Agent runs picks it up")
+    run = "retry-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
+    start_director(run, [item])
+    return {"job": detail(item), "cleared": cleared, "run": run}
 
 
 # ------------------------------------------------------------------ the catalogue

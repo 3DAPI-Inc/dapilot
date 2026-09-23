@@ -13,6 +13,8 @@ work/<sha256>/          one model, forever, whatever it was called on upload
   <stage outputs>       analysis.json, quote.json, renders/, comparables.json, price.json, design/, design.json
   log.md                one paragraph per stage
   .lock                 present while a worker holds the dir
+  <stage>.failed.json   the ledger's marker: the stage failed (or .blocked.json: asked a
+                        person); no run dispatches it until a person clears the file
 runs/<id>/
   state.json            written only by ledger.py
   report.md             written only by ledger.py report

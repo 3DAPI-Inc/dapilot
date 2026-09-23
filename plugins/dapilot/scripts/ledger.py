@@ -21,6 +21,14 @@ counts as an attempt; a running stage older than max_wall_minutes is reset
 once; a result for a stage that is not running is rejected; an ok result whose
 outputs are missing on disk becomes a failure; attempts beyond max_attempts
 become failed; needs_human becomes blocked and is never re-dispatched.
+
+A stage that ends failed or blocked leaves a marker in the work dir,
+<stage>.failed.json or <stage>.blocked.json (2026-09-23), so the console, a
+resume and the next run all read the same fact: until a person clears the
+marker (the console's Try again, or rm), no run dispatches that stage again.
+Before the marker, failure lived only in one run's state.json and every
+resume re-bought it. A marker is cleared by the ledger itself when the
+stage's outputs turn up on disk.
 """
 from __future__ import annotations
 
@@ -150,6 +158,38 @@ def clear_stale_lock(wd: Path, max_minutes: float | None = None, notes: list | N
     return False
 
 
+MARKERS = ("failed", "blocked")
+
+
+def marker(wd: Path, stage: str, kind: str) -> Path:
+    return wd / f"{stage}.{kind}.json"
+
+
+def read_marker(wd: Path, stage: str) -> tuple[str, dict] | None:
+    """(kind, contents) of the stage's marker, when one is there."""
+    for kind in MARKERS:
+        m = marker(wd, stage, kind)
+        if m.exists():
+            try:
+                return kind, json.loads(m.read_text())
+            except (OSError, json.JSONDecodeError):
+                return kind, {}
+    return None
+
+
+def write_marker(wd: Path, stage: str, kind: str, run: str, attempt: int, text: str) -> None:
+    clear_markers(wd, stage)
+    marker(wd, stage, kind).write_text(json.dumps(
+        {"stage": stage, "status": kind, "run": run, "attempt": attempt,
+         ("question" if kind == "blocked" else "reason"): text, "at": now(),
+         "clear": "delete this file (or Try again in the console) to let a run dispatch the stage again"}, indent=2))
+
+
+def clear_markers(wd: Path, stage: str) -> None:
+    for kind in MARKERS:
+        marker(wd, stage, kind).unlink(missing_ok=True)
+
+
 def unfinished(wd: Path, stages: dict) -> bool:
     """True when an enabled stage still lacks its output and nothing marks the item as stopped."""
     if (wd / ".lock").exists() and not lock_is_stale(wd):
@@ -160,6 +200,8 @@ def unfinished(wd: Path, stages: dict) -> bool:
         if all(exists(wd, p) for p in st["produces"]):
             continue
         # a stage whose own hold or error file exists is stopped, not pending
+        if read_marker(wd, st["stage"]):
+            return False
         if st["stage"] == "price" and (wd / "price.rejected.json").exists():
             return False
         if st["stage"] == "quote" and (wd / "quote.error.json").exists():
@@ -262,6 +304,7 @@ def refresh(state: dict, stages: dict) -> None:
                 rec.update({"status": "done", "finished": rec.get("finished") or now()})
                 if "summary" not in rec:
                     rec["summary"] = "output present on disk"
+                clear_markers(wd, st["stage"])   # the outputs are the fact; an old marker is history
             elif rec["status"] == "running":
                 started = datetime.fromisoformat(rec["dispatched"])
                 age = (datetime.now(timezone.utc) - started).total_seconds() / 60
@@ -269,6 +312,17 @@ def refresh(state: dict, stages: dict) -> None:
                     rec["status"] = "queued" if rec["attempt"] < state["budget"]["max_attempts"] else "failed"
                     rec["previous"] = f"attempt {rec['attempt']} exceeded {max_min} minutes with no result"
                     state["notes"].append(f"{now()} {h[:8]} {st['stage']}: stale running stage reset")
+                    if rec["status"] == "failed":
+                        rec["reason"] = rec["previous"]
+                        write_marker(wd, st["stage"], "failed", state["run"], rec["attempt"], rec["previous"])
+            elif rec["status"] == "queued":
+                # A marker left by an earlier run holds until a person clears it: this run does not retry it.
+                held = read_marker(wd, st["stage"])
+                if held:
+                    kind, doc = held
+                    rec["status"] = kind
+                    rec[("question" if kind == "blocked" else "reason")] = doc.get("question") or doc.get("reason") or f"{kind} in run {doc.get('run')}"
+                    rec["summary"] = rec.get("summary") or f"{kind} in run {doc.get('run')}, held by {marker(wd, st['stage'], kind).name}"
 
 
 def ready_briefs(state: dict, stages: dict) -> list[dict]:
@@ -291,7 +345,8 @@ def ready_briefs(state: dict, stages: dict) -> list[dict]:
             if rec["attempt"] >= state["budget"]["max_attempts"]:
                 rec["status"] = "failed"
                 rec["reason"] = rec.get("previous") or "attempts exhausted"
-                continue
+                write_marker(wd, st["stage"], "failed", state["run"], rec["attempt"], rec["reason"])
+                break
             briefs.append({
                 "run": state["run"], "department": state["department"], "item": h,
                 "workdir": item["workdir"], "file": item["file"], "stage": st["stage"], "skill": st["skill"],
@@ -362,6 +417,7 @@ def cmd_record(a) -> int:
     if res["needs_human"]:
         rec["status"] = "blocked"
         rec["question"] = res["needs_human"]
+        write_marker(wd, res["stage"], "blocked", a.run, rec["attempt"], res["needs_human"])
     elif res["ok"]:
         stages = load_stages(state.get("stages_file"))
         st = next(s for s in stages["stages"] if s["stage"] == res["stage"])
@@ -370,6 +426,9 @@ def cmd_record(a) -> int:
             rec["status"] = "queued" if rec["attempt"] < state["budget"]["max_attempts"] else "failed"
             rec["previous"] = f"claimed ok but outputs missing: {missing}"
             state["notes"].append(f"{now()} {res['item'][:8]} {res['stage']}: ok claimed, outputs missing {missing}")
+            if rec["status"] == "failed":
+                rec["reason"] = rec["previous"]
+                write_marker(wd, res["stage"], "failed", a.run, rec["attempt"], rec["previous"])
         else:
             rec["status"] = "done"
             rec["cached"] = res["cached"]
@@ -378,6 +437,7 @@ def cmd_record(a) -> int:
         rec["status"] = "queued" if rec["attempt"] < state["budget"]["max_attempts"] else "failed"
         if rec["status"] == "failed":
             rec["reason"] = res["reason"]
+            write_marker(wd, res["stage"], "failed", a.run, rec["attempt"], res["reason"])
     if a.tokens or a.usd is not None:
         cfg = load_config()
         price = cfg.get("pricing_usd_per_1k_tokens", {}).get(a.model or "inherit", 0.0)

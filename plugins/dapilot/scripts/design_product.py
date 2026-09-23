@@ -23,7 +23,8 @@ with the rejection in its prompt; the first attempt is kept as <asset>.rN.
 
 Assets, all under DIR/design/:
   frames/stills/beauty/     the studio stills at the brief's yaws (browser studio)
-  frames/turntable/beauty/  a full turn starting on the hero yaw -> turntable.mp4
+  frames/turntable/beauty/  a full turn starting on the hero yaw -> turntable.mp4, only when fal could
+                            not make the lifestyle clip (turntable.when "fallback"; "always" as before)
   frames/conditioning/      beauty and depth for the lifestyle clip
   lifestyle_N.png           image edits of our stills on fal       (paid)
   lifestyle.mp4             depth-conditioned Wan clip on fal      (paid)
@@ -59,7 +60,10 @@ DEFAULTS = {
     "palette": {"#E8E4DC": "warm white", "#1F1F1F": "matte black", "#3B7DD8": "blue", "#D8453B": "red",
                 "#F2C230": "yellow", "#4E9A5B": "green", "#F08BB4": "pink", "#8A5CC7": "purple"},
     "stills": {"count": 4, "size": 2048, "elevation": 18},
-    "turntable": {"frames": 240, "size": 1080, "fps": 24},
+    # when "fallback" (decided 2026-09-22) the turntable is rendered only after fal failed to make the
+    # lifestyle clip and its redo; "always" renders it on every item, as before. It is the listing video
+    # only then, and on a server without a GPU it costs about half an hour of CPU.
+    "turntable": {"frames": 240, "size": 1080, "fps": 24, "when": "fallback"},
     "lifestyle_images": {"count": 4, "endpoint": "fal-ai/nano-banana-pro/edit", "resolution": "2K",
                          "aspect": "1:1", "usd_each": 0.15},
     # engine i2v animates a lifestyle photo (the brief's start_from); engine vace paints over our depth pass.
@@ -470,27 +474,6 @@ def cmd_produce(a, cfg: dict) -> int:
     for i, (sid, yaw) in enumerate(zip(ids, yaws)):
         assets[sid] = {"file": f"design/frames/stills/beauty/frame_{i:04d}.png", "kind": "studio", "yaw": yaw}
 
-    # 2. studio turntable, starting on the hero
-    tt = dz / "frames" / "turntable"
-    tt_mp4 = dz / "turntable.mp4"
-    if not tt_mp4.exists():
-        if left() < 120:
-            return pending_exit("turntable")
-        t = cfg["turntable"]
-        code, res = run_json(capture + ["--frames", str(t["frames"]), "--size", str(t["size"]), "--fps", str(t["fps"]),
-                                        "--passes", "beauty", "--start-yaw", f"{(yaws[0] + 180) % 360:g}", "--arc", "360",
-                                        "--elevation", elevation, "--out", str(tt), "--resume",
-                                        "--timeout", str(max(left() - 30, 90))])
-        if code == 3 and res.get("partial"):   # a slow machine (software WebGL on a server): frames kept, next call goes on
-            steps.append({"step": "turntable", "frames_done": res.get("frames_done"), "frames": res.get("frames")})
-            return pending_exit(f"turntable ({res.get('frames_done')}/{res.get('frames')} frames)")
-        if code != 0:
-            return fail(f"turntable capture failed: {res.get('reason')}", step="turntable")
-        (tt / "turntable.mp4").replace(tt_mp4)
-        steps.append({"step": "turntable", "seconds": res.get("capture_s")})
-    assets["turntable"] = {"file": "design/turntable.mp4", "kind": "video", **probe(tt_mp4),
-                           "bytes": tt_mp4.stat().st_size}
-
     # 3. lifestyle images, paid
     li = cfg["lifestyle_images"]
     for i, item in enumerate(b.get("lifestyle_images") or []):
@@ -592,7 +575,36 @@ def cmd_produce(a, cfg: dict) -> int:
         else:
             assets["lifestyle_video"] = {"file": None, "kind": "video", "failed": (read(failed) or {}).get("reason")}
 
-    # 5. one review sheet: every photo, and four frames of every clip
+    # 5. studio turntable, starting on the hero. Only when fal could not make the lifestyle clip (it failed,
+    # and its redo failed too or the cap has no room for one), or when config says always. A clip the
+    # reviewer rejected is not a fal error and gets no turntable: the listing then goes without a video.
+    tt = dz / "frames" / "turntable"
+    tt_mp4 = dz / "turntable.mp4"
+    clip = assets.get("lifestyle_video") or {}
+    clip_redos = redone.get("lifestyle_video", {}).get("count", 0)
+    no_room = cfg["usd_cap_per_item"] - spend(wd, cfg)["usd"] < video_usd(cfg) - 1e-9
+    fal_gave_up = bool(clip.get("failed")) and (clip_redos >= cfg["redo_per_asset"] or no_room)
+    planned = bool(lvb and lv["enabled"])
+    if tt_mp4.exists() or cfg["turntable"].get("when") == "always" or fal_gave_up or not planned:
+        if not tt_mp4.exists():
+            if left() < 120:
+                return pending_exit("turntable")
+            t = cfg["turntable"]
+            code, res = run_json(capture + ["--frames", str(t["frames"]), "--size", str(t["size"]), "--fps", str(t["fps"]),
+                                            "--passes", "beauty", "--start-yaw", f"{(yaws[0] + 180) % 360:g}", "--arc", "360",
+                                            "--elevation", elevation, "--out", str(tt), "--resume",
+                                            "--timeout", str(max(left() - 30, 90))])
+            if code == 3 and res.get("partial"):   # a slow machine (software WebGL on a server): frames kept, next call goes on
+                steps.append({"step": "turntable", "frames_done": res.get("frames_done"), "frames": res.get("frames")})
+                return pending_exit(f"turntable ({res.get('frames_done')}/{res.get('frames')} frames)")
+            if code != 0:
+                return fail(f"turntable capture failed: {res.get('reason')}", step="turntable")
+            (tt / "turntable.mp4").replace(tt_mp4)
+            steps.append({"step": "turntable", "seconds": res.get("capture_s")})
+        assets["turntable"] = {"file": "design/turntable.mp4", "kind": "video", **probe(tt_mp4),
+                               "bytes": tt_mp4.stat().st_size}
+
+    # 6. one review sheet: every photo, and four frames of every clip
     order = review_sheet(dz, assets)
     produced = {"ok": True, "pose": produced.get("pose"), "multicolour": produced.get("multicolour"),
                 "assets": assets, "review": "design/review.png", "review_cells": order,
@@ -777,7 +789,8 @@ def cmd_finalize(a, cfg: dict) -> int:
     candidates = []
     if lifestyle and "lifestyle_video" not in rejected_ids:
         candidates.append(("lifestyle_video", lifestyle))
-    candidates.append(("turntable", assets["turntable"]))
+    if assets.get("turntable", {}).get("file"):
+        candidates.append(("turntable", assets["turntable"]))
     video = None
     for vid, v in candidates:
         why = fits(v)
@@ -785,14 +798,19 @@ def cmd_finalize(a, cfg: dict) -> int:
             video = {"id": vid, "source": v["file"], "seconds": v.get("seconds"), "bytes": v.get("bytes")}
             break
         warnings.append(f"{vid} not used as the listing video: {why}")
+    # A video is not required by Etsy. With the turntable only a fallback for a fal failure, a clip the
+    # reviewer rejected leaves the listing without one, which is a result, not a failure.
     if video is None:
-        return fail("no clip fits Etsy's video limits", warnings=warnings)
-    shutil.copy2(wd / video["source"], dz / "video.mp4")
-    video["file"] = "design/video.mp4"
+        why = ("the lifestyle clip was rejected, and a rejection gets no turntable" if "lifestyle_video" in rejected_ids
+               else "; ".join(w for w in warnings if "listing video" in w) or "none produced")
+        warnings.append(f"no listing video: {why}")
+    else:
+        shutil.copy2(wd / video["source"], dz / "video.mp4")
+        video["file"] = "design/video.mp4"
 
     redone = read(dz / "redo.json") or {}
     standard = {"lifestyle_images": {"want": image_count(cfg), "kept": len(kept)},
-                "lifestyle_video": {"want": clip_required(cfg), "kept": video["id"] == "lifestyle_video"}}
+                "lifestyle_video": {"want": clip_required(cfg), "kept": bool(video) and video["id"] == "lifestyle_video"}}
     standard["met"] = not short and (standard["lifestyle_video"]["kept"] or not clip_required(cfg))
     manifest = {
         "ok": True, "name": b["name"], "color": b["color"], "rotate": b.get("rotate", "0,0,0"),
@@ -807,7 +825,7 @@ def cmd_finalize(a, cfg: dict) -> int:
     }
     write(wd / "design.json", manifest)
     return emit({"ok": True, "design": "design.json", "name": b["name"], "photos": len(photos),
-                 "video": video["id"], "standard_met": standard["met"], "spend_usd": manifest["spend"]["usd"],
+                 "video": video["id"] if video else None, "standard_met": standard["met"], "spend_usd": manifest["spend"]["usd"],
                  "warnings": warnings})
 
 

@@ -115,13 +115,15 @@ for captures. The script fails with a one-line reason when one is missing.
    "reason": "one or two sentences"}
   ```
 - By the script: `design/context.json`, `design/plan.json`, `design/produced.json`,
-  `design/review.png`, `design/frames/`, `design/turntable.mp4`,
+  `design/review.png`, `design/frames/`, `design/turntable.mp4` (only when fal
+  could not make the clip, even after its redo),
   `design/lifestyle_N.png`, `design/lifestyle.mp4`, their `.request.json` and
   records, `design/photos/NN_<id>.png` in listing order, `design/video.mp4`.
 - `design.json`, by `finalize`: name, colour, orientation, `photos` in order
   (lifestyle photos, stand-in stills, then `studio_photos`), the listing
   `video` (the lifestyle clip when kept and within Etsy's limits, else the
-  turntable), `standard` (wanted, kept, `met`), `videos`, `rejected`,
+  turntable when fal failed; `null` when the clip was rejected, which is a
+  result, not a failure), `standard` (wanted, kept, `met`), `videos`, `rejected`,
   `redone`, `failed`, `spend`, `warnings`.
   Its existence completes the stage.
 
@@ -138,7 +140,10 @@ through `design_product.py`, and `check` refuses a plan above
 - One lifestyle asset failed on fal: the script records it under `failed`
   and carries on. Step 7 makes it again once. Not a stage failure; mention
   it in the log.
-- No clip fits Etsy's limits: `finalize` fails; `ok:false` with its reason.
+- No clip fits Etsy's limits, or the clip was rejected: the listing goes
+  without a video and `finalize` says so in `warnings`. The studio
+  turntable is made only when fal failed to make the clip and its redo;
+  it is a fallback, never planned.
 
 ## Do not
 - Do not type a price, a cost, a pixel size or a frame count anywhere. The

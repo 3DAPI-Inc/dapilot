@@ -85,6 +85,7 @@ def _parse_model(data: bytes) -> _Model:
     model = _Model()
     verts: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
+    paint: list[str | None] = []  # Bambu's per-triangle paint (`paint_color`), None where unpainted
     comps: list[tuple[str, str | None, np.ndarray]] = []
     obj_id: str | None = None
     it = ET.iterparse(_Bytes(data), events=("start", "end"))
@@ -95,24 +96,26 @@ def _parse_model(data: bytes) -> _Model:
                 model.unit = el.attrib.get("unit", "millimeter")
             elif tag == "object":
                 obj_id = el.attrib.get("id")
-                verts, faces, comps = [], [], []
+                verts, faces, paint, comps = [], [], [], []
             continue
         # end events
         if tag == "vertex":
             verts.append((float(el.attrib["x"]), float(el.attrib["y"]), float(el.attrib["z"])))
         elif tag == "triangle":
             faces.append((int(el.attrib["v1"]), int(el.attrib["v2"]), int(el.attrib["v3"])))
+            paint.append(el.attrib.get("paint_color") or el.attrib.get("slic3rpe:mmu_segmentation"))
         elif tag == "component":
             comps.append((el.attrib["objectid"], _attr(el, "path"), _parse_transform(el.attrib.get("transform"))))
         elif tag == "item":
             model.build.append((el.attrib["objectid"], _attr(el, "path"), _parse_transform(el.attrib.get("transform"))))
         elif tag == "object" and obj_id is not None:
             if faces:
-                model.objects[obj_id] = ("mesh", np.asarray(verts, dtype=np.float64), np.asarray(faces, dtype=np.int64))
+                painted = paint if any(paint) else None
+                model.objects[obj_id] = ("mesh", np.asarray(verts, dtype=np.float64), np.asarray(faces, dtype=np.int64), painted)
             elif comps:
                 model.objects[obj_id] = ("comp", list(comps))
             obj_id = None
-            verts, faces, comps = [], [], []
+            verts, faces, paint, comps = [], [], [], []
         el.clear()
     return model
 
@@ -133,7 +136,10 @@ class _Bytes:
 
 
 def load_3mf_parts(path: str, placements: dict | None = None) -> list[dict]:
-    """One entry per build item, in millimetres: {object_id, instance, vertices, faces}.
+    """One entry per build item, in millimetres: {object_id, instance, vertices, faces, paint}.
+
+    `paint` is None, or one entry per face: Bambu's `paint_color` string for that
+    triangle, None where it is unpainted (see assembly_3mf.paint_state).
 
     `placements` maps (object_id, instance) to a 4x4 that replaces that item's
     build transform: how assembly_3mf.py puts the parts where Bambu's assemble
@@ -164,6 +170,7 @@ def load_3mf_parts(path: str, placements: dict | None = None) -> list[dict]:
         parts: list[dict] = []
         chunks_v: list[np.ndarray] = []
         chunks_f: list[np.ndarray] = []
+        chunks_p: list[list] = []
         offset = 0
 
         def resolve(model_key: str | None, obj_id: str, xf: np.ndarray, depth: int = 0) -> None:
@@ -175,12 +182,13 @@ def load_3mf_parts(path: str, placements: dict | None = None) -> list[dict]:
                 return  # an object with neither mesh nor components (metadata only)
             kind, *payload = model.objects[obj_id]
             if kind == "mesh":
-                v, f = payload
+                v, f, painted = payload
                 if len(f) == 0:
                     return
                 vh = np.c_[v, np.ones(len(v))] @ xf.T
                 chunks_v.append(vh[:, :3])
                 chunks_f.append(f + offset)
+                chunks_p.append(painted or [None] * len(f))
                 offset += len(v)
             else:
                 for ref_id, ref_path, ref_xf in payload[0]:
@@ -191,11 +199,13 @@ def load_3mf_parts(path: str, placements: dict | None = None) -> list[dict]:
         for obj_id, obj_path, xf in items:
             instance = seen.get(obj_id, 0)
             seen[obj_id] = instance + 1
-            chunks_v, chunks_f, offset = [], [], 0
+            chunks_v, chunks_f, chunks_p, offset = [], [], [], 0
             resolve(obj_path, obj_id, (placements or {}).get((obj_id, instance), xf))
             if chunks_f:
+                paint = [x for c in chunks_p for x in c]
                 parts.append({"object_id": obj_id, "instance": instance,
-                              "vertices": np.vstack(chunks_v) * scale, "faces": np.vstack(chunks_f)})
+                              "vertices": np.vstack(chunks_v) * scale, "faces": np.vstack(chunks_f),
+                              "paint": paint if any(paint) else None})
     if not parts:
         raise ValueError("3mf contains no triangles")
     return parts

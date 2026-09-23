@@ -3,6 +3,7 @@
 
     listing_copy.py context --workdir work/<hash>   facts for the writer -> copy/context.json
     listing_copy.py check   --workdir work/<hash>   validate copy/draft.json -> listing.json, social/posts.json
+    listing_copy.py taxonomy "<words>"              seller taxonomy nodes matching the words, with ids
 
 The skill (write-listing) writes copy/draft.json between the two:
     {"title": "...", "description": "...", "tags": ["..."], "materials": ["pla"],
@@ -10,8 +11,11 @@ The skill (write-listing) writes copy/draft.json between the two:
                               "carousel": {"caption": "...", "hashtags": ["..."]}}}}
 
 Everything that is not wording is decided here or upstream: the category is
-research's taxonomy id, checked against the seller taxonomy when the store
-has it; the price is never in the copy; which photos a post carries is fixed
+research's taxonomy id when research found the aisle; when it did not (no
+comparables, 2026-09-23), the writer picks one from the candidates `context`
+lists out of the seller taxonomy and puts it in the draft as `taxonomy_id`,
+and `check` accepts it only when it is a node of that taxonomy, so no person
+is asked; the price is never in the copy; which photos a post carries is fixed
 (a reel is the listing video, a carousel the first photos in listing order).
 `check` refuses what Etsy or a platform would refuse and a short list of
 claims a 3D print cannot back, then writes the two files the publish stage
@@ -57,13 +61,17 @@ def bad_chars(text: str, categories: tuple, extra: str = "") -> list:
     return sorted({c for c in text if not unicodedata.category(c).startswith(categories) and c not in extra})
 
 
-def taxonomy(wd: Path) -> tuple[int | None, str | None]:
-    """Research's category, with its path from the seller taxonomy when the store keeps one."""
-    tid = (read(wd / "comparables.json") or {}).get("taxonomy_id")
+def seller_tree() -> list | None:
     store = os.environ.get("DAPILOT_STORE_DIR")
     tree = read(Path(store) / "reference" / "etsy_seller_taxonomy.json") if store else None
+    if tree is None:
+        return None
+    return tree.get("results") if isinstance(tree, dict) else tree
+
+
+def taxonomy_path(tree: list | None, tid) -> str | None:
     if not isinstance(tid, int) or not tree:
-        return (tid if isinstance(tid, int) else None), None
+        return None
 
     def walk(nodes, path=()):
         for n in nodes:
@@ -74,8 +82,58 @@ def taxonomy(wd: Path) -> tuple[int | None, str | None]:
             if found:
                 return found
         return None
-    path = walk(tree.get("results") if isinstance(tree, dict) else tree)
-    return (tid if path else None), path
+    return walk(tree)
+
+
+STOP = {"a", "an", "the", "of", "for", "and", "or", "with", "to", "in", "on", "3d", "printed", "print", "end", "ends", "v2"}
+
+
+def taxonomy_candidates(tree: list | None, words: str, limit: int = 8) -> list[dict]:
+    """Seller taxonomy nodes whose path carries the most of `words`, leaves first: what the writer chooses from."""
+    if not tree:
+        return []
+    def stem(w: str) -> str:
+        w = w.strip("().,/&").lower()
+        return w[:-1] if w.endswith("s") and len(w) > 3 else w
+
+    stems = {stem(w) for w in words.split()} - STOP - {""}
+    rows: list[tuple[float, int, str]] = []
+
+    def walk(nodes, path=()):
+        for n in nodes:
+            here = path + (n.get("name") or "",)
+            # whole words only: "jig" must not match "jigsaw"
+            own_words = {stem(w) for w in (n.get("name") or "").split()}
+            path_words = {stem(w) for name in here for w in name.split()}
+            hits = len(stems & path_words)
+            kids = n.get("children") or []
+            if hits:
+                # a hit in the node's own name beats one inherited from its parents; a leaf beats a branch
+                rows.append((hits + 0.5 * len(stems & own_words) + (0.25 if not kids else 0), n.get("id"), " > ".join(here)))
+            walk(kids, here)
+    walk(tree)
+    rows.sort(key=lambda r: (-r[0], len(r[2])))
+    return [{"taxonomy_id": tid, "path": path} for _, tid, path in rows[:limit]]
+
+
+def taxonomy(wd: Path) -> tuple[int | None, str | None]:
+    """The category: research's taxonomy id when it is a node of the seller taxonomy, else the draft's."""
+    tree = seller_tree()
+    for tid in ((read(wd / "comparables.json") or {}).get("taxonomy_id"),
+                (read(wd / "copy" / "draft.json") or {}).get("taxonomy_id")):
+        if not isinstance(tid, int):
+            continue
+        if not tree:
+            return tid, None   # no seller taxonomy in the store: nothing to check against
+        path = taxonomy_path(tree, tid)
+        if path:
+            return tid, path
+    return None, None
+
+
+def cmd_taxonomy(a) -> int:
+    rows = taxonomy_candidates(seller_tree(), a.words, a.limit)
+    return emit({"ok": bool(rows), "candidates": rows} | ({} if rows else {"reason": "no seller taxonomy in the store, or no node matches"}), 0 if rows else 1)
 
 
 def cmd_context(a) -> int:
@@ -88,13 +146,20 @@ def cmd_context(a) -> int:
     size = (shown.get("bbox_mm") if shown.get("pose") == "assembled" else None) or (read(wd / "analysis.json") or {}).get("bbox_mm")
     assembly = read(wd / "assembly.json") or {}
     tid, path = taxonomy(wd)
+    identity = comps.get("identity") or {}
+    words = " ".join(str(x) for x in (design.get("name"), comps.get("product"), identity.get("object")) if x)
     ctx = {
         "ok": True, "name": design.get("name"), "identity": comps.get("identity"),
         "size_mm": sorted(size, reverse=True) if size else None,
         "weight_g": ((read(wd / "quote.json") or {}).get("metrics") or {}).get("model_g"),
         "parts": [{"name": i.get("name"), "colour": i.get("colour")} for i in assembly.get("items") or []] or None,
         "multicolour": bool(assembly.get("multicolour")),
-        "category": {"taxonomy_id": tid, "path": path},
+        # Research's aisle when it found one; else candidates from the seller taxonomy for the writer to pick
+        # from (draft.taxonomy_id), so a product with no comparables still gets a category without a person.
+        "category": {"taxonomy_id": tid, "path": path,
+                     "candidates": [] if tid else taxonomy_candidates(seller_tree(), words),
+                     "note": None if tid else "research found no aisle: put one candidate's taxonomy_id in the draft, "
+                                              "or search with `listing_copy.py taxonomy \"<words>\"`"},
         "comparable_titles": [c.get("title") for c in (comps.get("comparables") or [])[:10]],
         "comparable_tags": sorted({t for c in (comps.get("comparables") or [])[:10] for t in (c.get("tags") or [])})[:60],
         "photos": [p.get("id") for p in design.get("photos") or []], "video": (design.get("video") or {}).get("id"),
@@ -164,6 +229,8 @@ def cmd_check(a) -> int:
             refs = media if isinstance(media, list) else [f"photo:{n + 1}" for n in range(min(photos, CAROUSEL_MAX))]
             if fmt == "carousel" and len(refs) < 2:
                 continue  # one photo cannot make a carousel; the reel still goes out
+            if "video" in refs and not design.get("video"):
+                continue  # no listing video (a rejected clip gets no turntable since 2026-09-22): no reel
             posts.append({"platform": platform, "format": fmt, "caption": row["caption"].strip(), "hashtags": hashtags, "media": refs})
 
     everything = " ".join([title, description] + [p["caption"] for p in posts]).lower()
@@ -174,7 +241,8 @@ def cmd_check(a) -> int:
             e.append(f"the copy claims {claim!r}; a printed part cannot back that")
     tid, _ = taxonomy(wd)
     if tid is None:
-        e.append("research's taxonomy id is missing or is not in the seller taxonomy; a person sets the category")
+        e.append("no category: research found no aisle and the draft's taxonomy_id is missing or is not a node of the "
+                 "seller taxonomy; pick one from copy/context.json category.candidates")
     if e:
         return emit({"ok": False, "errors": e}, 1)
 
@@ -190,7 +258,10 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("context", "check"):
         sub.add_parser(name).add_argument("--workdir", required=True)
+    t = sub.add_parser("taxonomy"); t.add_argument("words"); t.add_argument("--limit", type=int, default=8)
     a = ap.parse_args()
+    if a.cmd == "taxonomy":
+        return cmd_taxonomy(a)
     if not Path(a.workdir).is_dir():
         return emit({"ok": False, "reason": f"no work dir at {a.workdir}"}, 2)
     return {"context": cmd_context, "check": cmd_check}[a.cmd](a)

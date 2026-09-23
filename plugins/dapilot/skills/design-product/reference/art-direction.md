@@ -108,7 +108,9 @@ where it goes, next to the thing it fits, on a workbench, and close up.
 
 A short clip that animates one of the lifestyle photos (`start_from`), so it
 opens on a picture the listing also shows. It becomes the listing video when
-it passes review; the studio turntable is the fallback. Nothing locks the
+it passes review. The studio turntable is rendered only when fal could not
+make the clip at all, even after its redo; a rejected clip leaves the
+listing without a video. Nothing locks the
 geometry, so write the scene to protect it and review it for a product that
 bends, grows parts or changes colour.
 

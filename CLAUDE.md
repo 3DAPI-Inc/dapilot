@@ -101,6 +101,27 @@ Read before building anything:
   "vace"`. A standard item is about 1.56 USD, so under the 2.00 USD cap there is
   room to redo photos but not the clip (0.96 USD): the cap needs a decision.
   H3 Max answers in 10 to 20 s where Wan took 7 minutes.
+- **Failure is a file in the work dir (2026-09-23).** When a stage ends failed
+  (attempts exhausted, stale, outputs missing) or blocked (`needs_human`), the
+  ledger writes `<stage>.failed.json` or `<stage>.blocked.json` beside the
+  stage's outputs, with the run, attempt and reason. `ledger.py` refuses to
+  dispatch a marked stage in any run, `--resume` and the console's Resume skip
+  the item, and `GET /jobs/{id}` reports the marker's status and reason. A
+  person clears it: Try again on the job page (`POST /jobs/{id}/retry`, which
+  removes the markers and starts a director) or `rm`. The ledger removes a
+  marker itself when the stage's outputs turn up. Before this, failure lived
+  only in one run's `state.json`, the console called the item queued, and every
+  Resume re-bought the same failure. Caps were raised the same day for the
+  measured turn counts: research 40, price 30, design 50, copy 30 turns,
+  stage budgets 1.2, 0.6, 1.5, 0.8 USD, run ceiling 15 USD.
+- **The studio turntable is a fallback (ordered 2026-09-23).** `design.turntable.when`
+  is `fallback` in config: `design_product.py produce` captures the stills, the
+  lifestyle photos and the clip, and renders the 240-frame turntable only when
+  fal failed to make the clip and its one redo, or the cap has no room for the
+  redo. A clip the reviewer rejected gets no turntable: the listing goes without
+  a video, `design.json` carries `video: null`, and `listing_copy.py` drops the
+  reel. `"always"` restores the old behaviour. The turntable is close to being
+  removed outright; nothing downstream may come to depend on it.
 - **Assembly and part colours come from the project file (2026-09-21).** A
   Bambu project places its objects twice: `<build>` is the print layout,
   `<assemble>` in `Metadata/model_settings.config` is the Assembly View, kept
@@ -109,7 +130,12 @@ Read before building anything:
   `strip_3mf.py` removes both, so the server runs `assembly_3mf.py read` on
   the original first and writes `work/<hash>/assembly.json`:
   `required_assembly` (true when the assembled placement differs from the
-  print layout; a person or the design brief's `assembled` may flip it),
+  print layout and the parts meet there: since 2026-09-23 `parts_touch` requires
+  every part within 1 mm of another by bounding box, one connected set, because
+  Bambu's Assembly View lines never-assembled objects up in a row and a filament
+  welder jig came out as a 479 mm row of three specks, which cost research its
+  only comparable on size; `contact` in the file records the test. A person or
+  the design brief's `assembled` may still flip it),
   `multicolour`, and per item the two transforms, extruder and colour.
   `assembly_3mf.py build` writes `display.ply`, the parts placed by that flag
   with their filament colour per vertex, and both renderers
@@ -145,7 +171,13 @@ Read before building anything:
   stage: `stages.json` names `publish_product.py`, the ledger passes it in the
   brief, and `run_intake.py` runs it with no worker and no tokens. It drafts,
   uploads media, activates the Etsy listing (0.20 USD, public) and sends every
-  social post, then writes `published.json`. The person's approval of the sale
+  social post, then writes `published.json`. The category is research's aisle,
+  or, when research found no comparables, the writer's pick from the
+  seller-taxonomy candidates `listing_copy.py context` lists (`draft.taxonomy_id`,
+  accepted by `check` only as a node of that taxonomy); no question goes to a
+  person from copy (decided 2026-09-23, after a filament welder jig sat blocked
+  on "Which Etsy category?" while the console said nothing was running). The
+  person's approval of the sale
   price is the gate for all of it; `publish.auto_activate` and
   `publish.auto_post` in store config hand either half back to a person, and
   `publish.auto_since` keeps a price approved before that moment from going

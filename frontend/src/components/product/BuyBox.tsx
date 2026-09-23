@@ -3,6 +3,8 @@ import { Check, TriangleAlert } from 'lucide-react';
 import { isLive, type Job, type Viability } from '@/api/jobs';
 import { StatusText } from '@/components/site/JobRow';
 import { PriceDialog, errorText, pct, recommendedPrice, useDecidePrice } from '@/components/site/PriceDecision';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { retryJob } from '@/api/jobs';
 import { Spinner } from '@/components/site/Spinner';
 import { Button } from '@/components/ui/button';
 import { formatMinutes, money } from '@/lib/format';
@@ -39,6 +41,12 @@ export function BuyBox({ job }: { job: Job }) {
   const headline = approved?.price ?? recommended;
   const [dialog, setDialog] = useState(false);
   const approve = useDecidePrice(job);
+  const queries = useQueryClient();
+  // A failed stage is held by a marker in the work dir until a person clears it; this is that clearing.
+  const retry = useMutation({
+    mutationFn: () => retryJob(job.id),
+    onSuccess: () => { void queries.invalidateQueries({ queryKey: ['job', job.id] }); void queries.invalidateQueries({ queryKey: ['jobs'] }); },
+  });
 
   const match = headline != null ? p?.candidates.find((c) => Math.abs(c.price - headline) < 0.005) : undefined;
   const margin = approved ? { usd: approved.margin, pct: approved.margin_pct } : match ? { usd: match.margin, pct: match.margin_pct } : null;
@@ -104,7 +112,7 @@ export function BuyBox({ job }: { job: Job }) {
         )}
       </div>
 
-      {job.reason && (trouble || (!approved && headline == null)) ? (
+      {job.reason && (trouble || job.status === 'queued' || (!approved && headline == null)) ? (
         <p
           className={cn(
             'mt-5 flex gap-2.5 rounded-xl px-3.5 py-3 font-sans text-sm leading-relaxed',
@@ -115,6 +123,15 @@ export function BuyBox({ job }: { job: Job }) {
           {/* The headline already says there is no price; the note keeps only the why. */}
           <span className="first-letter:uppercase">{headline == null ? job.reason.replace(/^no sellable price:\s*/i, '') : job.reason}</span>
         </p>
+      ) : null}
+      {job.status === 'failed' ? (
+        <div className="mt-3">
+          <Button variant="outline" size="sm" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? <Spinner className="size-4" /> : null}
+            Try again
+          </Button>
+          {retry.isError ? <p className="mt-2 font-sans text-sm text-destructive">{errorText(retry.error)}</p> : null}
+        </div>
       ) : null}
 
       {p ? (
