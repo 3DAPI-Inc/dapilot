@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Quote one model file through dapi: upload, create, poll. Deterministic and resumable.
+"""Quote one model file through 3DAPI: upload, create, poll. Deterministic and resumable.
 
   quote.py --workdir DIR [--max-wait SECONDS] [--store-id ID]
 
-Reads DIR/source.<ext> and DIR/meta.json (sha256). Every dapi call goes through
+Reads DIR/source.<ext> and DIR/meta.json (sha256). Every 3DAPI call goes through
 dapi.py so it is validated against the live contract. The quote is named with
 the file's sha256 so it can always be found again:
 

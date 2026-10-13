@@ -1,4 +1,4 @@
-# dapi public API surfaces
+# 3DAPI public API surfaces
 
 Read from the live contract (`dapi.py ops`) when in doubt. This file adds the
 two things the contract does not carry: scopes and gates.

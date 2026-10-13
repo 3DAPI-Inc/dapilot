@@ -30,7 +30,7 @@ Setup works through these steps:
 4. **Store files.** Copies `store/.env` and `store/config.json` from their
    templates when missing, and stops if a required value in `.env` is empty.
    Copies `store/pricing-policy.example.json` to
-   `store/reference/pricing-policy.json` when missing. That template is dapi's
+   `store/reference/pricing-policy.json` when missing. That template is 3DAPI's
    own policy (EU seller, 21% VAT inside every sale, 50% markup, full-plate
    cost), so review it: every price proposal and the break-even floor come
    from it.
@@ -108,14 +108,14 @@ fails on a new machine, that log is the thing to send.
 All of them live in `store/.env` (gitignored). A value already set in the
 shell wins over the file. `shop.sh check` reads every one, says which stage it
 blocks when it is missing, and for credentials makes one free call to prove
-they work (`GET /me` on dapi, `/users/me` on Etsy, the Instagram session).
+they work (`GET /me` on 3DAPI, `/users/me` on Etsy, the Instagram session).
 Secrets are shown by length only, never by value.
 
 | Variable | Needed by | Required | Notes |
 |---|---|---|---|
 | `DAPI_API_URL` | quote | yes | origin only, e.g. `https://api.example.com`; no `/v1` |
 | `DAPI_API_KEY` | quote | yes | scoped key, PRICING for intake |
-| `DAPI_STORE_ID` | quote | no | only when the dapi account has more than one store |
+| `DAPI_STORE_ID` | quote | no | only when the 3DAPI account has more than one store |
 | `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET` | research, publish | yes | Etsy Open API v3 app; plus `store/etsy_token.json` |
 | `FAL_KEY` (or `FAL_API_KEY`) | design | yes | paid: lifestyle photos and clip |
 | `INSTAGRAM_ACCESS_TOKEN`, or `INSTAGRAM_APP_ID` + `INSTAGRAM_APP_SECRET` | publish | when social posting is on | the session file under `store/social/` is what counts |
@@ -147,7 +147,7 @@ nothing is missing) and stops at the price gate for a person.
 | Stage | What happens | Costs |
 |---|---|---|
 | analyze | local geometry pre-check | a worker's tokens |
-| quote | dapi slices and prices the file (18 to 40 s) | tokens |
+| quote | 3DAPI slices and prices the file (18 to 40 s) | tokens |
 | preview | Blender draft turntable | tokens |
 | research | Etsy comparables, market band, viability | tokens, up to 1.00 USD |
 | price | the model picks a candidate; `price_candidates.py --check` enforces the break-even floor | tokens |

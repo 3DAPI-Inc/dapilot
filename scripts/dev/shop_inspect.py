@@ -9,7 +9,7 @@ Changes nothing on disk except what a credential check does on its own (etsy_aut
 whoami refreshes an expired Etsy token, as any Etsy call would).
 
 check exits 0 when every enabled stage can run, 1 when some stage is blocked,
-2 when nothing can start (no python deps, no dapi key, no claude CLI).
+2 when nothing can start (no python deps, no 3DAPI key, no claude CLI).
 """
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ PLACEHOLDER = re.compile(r"^(<.*>|x+|changeme|todo|your[-_ ].*|\.\.\.)$", re.I)
 ENV = [
     ("DAPI_API_URL", ["quote"], True, False, "origin of the public API, no /v1"),
     ("DAPI_API_KEY", ["quote"], True, True, "scoped key, PRICING for intake"),
-    ("DAPI_STORE_ID", ["quote"], False, False, "only when the dapi account has more than one store"),
+    ("DAPI_STORE_ID", ["quote"], False, False, "only when the 3DAPI account has more than one store"),
     ("ANTHROPIC_API_KEY", ["workers"], False, True, "unset: workers bill to the logged-in Claude subscription"),
     ("CLAUDE_CODE_OAUTH_TOKEN", ["workers"], False, True, "claude setup-token; signs workers in without a browser login"),
     ("DAPILOT_BILLING", ["workers"], False, False, "auto | api | subscription"),
@@ -267,7 +267,7 @@ def check(offline: bool) -> int:
             j = last_json(out)
             body = j.get("body") or j.get("data") or j
             who = body.get("name") or body.get("email") or body.get("keyName") or body.get("id") if isinstance(body, dict) else None
-            ck.add("live", "dapi GET /me", "ok" if code == 0 else "missing",
+            ck.add("live", "3DAPI GET /me", "ok" if code == 0 else "missing",
                    f"{os.environ['DAPI_API_URL']} answers" + (f" as {who}" if who else "") + (f", {body.get('permissions')}" if isinstance(body, dict) and body.get("permissions") else "") if code == 0 else (j.get("reason") or j.get("error") or out)[:160],
                    ["quote"])
         if tok.exists() and os.environ.get("ETSY_KEYSTRING"):
@@ -354,7 +354,7 @@ def item_status(wd: Path) -> tuple[list[tuple[str, str]], str]:
             q = read(wd / "quote.error.json") or {}
             mark, why = "failed", (q.get("raw") or {}).get("errorMessage") or q.get("status") or "slicer error"
         elif s == "quote" and (wd / "quote.pending.json").exists():
-            mark, why = "running", "slicing on dapi"
+            mark, why = "running", "slicing on 3DAPI"
         elif s == "price" and (wd / "price.rejected.json").exists():
             r = read(wd / "price.rejected.json") or {}
             mark, why = "blocked", f"no sellable price: floor {r.get('floor')} vs market median {(r.get('market') or {}).get('median')}"

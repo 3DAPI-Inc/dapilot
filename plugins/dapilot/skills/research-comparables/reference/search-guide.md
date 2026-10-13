@@ -133,9 +133,14 @@ Read it top to bottom; every block answers one question.
   that will carry the band, so a wrong product here is the one that matters.
   `market_weight` is the listing's estimated units sold per day, from its
   shop's recent reviews split over the shop's listings; `reviews_in_window`
-  says how many reviews the listing itself had. A set or bundle at the top
-  of this list matters more than one further down, because the band is
-  weighted by units and a set that sells is a lot of units.
+  says how many reviews the listing itself had. `units` is how many of the
+  product one purchase brings, read from the title ("Set of 6", "6pc"), the
+  chosen variant or the description, and `unit_price` the price of one;
+  the band is built on `unit_price`, so a set of six at 31 USD is a 5.17
+  USD coaster, and the aisle's usual pack becomes our offer. A row with
+  `units` null said "set" without a count and stays out of the band. Read
+  the units against the titles: a wrong count on a heavy row is the mistake
+  that matters, and it is reported, not corrected by a rule.
 - `sample_every_kth`: twenty titles spread across the survivors in id order,
   to see the tail the heavy sellers hide.
 
@@ -176,8 +181,10 @@ in or out is a word.
   list earns the share for everyone, which is right only when the noun
   alone is the product.
 - `excluded`: words that name the neighbouring products a buyer would see
-  for the same query: "spinner", "cube", "keychain", "pendant", "set of",
-  "bundle", "pack of", "pcs", "articulated", "custom". Matched in title and
+  for the same query: "spinner", "cube", "keychain", "pendant",
+  "articulated", "custom". Never "set of", "bundle", "pack of" or "pcs":
+  a set of our product is ours, read per unit through `units`; a bundle of
+  other products goes by the other product's name. Matched in title and
   tags. A hit is a penalty, not a veto: it removes one share of the score.
   A listing with an excluded word stays in only when nearly everything else
   is in its favour: the noun, and at most one of a required word, a stated
@@ -209,7 +216,8 @@ a spinner with a handle, a 3-piece passthrough set.
 
 First rules: `required_any` ["fidget", "twist", "swirl", "passthrough",
 "pass through", "infinity"], `excluded` ["spinner", "keychain", "pendant",
-"slider", "clicker", "magnetic", "cube", "set of", "piece set", "bundle"],
+"slider", "clicker", "magnetic", "cube"] (the run of 2026-09-11 also had
+"set of", "piece set" and "bundle", which the unit of sale made wrong),
 metals and leather under `materials_excluded`. Result: 5 selected. The
 review found 3 of the 5 were a cube, a spinner and a 3-piece set: fewer
 than 10 listed and more than 1 wrong, so tighten. Each wrong one carried
@@ -222,12 +230,10 @@ through", "spiral", "vortex", "wobble", "stretch"]; nothing else changed.
 Now the cube and the spinner lack a required word and carry an excluded
 one, so they fall out. Result: 3 selected (the swirl octagon, the Infinity
 Twist, the 3-piece passthrough set with one sale and almost no weight),
-verdict viable. The set is the residue: it is a set of our product, so it
-counts as not ours, but it carries "passthrough" and the only word that
-names it, "piece set", is a penalty it survives. No word removes it without
-also removing the genuine passthrough listings, so it stays, and the log
-says so. That is the one exception the skill allows, and with 1 wrong of 3
-the count rule would not ask for a third pass anyway.
+verdict viable. The set is not a residue: it is three of our product, so it
+is read as `units` 3 at a third of its price and belongs in the band. (Until
+2026-10-12 a set counted as not ours and was kept only because no word
+removed it; the band then compared its set price to our single.)
 
 ## Worked example: the mini duck
 
@@ -239,11 +245,13 @@ printed duck; nobody stated size or weight. `materials_top` was resin,
 epoxy resin, paint, and packaging strings.
 
 Rules: `required_any` ["charm", "mini", "miniature", "tiny", "pocket hug",
-"figurine"], `excluded` ["set of", "pcs", "pack of", "bundle", "family",
-"keychain", "articulated", "articulado", "custom"], `materials_allowed`
+"figurine"], `excluded` ["family", "keychain", "articulated", "articulado",
+"custom"] (the run of 2026-09-11 also excluded "set of", "pcs", "pack of"
+and "bundle"; since 2026-10-12 a 10-pack of charms is ten charms at a tenth
+of the price, and "family" names the bundle of different animals),
+`materials_allowed`
 with resin and epoxy resin, `materials_excluded` with polymer clay, clay,
-ceramic, porcelain, metal, wood, glass. The "pcs" entry covers "5pcs" and
-"10pcs" on its own. Result: 12 of 15 selected, the clay pieces vetoed to
+ceramic, porcelain, metal, wood, glass. Result: 12 of 15 selected, the clay pieces vetoed to
 zero. The review found 2 of 12 that are not our product (the 5-pack, the
 articulated duck), each in through one penalty with everything else in
 its favour: 10 or more listed and not more than 4 wrong, so the rules stood.
@@ -271,8 +279,10 @@ After the two scripts have run, read `top_by_market_weight` in the
 refreshed summary. Entries at or above the threshold the script printed
 are the comparables, heaviest first; the rest show what the rules removed
 and why (`excluded_by`). Look at the first twenty comparables against the
-drafts and count the ones that are a different product; a set or bundle of
-our product counts as different. More than 4 of 20 means the rules are
+drafts and count the ones that are a different product. A set of our
+product is ours, counted per unit through `units`; only a bundle of other
+products is different, and it goes by naming the other product, never by
+"set", "pack" or "pcs". More than 4 of 20 means the rules are
 wrong; with fewer than 10 comparables listed, more than 1 does.
 
 Tighten once, with the smallest edit that names the mistake: replace an

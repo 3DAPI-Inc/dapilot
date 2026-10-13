@@ -38,7 +38,8 @@ for captures. The script fails with a one-line reason when one is missing.
 3. Judge: write the brief. Read `design/context.json` and drafts 00, 02, 04
    and 06 (the others only if those leave the front unclear). Decide, with
    `reference/art-direction.md`:
-   - `name`: what a buyer calls it, 2 to 5 words
+   - `name`: what a buyer calls it, 2 to 5 words; the count is the copy's
+     job, so no "set of" here
    - `rotate` and `hero_yaw`: stand it the way a buyer expects, pick the side
      that reads best; yaw is the draft's yaw
    - `angles`: the other stills, each showing something the hero does not
@@ -52,7 +53,11 @@ for captures. The script fails with a one-line reason when one is missing.
      the listing should show them so (a kit), `true` never needs setting
    - `lifestyle_images`: exactly `limits.lifestyle_images` scenes (4), one
      scene each, and which still it starts from. The count is the listing
-     standard, not your call
+     standard, not your call. When `context.offer.units` is more than one
+     the listing sells a set, so every scene shows all of them (six
+     coasters on the table, not one) and says so in its text; the studio
+     stills still show one. Never show an extra the comparables ship with
+     (`offer.extras_common`, a holder) that ours does not include
    - `lifestyle_video`: one scene, and `start_from`: the lifestyle photo the
      clip opens on (the clip animates that photo, so pick the scene with
      room to move in). Required, never `null`
@@ -130,7 +135,7 @@ for captures. The script fails with a one-line reason when one is missing.
 ## Gate
 Auto, spend capped. The paid assets run only for an item with a price, only
 through `design_product.py`, and `check` refuses a plan above
-`design.usd_cap_per_item`. Nothing here touches dapi or Etsy.
+`design.usd_cap_per_item`. Nothing here touches 3DAPI or Etsy.
 
 ## Failure
 - Studio page not running, Chrome or ffmpeg missing: `ok:false` with the

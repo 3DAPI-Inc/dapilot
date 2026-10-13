@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One client for every dapi public API route, driven by the OpenAPI contract.
+"""One client for every 3DAPI public API route, driven by the OpenAPI contract.
 
 The public API serves its own contract at <DAPI_API_URL>/openapi.json. This
 script reads it and uses it for everything: listing operations, describing

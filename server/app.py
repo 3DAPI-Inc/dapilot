@@ -67,6 +67,8 @@ def env_value(raw: str) -> str:
     v = raw.strip()
     if v[:1] in "\"'" and v[:1] and v.find(v[0], 1) > 0:
         return v[1:v.find(v[0], 1)]
+    if v.startswith("#"):  # `KEY=   # comment` is an empty value, not a comment as the value
+        return ""
     return re.split(r"\s#", v, maxsplit=1)[0].strip()
 
 
@@ -131,7 +133,7 @@ def read_assembly(path: Path) -> dict | None:
 
 
 def strip_if_project(path: Path) -> dict:
-    """Foreign 3mf project settings make dapi's slicer fail; keep the geometry only."""
+    """Foreign 3mf project settings make 3DAPI's slicer fail; keep the geometry only."""
     if path.suffix.lower() != ".3mf":
         return {"stripped": False}
     check = subprocess.run([PY, str(SCRIPTS / "strip_3mf.py"), str(path), "--check"], capture_output=True, text=True)
@@ -368,7 +370,7 @@ def status_of(item: str, wd: Path, meta: dict) -> dict:
                         "quoteId": q.get("publicId"), "done": done_stages}
             if (wd / "quote.pending.json").exists():
                 q = read_json(wd / "quote.pending.json") or {}
-                return {"stage": "slice", "status": "running", "reason": "slicing on dapi", "quoteId": q.get("publicId"), "done": done_stages}
+                return {"stage": "slice", "status": "running", "reason": "slicing on 3DAPI", "quoteId": q.get("publicId"), "done": done_stages}
         if stage == "price" and (wd / "price.rejected.json").exists():
             r = read_json(wd / "price.rejected.json") or {}
             return {"stage": stage, "status": "blocked", "reason": f"no sellable price: floor {r.get('floor')} against market median {r.get('market', {}).get('median')}", "done": done_stages}
@@ -397,8 +399,8 @@ def status_of(item: str, wd: Path, meta: dict) -> dict:
         died = director_failed_for(item)
         if died:
             return {"stage": "slice" if stage == "quote" else stage, "status": "failed", "reason": died, "done": done_stages}
-        return {"stage": "slice" if stage == "quote" else stage, "status": "queued",
-                "reason": f"nothing is running; {stage} waits for a Resume on Agent runs", "done": done_stages}
+        return {"stage": "slice" if stage == "quote" else stage, "status": "queued", "idle": True,
+                "reason": f"nothing is running; Continue starts {stage}", "done": done_stages}
     last = done_stages[-1] if done_stages else "intake"
     return {"stage": "slice" if last == "quote" else last, "status": "done", "reason": None, "done": done_stages}
 
@@ -409,7 +411,7 @@ def job(item: str) -> dict | None:
     if not meta:
         return None
     s = status_of(item, wd, meta)
-    j = {"id": item, "fileName": meta.get("file", item), "createdAt": meta.get("first_seen"),
+    j = {"id": item, "fileName": meta.get("file", item), "createdAt": meta.get("first_seen"), "idle": bool(s.get("idle")),
          "updatedAt": iso(max((p.stat().st_mtime for p in wd.rglob("*") if p.is_file()), default=0)) if wd.exists() else meta.get("first_seen"),
          "stage": s["stage"], "status": s["status"], "reason": s.get("reason"), "stagesDone": s["done"],
          "stripped": bool(meta.get("stripped")), "sourceApplication": meta.get("application"), "runs": runs_for(item)}
@@ -442,6 +444,8 @@ def detail(item: str) -> dict:
                           "identity": v.get("identity"),
                           "market": v.get("market"), "breakEven": s0.get("break_even_price"), "markupPrice": s0.get("markup_price"),
                           "unitCost": s0.get("unit_cost"), "atMedian": next((a for a in s0.get("at", []) if a.get("label") == "median"), None),
+                          # The unit of sale (2026-10-12): the pack we list, its cost and the band at it; the scenario's offer block.
+                          "offer": v.get("offer"), "offerScenario": s0.get("offer"),
                           "policy": v.get("policy"), "stock": v.get("stock"), "costBasis": v.get("cost_basis"),
                           "ours": {k: (v.get("ours") or {}).get(k) for k in ("quote_unit_price_one_off", "quote_unit_price_full_plate",
                                                                              "max_per_plate", "plate_discount_pct")}}
@@ -468,6 +472,7 @@ def detail(item: str) -> dict:
     if cand or rej or chosen:
         src = cand or rej or {}
         j["pricing"] = {"floor": src.get("floor"), "minMarginPct": src.get("min_margin_pct"),
+                        "offer": src.get("offer"),
                         "candidates": src.get("candidates", []), "rejectedCandidates": src.get("rejected", []),
                         "skipped": src.get("skipped", []), "p75Sellers": src.get("p75_sellers"),
                         "costBases": src.get("cost_bases"), "currency": src.get("currency") or "USD",
@@ -589,8 +594,19 @@ sys.path.insert(0, str(SCRIPTS))
 from pricing import Model, PricingError, load_fees, load_policy, unit_cost_basis  # noqa: E402
 
 
+def offer_units(wd: Path) -> int:
+    """How many printed units one sale brings (viability.json offer.units, the market's modal pack); 1 before 2026-10-12."""
+    o = (read_json(wd / "viability.json") or {}).get("offer")
+    u = o.get("units") if isinstance(o, dict) else None
+    return u if isinstance(u, int) and not isinstance(u, bool) and u > 0 else 1
+
+
 def price_model(wd: Path) -> tuple[Model, float, float]:
-    """(formula, unit cost, floor) for one item, exactly as price_candidates.py builds them."""
+    """(formula, cost of one sale, floor) for one item, exactly as price_candidates.py builds them.
+
+    The cost is for the offer: units x the unit cost, since a sale of a six-coaster set
+    prints six coasters and pays the fixed fees once.
+    """
     quote = read_json(wd / "quote.json")
     if not quote:
         raise HTTPException(409, "not quoted yet")
@@ -598,7 +614,7 @@ def price_model(wd: Path) -> tuple[Model, float, float]:
         policy, _ = load_policy()
         fees, _ = load_fees(policy)
         model = Model(policy, fees)
-        cost = model.cost(unit_cost_basis(quote, policy)["unit_price"])
+        cost = model.cost(unit_cost_basis(quote, policy)["unit_price"]) * offer_units(wd)
         return model, cost, model.round_price(model.break_even(cost), "up")
     except PricingError as e:
         raise HTTPException(500, str(e))
@@ -612,10 +628,11 @@ def price_preview(item: str, price: float) -> dict:
     if not price > 0:
         raise HTTPException(400, "price must be positive")
     model, cost, floor = price_model(wd)
+    units = offer_units(wd)
     cands = (read_json(wd / "price.candidates.json") or {}).get("candidates", [])
     match = next((c["label"] for c in cands if abs(c["price"] - price) < 0.005), None)
-    return {**model.point(match or "custom", price, cost), "floor": floor, "aboveFloor": price + 1e-9 >= floor,
-            "candidate": match}
+    return {**model.point(match or "custom", price, cost, units=units, per_unit=round(price / units, 2)),
+            "floor": floor, "aboveFloor": price + 1e-9 >= floor, "candidate": match}
 
 
 class PriceDecision(BaseModel):
@@ -657,6 +674,8 @@ def decide_price(item: str, body: PriceDecision) -> dict:
                   "position": (proposal or {}).get("position") if label and proposal and proposal.get("candidate") == label else None,
                   "rationale": (body.reason or "").strip() or f"{by} chose the {label} candidate over the proposal.",
                   "runner_up": None, "floor": source.get("floor"), "verdict": source.get("verdict"),
+                  # The unit of sale stays the market's: a person changes the pack by hand in price.json, not here.
+                  "offer": {"units": offer_units(wd)},
                   "override": {"by": by, "reason": (body.reason or "").strip() or f"chose the {label} candidate", "at": now()},
                   "proposed": first}
         pending = wd / "price.pending.json"
@@ -674,11 +693,14 @@ def decide_price(item: str, body: PriceDecision) -> dict:
     model, cost, floor = price_model(wd)
     if price + 1e-9 < floor:   # belt and braces for the approve-as-is path, which skips --check
         raise HTTPException(422, f"price {price:.2f} is below the floor {floor:.2f}")
+    units = offer_units(wd)
     point = model.point("approved", price, cost)
     (wd / "price.approved.json").write_text(json.dumps(
         {"price": price, "currency": source.get("currency") or "USD", "by": by, "at": now(),
          "source": "proposal" if same else "override", "floor": floor, "unit_cost": point["unit_cost"],
-         "margin": point["margin"], "margin_pct": point["margin_pct"]}, indent=2))
+         "margin": point["margin"], "margin_pct": point["margin_pct"],
+         # What the price buys: units printed units per sale (one Etsy sale = one 3DAPI line of this quantity).
+         "offer": {"units": units, "per_unit": round(price / units, 2)}}, indent=2))
     product = file_product(item)
     queued = None
     if item in unfinished_items():
@@ -689,7 +711,10 @@ def decide_price(item: str, body: PriceDecision) -> dict:
 
 @api.post("/jobs/{item}/retry")
 def retry(item: str) -> dict:
-    """A person clears the stage's failed or blocked marker and a director takes the item up again."""
+    """One item, taken up again: any failed or blocked marker is cleared and a director runs what is left.
+
+    This is the per-item form of Resume. Resume on Agent runs takes every unfinished work dir, old fixtures
+    included, which is the wrong tool for finishing one product (2026-09-23)."""
     wd = WORK / item
     if not (wd / "meta.json").exists():
         raise HTTPException(404, "no such job")
@@ -704,9 +729,9 @@ def retry(item: str) -> dict:
             if m.exists():
                 m.unlink()
                 cleared.append(m.name)
-    if not cleared:
-        raise HTTPException(409, "nothing is held on this item; Resume on Agent runs picks it up")
-    run = "retry-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
+    if item not in unfinished_items():
+        raise HTTPException(409, "nothing left to run on this item" + (": it waits on a person" if not cleared else ""))
+    run = ("retry-" if cleared else "continue-") + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
     start_director(run, [item])
     return {"job": detail(item), "cleared": cleared, "run": run}
 

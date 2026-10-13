@@ -78,11 +78,16 @@ export interface Viability {
   identity?: Identity | null;
   product?: string;
   n?: number;
+  /** Per unit of sale since 2026-10-12; `offer.market` is the same band at the pack. */
   market?: MarketBand;
   breakEven?: number;
   markupPrice?: number;
   unitCost?: number;
   atMedian?: { price: number; fees: number; margin: number; margin_pct: number | null } | null;
+  /** The pack we list, as research decided it from the comparables. */
+  offer?: Offer | null;
+  /** The policy scenario at the pack: cost, break-even and margins for one purchase. */
+  offerScenario?: { units: number; cost: number; break_even_price: number; markup_price: number } | null;
   reason?: string;
   costBasis?: 'one_off' | 'full_plate';
   /** What a production run costs and how many sales pay it back, per band price. */
@@ -97,6 +102,7 @@ export interface Viability {
 
 export interface PriceCandidate {
   label: string;
+  /** The price of one purchase: `units` printed units (a set of six), or one. */
   price: number;
   net_of_vat: number;
   fees: number;
@@ -106,6 +112,22 @@ export interface PriceCandidate {
   how?: string;
   rejected_because?: string;
   below_floor_by?: number;
+  units?: number;
+  per_unit?: number;
+}
+
+/** The unit of sale research decided from the comparables (viability.json / price.candidates.json `offer`). */
+export interface Offer {
+  units: number;
+  source: 'market_modal' | 'single' | string;
+  modal_units?: number | null;
+  modal_share?: number | null;
+  extras_common?: string[];
+  note?: string | null;
+  /** Cost of one purchase: units times the unit cost. */
+  cost?: number;
+  /** The market band at the unit of sale. */
+  market?: { p25?: number; median?: number; p75?: number } | null;
 }
 
 export interface PriceProposal {
@@ -132,6 +154,8 @@ export interface PriceApproval {
   unit_cost: number;
   margin: number;
   margin_pct: number | null;
+  /** Since 2026-10-12: what the price buys. Absent on earlier approvals, which sold singles. */
+  offer?: { units: number; per_unit: number } | null;
 }
 
 export interface PricePreview {
@@ -149,6 +173,8 @@ export interface PricePreview {
 export interface Pricing {
   floor: number | null;
   minMarginPct: number | null;
+  /** How many printed units one sale brings; null on files from before the unit of sale existed. */
+  offer?: Offer | null;
   candidates: PriceCandidate[];
   rejectedCandidates: PriceCandidate[];
   /** Candidates the script did not offer, with the reason (p75 rounding onto another price, no band). */
@@ -187,6 +213,8 @@ export interface Job {
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
+  /** True when the item is queued and no director holds it: Continue on the job page starts one. */
+  idle?: boolean;
   /** Set when status is 'blocked' or 'failed', or a one-line note while waiting. */
   reason?: string | null;
   stagesDone: string[];
@@ -283,7 +311,7 @@ export interface Run {
 
 export const listRuns = (): Promise<Run[]> => api<Run[]>('/runs');
 export const listUnfinished = (): Promise<{ items: string[]; count: number }> => api('/runs/unfinished');
-/** Clears the stage's failed or blocked marker and starts a director over the item. */
+/** Takes one item up again: clears a failed or blocked marker if there is one, then a director runs what is left. */
 export const retryJob = (id: string): Promise<{ job: Job; cleared: string[]; run: string }> =>
   api(`/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
 

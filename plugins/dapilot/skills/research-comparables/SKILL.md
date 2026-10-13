@@ -67,20 +67,27 @@ script fails with a one-line JSON error when one is missing. Pass it on.
    lists the selected comparables only (each row carries `selected: true`;
    the heaviest rejects sit apart under `top_rejected_by_market_weight`),
    heaviest first. Against the drafts, count how many of the first 20 are
-   not our product; a set or bundle of the product counts as not ours.
+   not our product. A set of our product is ours: each row shows `units`
+   (how many one purchase brings, read from the title, the variants or the
+   description) and `unit_price`, the band is per unit, and the market's
+   usual pack becomes our offer (`viability.json` `offer`). Only a bundle
+   of different products counts as not ours, and it is removed by naming
+   the other product, never by "set" or "pack" words. A row with `units`
+   null said set without a count; it stays out of the band and is listed
+   under `market.unknown_units`, which the log mentions when it is not empty.
    Tighten when more than 4 of 20 are not ours, or when fewer than 10 are
    listed and more than 1 is not: add words to `excluded`, `required_any`
    or `materials_excluded` as the guide says, nothing else, and rerun the
-   two scripts once. Never a third pass. One exception: when the only wrong
-   entries are sets or bundles and no word removes them without removing
-   genuine comparables, keep the rules, keep them in, and say so in the log.
+   two scripts once. Never a third pass.
 5. Append the log paragraph: the object and the confidence with its reason,
    noun, query, taxonomy id, windows and stop reason,
    fetched, kept, scored, selected, whether the rules were tightened and why,
-   weighted median and p75, basis, `market.thin` and `market.weight_basis`
+   weighted median and p75 per unit, basis, the offer (`offer.units` and
+   `offer.modal_share`, and `offer.market.median` when units is more than
+   one), `market.thin` and `market.weight_basis`
    as printed, the heaviest shop and its `top_shop_share` when that is 0.5
-   or more, unit cost,
-   break-even, margin at the median, verdict, quota left. Remove `.lock`.
+   or more, unit cost and the offer's cost,
+   break-even at the offer, margin at the median, verdict, quota left. Remove `.lock`.
    Print the result line with the verdict in `summary`; when confidence is
    `low`, the summary starts with "identity low:" and the object, so the
    report and the console say it before they say the verdict.
@@ -108,15 +115,21 @@ script fails with a one-line JSON error when one is missing. Pass it on.
   ordered by `market_weight` descending with `relevance`, `page` and a
   `shop` block on each, `rejected_count`, `rejected_sample`.
 - `viability.json`, schema as printed by `market_stats.py`: `market` with
-  `basis`, `weighted` and `unweighted` bands, `spread_ratio` and `thin`,
+  `basis`, `weighted` and `unweighted` bands per unit of sale
+  (`price_basis: per_unit`; `per_listing` keeps what buyers pay at
+  checkout, `unknown_units` the listings left out), `spread_ratio` and `thin`,
   `weight_basis` (`units_per_day`, or `legacy` for a file scored without
   the review pass) and `weight_concentration` (the heaviest listing's and
-  shop's share of the weight), per-gram, unit cost, fees, margins,
-  break-even, `identity` as in `comparables.json`, and a `verdict` of
-  `viable`, `thin` or `not_viable`. Paths in it are relative to the work dir.
+  shop's share of the weight), per-gram; `offer`: the unit of sale we list
+  (`units`, the market's modal pack by weight when it holds `adopt_share`
+  of it, else 1; `distribution`, `extras_common`, and `market`, the band at
+  that pack); unit cost, fees, margins and break-even per unit and, in each
+  scenario's `offer` block, per pack; `identity` as in `comparables.json`,
+  and a `verdict` of `viable`, `thin`, `not_viable` or `unreliable`, judged
+  at the offer. Paths in it are relative to the work dir.
 
 ## Gate
-Auto. Etsy reads only; no dapi call. The one spend is Etsy quota: one search call
+Auto. Etsy reads only; no 3DAPI call. The one spend is Etsy quota: one search call
 per price window, one batch call per 100 survivors, one review call per
 distinct shop among the survivors, one inventory call per survivor with
 variants. At most two searches per item.
@@ -147,5 +160,8 @@ variants. At most two searches per item.
   "dragon_v3.3mf" is one witness; the pictures are the evidence, and a
   reading the pictures do not support is `low` however the file is named.
 - Do not propose a price, search more than twice, or run the rules a third time.
+- Do not put "set of", "pack", "pcs" or "bundle" in `excluded`. Sets of our
+  product are the market and are read per unit; a bundle of other products
+  is excluded by the other product's name.
 
 `$PY` is `${DAPILOT_PYTHON:-python3}`.

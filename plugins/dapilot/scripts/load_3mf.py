@@ -2,7 +2,7 @@
 """Stream a .3mf into numpy arrays.
 
 Why this exists: trimesh's 3mf path builds an XML DOM and per-vertex Python
-objects before anything reaches numpy. dapi measured an 8.4MB project taking
+objects before anything reaches numpy. 3DAPI measured an 8.4MB project taking
 183 seconds and peaking at 6.08 GB RSS - 725x the file size - which is why
 tools/bulk-slice/mesh_bbox.py skips .3mf entirely. Blender has no 3mf importer
 either (4.5 ships stl/obj/ply/fbx/usd/collada/alembic and nothing else).

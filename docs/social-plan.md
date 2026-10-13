@@ -7,11 +7,22 @@ drives the platform's own web uploader. No paid API, no aggregator.
 `docs/store-plan.md` and `docs/agents.md` still hold: scripts do, skills
 decide, state on disk by content hash, nothing posted twice.
 
+**Revised 2026-09-23: Instagram goes through the browser too.** The Meta
+route worked for two days. On the third, `/me` answered `API access blocked`
+(OAuthException 200) with the token 59 days from expiry and no change on our
+side; the only remedy is a person in the Meta dashboard, and there is no
+telling when it happens again. A route that can be pulled without notice
+cannot carry the shop's posting, so Instagram joins TikTok, X and LinkedIn on
+CloakBrowser: `instagram_web` in `DAPILOT_SOCIAL_ADAPTER_DIR`, the same
+`Integration` and `Session` contracts, the web uploader with the persistent
+profile. `instagram_api.py` stays in the plugin for anyone whose app Meta
+leaves alone; in our config it is disabled until `instagram_web` exists.
+
 ## 1. Route per platform (checked 2026-09-21)
 
 | Platform | Route | Why | Analytics |
 |---|---|---|---|
-| Instagram | Official API, Instagram Login variant, app in development mode, our account added as Instagram Tester | free, no app review for an account with a role on the app, no Facebook page needed; 100 API posts per 24 h | media and account insights from the same API |
+| Instagram | Browser: the web uploader, since 2026-09-23 (was the official API, Instagram Login variant, until Meta blocked the app's API access without notice) | the API is free and needs no review, but Meta can and did switch it off; a route we cannot restore ourselves is not a route | counts read from the post page in the browser; the API's insights when it is on |
 | TikTok | Browser: TikTok Studio web uploader, using its native scheduler | the Content Posting API is free but unaudited apps post private only, and the audit guidelines reject "a utility tool to help upload contents to the account(s) you or your team manages" | view, like, comment, share counts read from TikTok Studio in the browser |
 | X | Browser: web composer | the free tier closed to new developers on 2026-02-06; pay per use is 0.015 USD per post, 0.20 USD with a link | counts read from the post page |
 | LinkedIn | Browser for the company page; the free self-serve API (`w_member_social`) if we post as a person | company page posting needs the Community Management API: approval, a legal entity, weeks | counts read from the page admin view |
@@ -24,7 +35,7 @@ key in `store/.env`, nothing else.
 
 - **Department: Growth.** `docs/store-plan.md` already reserves it for
   marketing. It reads `work/<hash>/design.json` and the product record and
-  writes only under `work/<hash>/social/`. It gets no dapi key.
+  writes only under `work/<hash>/social/`. It gets no 3DAPI key.
 - **Process: `promote`**, its own stage table, separate from intake. It
   starts for a product whose record is `ready` (price approved, design
   done). It does not wait for Etsy: captions carry the listing URL when
@@ -89,7 +100,7 @@ social/                              private, not in the plugin, not published
 `social_post.py` loads browser adapters from `DAPILOT_SOCIAL_ADAPTER_DIR`.
 A stranger who installs the plugin gets the API adapters and a loud "no
 adapter configured for tiktok" for the rest. The detection-evading part
-never ships under dapi's name.
+never ships under 3DAPI's name.
 
 ## 5. Browser rules
 
@@ -103,7 +114,7 @@ never ships under dapi's name.
 - Passwords are never stored or typed by a script. `social_login.py` opens a
   headed window, a person logs in and passes 2FA, the profile keeps the
   session. When a session dies the poster exits 4 and a person logs in again.
-- The browser process starts with a scrubbed environment: no dapi, Etsy, fal
+- The browser process starts with a scrubbed environment: no 3DAPI, Etsy, fal
   or Anthropic key is visible to the closed binary.
 - Headed on the laptop, from the laptop's IP. Headless only after headed has
   a clean record.
@@ -113,7 +124,7 @@ never ships under dapi's name.
 - New accounts are used by hand for two weeks before a script touches them.
 - Failure screenshots go to `runs/`, never to `work/` or a report.
 
-## 6. Instagram API specifics
+## 6. Instagram API specifics (kept for the API adapter; our shop uses the browser since 2026-09-23)
 
 - Meta app in development mode, Instagram Login product, our Business or
   Creator account as Instagram Tester. Scopes: basic, content publish,

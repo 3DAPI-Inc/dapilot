@@ -220,3 +220,18 @@ Before: case 1 or 2 after completion.
 Expected: the first step finds `comparables.json` and prints
 `{"ok": true, "cached": true, "stage": "research", "outputs": ["comparables.json", "viability.json"], ...}`
 without running a script or spending quota.
+
+## Note, 2026-10-12: the unit of sale
+
+Every record now carries `offer` (`units`, how many of the product one
+purchase brings, read from the variant, the title or the description) and
+`unit_price`, and `market_stats.py` builds the band on `unit_price`, keeps
+the checkout band as `market.per_listing`, and writes `offer` in
+`viability.json` (the modal pack by weight when it holds half of it, else
+1). The expected files here predate that: their comparables carry no
+`offer`, which the scripts read as one unit, so the bands match to the
+cent (checked on the fidget's hand-written `comparables.json` and the four
+synthetic price fixtures). The fidget's 3-piece passthrough set would now
+read as `units` 3 at a third of its price on a rerun. The case that shows
+the change is the kumiko coaster of section 7d in `docs/market-research.md`:
+four six-coaster listings, unit median 5.17, offer 6 at 31.00.

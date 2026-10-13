@@ -1,13 +1,13 @@
 ---
 name: dapi-request
-description: Builds, validates and sends a request to any dapi public API route from the live OpenAPI contract. Use whenever a skill needs to call dapi (quote, poll, list orders, update status). Not for deciding what to send; the calling skill decides, this skill makes it correct and safe.
+description: Builds, validates and sends a request to any 3DAPI public API route from the live OpenAPI contract. Use whenever a skill needs to call 3DAPI (quote, poll, list orders, update status). Not for deciding what to send; the calling skill decides, this skill makes it correct and safe.
 allowed-tools: Read, Bash, Write
 ---
 
 # dapi-request
 
 ## When
-Any time a skill needs to talk to dapi. Every dapi call in this plugin goes
+Any time a skill needs to talk to dapi. Every 3DAPI call in this plugin goes
 through `${CLAUDE_PLUGIN_ROOT}/scripts/dapi.py`; no skill assembles HTTP
 requests in prose. Needs `DAPI_API_URL` and, to send, `DAPI_API_KEY`.
 
@@ -43,7 +43,7 @@ requests in prose. Needs `DAPI_API_URL` and, to send, `DAPI_API_KEY`.
    the response. Otherwise read `status` and `body`: 400 is a contract
    mismatch (go back to step 3 once), 401 or 403 is a key or scope problem
    (stop, report the `scope` from step 2), 404 is a missing resource (stop),
-   429 is rate limiting (stop, report `rate_limit`), 5xx is dapi's problem
+   429 is rate limiting (stop, report `rate_limit`), 5xx is 3DAPI's problem
    (stop, do not retry here; the orchestrator owns retries).
 
 ## Outputs

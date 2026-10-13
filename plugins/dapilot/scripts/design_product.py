@@ -207,6 +207,16 @@ def assembly_facts(wd: Path) -> dict | None:
 
 # ------------------------------------------------------------------ context
 
+def _offer_facts(price: dict, viab: dict) -> dict:
+    units = next((o["units"] for o in (price.get("offer"), viab.get("offer"))
+                  if isinstance(o, dict) and isinstance(o.get("units"), int) and o["units"] > 0), 1)
+    extras = (viab.get("offer") or {}).get("extras_common") or []
+    return {"units": units, "extras_common": extras,
+            "note": "one unit per sale" if units == 1 else
+            f"the listing sells {units} of this product per purchase, as the market does; every lifestyle scene shows all {units}"
+            + (f", and the comparables usually ship with a {', '.join(extras)}, which ours does not include" if extras else "")}
+
+
 def cmd_context(a, cfg: dict) -> int:
     wd = Path(a.workdir).resolve()
     need = ["meta.json", "analysis.json", "price.json", "renders/draft_00.png"]
@@ -238,6 +248,9 @@ def cmd_context(a, cfg: dict) -> int:
         "thumbnails": [f"thumbnails/{p.name}" for p in sorted((wd / "thumbnails").glob("*.png"))],
         "comparable_titles": [c.get("title") for c in (comps.get("comparables") or [])[:8]],
         "price": {k: price.get(k) for k in ("price", "currency", "position")},
+        # The unit of sale: how many of the product one purchase brings. A set is shown as a set in every
+        # lifestyle scene; the studio stills show one unit. Decided 2026-10-12 after the kumiko coaster.
+        "offer": _offer_facts(price, read(wd / "viability.json") or {}),
         "size": {"bbox_mm": [round(v) for v in bbox], "longest_cm": round(longest / 10, 1),
                  "scale": scale_phrase(longest), "bodies": analysis.get("bodies"),
                  "multi_part": bool((analysis.get("bodies") or 1) > 1 and (analysis.get("largest_body_frac") or 1) < 0.9)},

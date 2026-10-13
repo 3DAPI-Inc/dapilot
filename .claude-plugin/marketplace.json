@@ -1,0 +1,15 @@
+{
+  "name": "dapilot",
+  "owner": { "name": "dapi", "email": "dev@dapi.digital" },
+  "metadata": {
+    "description": "Skills, scripts and agents that run a 3D print shop on the 3DAPI platform."
+  },
+  "plugins": [
+    {
+      "name": "dapilot",
+      "source": "./plugins/dapilot",
+      "description": "Intake pipeline (analyze, quote, research, price, design, copy, publish), the Integrations page and the credential guard hook.",
+      "category": "productivity"
+    }
+  ]
+}

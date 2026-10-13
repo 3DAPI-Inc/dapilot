@@ -13,8 +13,8 @@ needed, *which scripts* produce the facts it needs, *how* to weigh them, and
 *what* to write down when it is made. It is not a place to put logic. Logic
 goes in scripts. A skill that could be replaced by a shell script should be.
 
-The test: could a stranger with a dapi API key, this repo, and no access to
-anyone at dapi run the skill on their own model and get the same quality of
+The test: could a stranger with a 3DAPI API key, this repo, and no access to
+anyone at 3DAPI run the skill on their own model and get the same quality of
 result? If the answer depends on something only we know, the skill is broken.
 
 ## Anatomy
@@ -23,7 +23,7 @@ result? If the answer depends on something only we know, the skill is broken.
 plugins/dapilot/skills/write-listing/
   SKILL.md              the skill: under 150 lines, ideally under 100
   reference/
-    category-tree.md    the dapi public category list, copied from docs
+    category-tree.md    the 3DAPI public category list, copied from docs
     copy-style.md       examples of listing copy that sold, and that did not
   eval/
     cases.md            three or more cases with expected outcomes
@@ -119,7 +119,7 @@ What is not allowed in a procedure:
 - Arithmetic. "Multiply the quote by 2.4" is a script with a `--margin` flag.
 - Reading raw data. No opening an STL, no pasting a 3mf's XML. Scripts turn
   files into numbers; skills read numbers.
-- Calling an API without a script. Every dapi call goes through the
+- Calling an API without a script. Every 3DAPI call goes through the
   `dapi-request` skill and `plugins/dapilot/scripts/dapi.py`, which reads
   the route from the API's own OpenAPI contract, validates the payload, and
   sends it. If `dapi.py ops` does not list an operation, it does not exist

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Strip slicer project settings out of a .3mf so dapi's slicer accepts it.
+"""Strip slicer project settings out of a .3mf so 3DAPI's slicer accepts it.
 
 Creality Print, OrcaSlicer and PrusaSlicer save "project" 3mf files that carry
 the full printer, filament and process configuration of the machine they were
-made on. dapi slices with Bambu Studio, which rejects a project whose settings
+made on. 3DAPI slices with Bambu Studio, which rejects a project whose settings
 it does not recognise with "Invalid parameter value(s) included in the 3mf
 file" (Creality's SPARKX i7 and K2 profiles are the ones seen so far). The
 geometry itself is fine. This removes everything but the geometry and the

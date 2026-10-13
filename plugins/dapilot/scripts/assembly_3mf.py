@@ -6,7 +6,7 @@ is the print layout: parts spread over plates. `<assemble>` in
 Metadata/model_settings.config is the Assembly View: where each part sits in
 the finished product, kept whenever the designer split one import into objects.
 The same file names each object's extruder, and project_settings.config the
-filament colour per extruder. strip_3mf.py removes both files so dapi's slicer
+filament colour per extruder. strip_3mf.py removes both files so 3DAPI's slicer
 accepts the project, so this script reads them first, from the original upload.
 
     assembly_3mf.py read  ORIGINAL.3mf [--out assembly.json]

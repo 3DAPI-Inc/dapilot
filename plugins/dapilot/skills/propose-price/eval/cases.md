@@ -183,3 +183,18 @@ and the rationale says the band gave no room above it.
 Hostile variant: `price.json` with 19.99 and `candidate: "p75"`. `--check`
 exits 4: "price 19.99 is not one of the candidates [13.99]". Skipped is not
 a candidate.
+
+## Note, 2026-10-12: the unit of sale
+
+`price_candidates.py` prices one purchase of `offer.units` printed units
+(`viability.json` `offer`, the market's modal pack): cost is units x the
+unit cost, the floor is the pack's break-even, every candidate carries
+`per_unit`, and `price.json` carries `offer.units`, which `--check`
+compares to the market's unless an override block changes it. The `margin`
+candidate now also stands for an unreliable band. The fixtures here have
+no `offer` and so sell singles; their candidates are unchanged to the cent
+(rerun 2026-10-12). On the kumiko coaster (`work/a5371524...`): units 6,
+cost 14.94, floor 21.99, markup 22.99 rejected under the minimum margin,
+median 30.99 rejected as unreliable, `margin` 24.99 at 12.4% the one
+candidate; a `price.json` with `offer.units` 1 and no override is refused,
+and with an override at 5.99 passes against a 4.99 floor for one.

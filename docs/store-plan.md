@@ -1,4 +1,4 @@
-# Store plan: an autonomous dapi shop run by a hierarchy of agents
+# Store plan: an autonomous 3DAPI shop run by a hierarchy of agents
 
 The construction plan for dapilot. It fixes the structure that keeps agents
 from drifting, leaves them free inside it, and keeps the cost per listing
@@ -67,10 +67,10 @@ Departments and what they own:
 |---|---|---|---|
 | Catalogue | intake: analyse, quote, render, write listing, publish proposal; catalogue audits | `work/<hash>/`, quotes API (PRICING) | orders, payments, stock, anything under another department's work dirs |
 | Commerce | orders: triage, shipping estimates, status proposals; fulfilment if we print | orders API (ORDER), print-farm API (farm key), `orders/<id>/` | model files, listings, quotes |
-| Growth | market research, comparables, copy audits, later marketing | read-only on listings and `work/*/listing.json`; external research tools | any dapi mutating route, any file another department writes |
+| Growth | market research, comparables, copy audits, later marketing | read-only on listings and `work/*/listing.json`; external research tools | any 3DAPI mutating route, any file another department writes |
 
 Each department has its own API key scoped to its surface. Growth has no
-dapi key at all until it needs read access.
+3DAPI key at all until it needs read access.
 
 ## 3. General skills (every agent loads them)
 
@@ -94,7 +94,7 @@ the shop.
 |---|---|---|
 | Catalogue | `dapi-request`, `analyze-model`, `quote-model`, `render-model`, `write-listing`, `publish-listing`, `audit-listing` | `dapi-request` exists. Quote is the source of truth for printability and price. |
 | Commerce | `dapi-request`, `triage-order`, `estimate-shipping`, `propose-order-status`, `manage-print-job` | All mutations are `propose` until a track record exists. |
-| Growth | `research-comparables`, `audit-copy`, later `plan-campaign` | No mutating dapi access. Reads listings from disk. |
+| Growth | `research-comparables`, `audit-copy`, later `plan-campaign` | No mutating 3DAPI access. Reads listings from disk. |
 
 `dapi-request` is a job skill shared by two departments, not a general one:
 Growth agents do not get it. Sharing is by listing it in two agent files.
@@ -175,7 +175,7 @@ Each phase ends with something that runs and a number that was measured.
 | 1. Quote | `quote-model` on top of `dapi-request`; quote polling script | three fixtures quoted against a real API, no file quoted twice on rerun, cost per quote recorded |
 | 2. Listing | `render-model` (stills and the required turntable video), `write-listing`, `publish-listing` (proposal only, refuses a listing with no video); design-create route added in `public-api/v1` | first listing approved by a person from `report.md`, with stills and video attached, cost per listing recorded |
 | 3. Commerce | `commerce-lead`, `triage-order`, `estimate-shipping` read-only; then `propose-order-status` | a day of real orders triaged with zero mutations, then one status change proposed and confirmed by hand |
-| 4. Growth | `growth-lead`, `research-comparables`, `audit-copy` | comparables attached to listings; audit flags reviewed; no dapi key issued to Growth |
+| 4. Growth | `growth-lead`, `research-comparables`, `audit-copy` | comparables attached to listings; audit flags reviewed; no 3DAPI key issued to Growth |
 | 5. Autonomy | director spanning all departments; scheduled runs; gates promoted by track record, one at a time, by commit | a scheduled run completes end to end with every Propose cleared by policy, and the cost line stays under threshold |
 
 Phase 0 is small and unblocks everything. Phases 1 and 2 are where the money

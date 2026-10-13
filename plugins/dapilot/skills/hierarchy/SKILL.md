@@ -32,7 +32,7 @@ Agent tool, you cannot spawn, and you must not try to work around that.
 |---|---|---|
 | catalogue | model intake, listings, catalogue audits | orders, payments, stock |
 | commerce | orders, shipping, fulfilment | model files, listings, quotes |
-| growth | research, copy audits, marketing | any mutating dapi route, another department's files |
+| growth | research, copy audits, marketing | any mutating 3DAPI route, another department's files |
 
 ## How work flows
 

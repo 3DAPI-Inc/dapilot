@@ -18,14 +18,14 @@ import trimesh
 from load_3mf import load_3mf
 
 # Guard against a pathological upload eating the box. Real printable parts in
-# the dapi catalogue land at 8-25MB.
+# the 3DAPI catalogue land at 8-25MB.
 MAX_BYTES = 600 * 1024 * 1024
 
 
 def analyze(path: str) -> dict:
     # .3mf goes through our own streaming loader. trimesh's 3mf path builds an
     # XML DOM and peaks in the gigabytes; ours took 1.1s and 0.14GB on the same
-    # file that dapi measured at 183s and 6.08GB. See load_3mf.py.
+    # file that 3DAPI measured at 183s and 6.08GB. See load_3mf.py.
     if path.lower().endswith(".3mf"):
         mesh = load_3mf(path)
     else:

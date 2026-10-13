@@ -3,7 +3,7 @@
 
 Deterministic. Every number here is arithmetic on files a skill already wrote:
 the comparables (comparables.json, chosen by hand or selected here by rules),
-dapi's quote (quote.json), the pricing policy and the platform fee schedule
+3DAPI's quote (quote.json), the pricing policy and the platform fee schedule
 (see pricing.py). Nothing is estimated; a missing input is a missing field in
 the output, never a default.
 
@@ -346,10 +346,78 @@ try:  # etsy_search.py owns these once it ships them; until then the copies abov
 except ImportError:
     relevance, market_weight, has_word = _relevance, _market_weight, _has_word
 
+try:
+    from etsy_search import parse_offer  # type: ignore
+except ImportError:  # a record without the search script beside it keeps whatever offer it carries
+    def parse_offer(title, description=None, variant_text=None, noun=None):  # type: ignore
+        return {"units": 1, "units_source": "default", "text": None, "extras": []}
+
 
 def weight_of(r: dict) -> float:
     w = r.get("market_weight")
     return float(w) if _is_num(w) and w >= 0 else float(market_weight(r))
+
+
+# ---------------------------------------------------------------- unit of sale
+
+def units_of(r: dict) -> int | None:
+    """How many units one purchase of this listing brings: 1 for a record without an
+    offer block (hand-written comparables, files from before 2026-10-12), None when the
+    listing says set and no count could be read (it stays out of the per-unit band)."""
+    o = r.get("offer")
+    if not isinstance(o, dict):
+        return 1
+    u = o.get("units")
+    return u if isinstance(u, int) and not isinstance(u, bool) and u > 0 else None
+
+
+def unit_price_of(r: dict) -> float | None:
+    u = units_of(r)
+    p = r.get("price")
+    if u is None or not _is_num(p) or p <= 0:
+        return None
+    return round(float(p) / u, 4)  # six of them add back to the listing price
+
+
+def offer_of(rows: list[dict], policy: dict) -> dict:
+    """The unit of sale the market uses, and so the one we list: the modal pack size by
+    weight among the comparables when it holds at least `offer.adopt_share` of the weight
+    (policy, default 0.5), else one unit. Numbers only; no prompt chooses this."""
+    cfg = policy.get("offer") if isinstance(policy.get("offer"), dict) else {}
+    adopt = float(cfg.get("adopt_share", 0.5))
+    cap = int(cfg.get("max_units", 24))
+    total_w = sum(weight_of(r) for r in rows)
+    basis = "weight" if total_w > 0 else "count"
+    by: dict[int, dict] = {}
+    extras: dict[str, float] = {}
+    for r in rows:
+        u = units_of(r)
+        if u is None:
+            continue
+        w = weight_of(r) if basis == "weight" else 1.0
+        d = by.setdefault(u, {"units": u, "n": 0, "weight": 0.0})
+        d["n"] += 1
+        d["weight"] += w
+        for x in (r.get("offer") or {}).get("extras") or []:
+            extras[x] = extras.get(x, 0.0) + w
+    total = sum(d["weight"] for d in by.values())
+    dist = sorted(({"units": u, "n": d["n"], "share": round(d["weight"] / total, 3) if total else None}
+                   for u, d in by.items()), key=lambda x: (-(x["share"] or 0), x["units"]))
+    modal = dist[0] if dist else None
+    common = sorted(x for x, w in extras.items() if total and w / total >= 0.5)
+    if modal and modal["share"] is not None and modal["share"] >= adopt and modal["units"] <= cap:
+        units, source = modal["units"], "market_modal"
+        note = None if units > 1 else "the market sells singles"
+    else:
+        units, source = 1, "single"
+        note = ("no comparables with a readable unit of sale" if not modal else
+                f"the modal pack of {modal['units']} holds {modal['share']:.0%} of the {basis}, under {adopt:.0%}" if modal["share"] is not None and modal["share"] < adopt else
+                f"the modal pack of {modal['units']} is over the {cap}-unit cap")
+    return {"units": units, "source": source, "note": note,
+            "modal_units": modal["units"] if modal else None, "modal_share": modal["share"] if modal else None,
+            "share_basis": basis, "adopt_share": adopt, "max_units": cap, "distribution": dist,
+            "extras_common": common,
+            "rule": "the modal units by market weight when its share is at or above adopt_share and at most max_units; else 1"}
 
 
 def weight_basis_of(rows: list[dict]) -> tuple[str, dict | None]:
@@ -446,6 +514,9 @@ def score_records(kept: list[dict], rules: dict) -> list[dict]:
             r["excluded_by"] = list(excluded_by)
         else:
             r.pop("excluded_by", None)
+        if not isinstance(r.get("offer"), dict):  # a full file searched before the unit of sale existed
+            r["offer"] = parse_offer(r.get("title"), r.get("description"), None, rules.get("noun"))
+        r["unit_price"] = unit_price_of(r)
     return kept
 
 
@@ -454,6 +525,9 @@ def comparable_record(r: dict) -> dict:
     out = {
         "listing_id": r.get("listing_id"), "url": r.get("url"), "title": r.get("title"),
         "price": r.get("price"), "currency": r.get("currency"), "price_source": r.get("price_source"),
+        # What one purchase brings and what one unit of it costs: the band is built on unit_price.
+        "offer": r.get("offer") if isinstance(r.get("offer"), dict) else None,
+        "unit_price": unit_price_of(r),
         "dims_mm": r.get("dims_mm"), "size_ratio": r.get("size_ratio"), "weight_g": r.get("weight_g"),
         "materials": r.get("materials") or [],
         "sold": _sold_of(r), "reviews": shop.get("review_count", r.get("reviews")),
@@ -503,6 +577,11 @@ def collapse_clones(selected: list[dict]) -> list[dict]:
                     if j >= CLONE_TITLE_SIMILARITY:
                         head["market_weight"] = float(head.get("market_weight") or 0) + float(r.get("market_weight") or 0)
                         head.setdefault("collapsed", []).append(r.get("listing_id"))
+                        # Same product, same shop, same price: a clone whose title says "Set of 6" settles the
+                        # unit of sale for a head whose title only says "Set".
+                        if units_of(head) is None and units_of(r) is not None:
+                            head["offer"] = {**r["offer"], "units_source": f"clone:{r.get('listing_id')}"}
+                            head["unit_price"] = unit_price_of(head)
                         break
             else:
                 groups.append((name, float(price), words, r))
@@ -630,6 +709,7 @@ def histogram(prices: list[float], buckets: int = HIST_BUCKETS) -> list[dict]:
 
 def title_row(r: dict, scored: bool) -> dict:
     row = {"listing_id": r.get("listing_id"), "title": r.get("title"), "price": r.get("price"),
+           "units": units_of(r), "unit_price": unit_price_of(r),
            "sold": _sold_of(r), "favorers": _favorers_of(r), "materials": (r.get("materials") or [])[:4],
            "size_ratio": r.get("size_ratio"), "market_weight": round(weight_of(r), 6)}
     est = r.get("sales_est") if isinstance(r.get("sales_est"), dict) else None
@@ -648,6 +728,9 @@ def build_summary(full: dict, rules: dict | None) -> dict:
     scored = rules is not None
     if scored:
         score_records(kept, rules)
+    for r in kept:  # a full file from before the unit of sale existed
+        if not isinstance(r.get("offer"), dict):
+            r["offer"] = parse_offer(r.get("title"), r.get("description"), None, full.get("noun") or (rules or {}).get("noun"))
     prices = [float(r["price"]) for r in kept if _is_num(r.get("price")) and r["price"] > 0]
     classes: dict[str, int] = {}
     raw_mats: dict[str, int] = {}
@@ -684,6 +767,10 @@ def build_summary(full: dict, rules: dict | None) -> dict:
         "materials_top": dict(sorted(raw_mats.items(), key=lambda kv: (-kv[1], kv[0]))[:20]),
         "price": quantiles(prices) if prices else None,
         "price_histogram": histogram(prices),
+        # How the aisle sells: listings per unit of sale ("6" is a set of six; "unknown" said set with no count).
+        "units_distribution": dict(sorted(((str(units_of(r) or "unknown"), sum(1 for x in kept if units_of(x) == units_of(r)))
+                                           for r in kept), key=lambda kv: -kv[1])),
+        "unit_price": quantiles([up for up in (unit_price_of(r) for r in kept) if up]) if any(unit_price_of(r) for r in kept) else None,
         "with_size_ratio": sum(1 for r in kept if _is_num(r.get("size_ratio"))),
         "with_weight_g": sum(1 for r in kept if _is_num(r.get("weight_g"))),
         "top_by_market_weight": [{**title_row(r, scored), **({"selected": True} if scored else {})} for r in by_weight[:TOP_BY_WEIGHT]],
@@ -783,14 +870,22 @@ def main() -> int:
     if foreign:
         die(f"{len(foreign)} comparables priced in a currency other than {currency}; search with --currency so Etsy converts them")
     dst = Path(args.out) if args.out else wd / "viability.json"
+    # The band is per unit of sale. A listing that says "set" with no readable
+    # count has no unit price and stays out, reported under market.unknown_units.
+    unknown = [c for c in rows if units_of(c) is None]
+    rows = [c for c in rows if units_of(c) is not None]
     if not rows:
-        out = {"ok": False, "reason": "no comparables with a price", "n_comparables": 0,
-               "mode": comps.get("mode", "hand")}
+        out = {"ok": False, "n_comparables": 0, "mode": comps.get("mode", "hand"),
+               "reason": "no comparables with a price" if not unknown else
+               f"{len(unknown)} comparable(s) priced as a set with no readable count, none per unit"}
         if rules is not None:
             out["n_scored"], out["min_relevance"] = comps["n_scored"], comps["min_relevance"]
         dst.write_text(json.dumps(out, indent=2))
         print(json.dumps(out))
         return 2
+    offer = offer_of(rows, policy)
+    # From here every `price` is a unit price; what the buyer pays travels as listing_price.
+    rows = [{**c, "price": unit_price_of(c), "listing_price": c["price"]} for c in rows]
     all_rows = rows
     fences = mark_outliers(rows)
     outliers = [c for c in rows if c.get("outlier")]
@@ -825,15 +920,30 @@ def main() -> int:
     market["iqr"] = round(unweighted["p75"] - unweighted["p25"], 2)
     market["iqr_ratio"] = round(unweighted["p75"] / unweighted["p25"], 3) if unweighted["p25"] > 0 else None
     market["outlier_fences"] = fences
-    market["outliers"] = [{"listing_id": c.get("listing_id"), "price": c.get("price"), "side": c["outlier"],
+    market["outliers"] = [{"listing_id": c.get("listing_id"), "price": c.get("listing_price"), "unit_price": c.get("price"),
+                           "units": units_of(c), "side": c["outlier"],
                            "title": c.get("title"), "shop": (c.get("shop") or {}).get("name"),
                            "materials": c.get("materials") or [], "url": c.get("url")} for c in outliers]
     market["n_before_outliers"] = len(all_rows)
     market["n_collapsed"] = comps.get("n_collapsed", 0)
     market["demand"] = demand_of(rows)
+    # The listing's stated weight is the whole parcel, so per gram is listing price over it.
     weighed = [c for c in rows if _is_num(c.get("weight_g")) and c["weight_g"] > 0]
-    market["per_gram"] = quantiles([c["price"] / c["weight_g"] for c in weighed]) if weighed else None
+    market["per_gram"] = quantiles([c["listing_price"] / c["weight_g"] for c in weighed]) if weighed else None
     market["listings_with_weight"] = len(weighed)
+    # Since 2026-10-12 the band above is per unit of sale (the kumiko coaster read a 31 USD
+    # set of six as a 31 USD coaster). What buyers pay at checkout is kept beside it.
+    market["price_basis"] = "per_unit"
+    lw = weighted_quantiles([(float(c["listing_price"]), weight_of(c)) for c in rows])
+    market["per_listing"] = {**quantiles([float(c["listing_price"]) for c in rows]),
+                             **({k: lw[k] for k in ("p25", "median", "p75")} if lw else {}),
+                             "basis": "weighted" if lw else "unweighted"}
+    market["unknown_units"] = [{"listing_id": c.get("listing_id"), "title": c.get("title"), "price": c.get("price"),
+                                "text": (c.get("offer") or {}).get("text"), "url": c.get("url")} for c in unknown]
+    # The band at the unit of sale, from the unrounded unit prices so six of them add back to the set price.
+    ow = weighted_quantiles([(float(c["price"]) * offer["units"], weight_of(c)) for c in rows])
+    offer["market"] = {**quantiles([float(c["price"]) * offer["units"] for c in rows]),
+                       **({k: ow[k] for k in ("p25", "median", "p75")} if ow else {}), "basis": "weighted" if ow else "unweighted"}
 
     # ---- our side
     metrics = quote.get("metrics") or {}
@@ -864,8 +974,11 @@ def main() -> int:
         if tag == "full_plate" and max_per_plate <= 1:
             continue
         cost = model.cost(q)
+        units = offer["units"]
+        pack_cost = cost * units
         try:
             be = model.break_even(cost)
+            be_pack = model.break_even(pack_cost)
         except PricingError as e:
             die(str(e))
         scenarios.append({
@@ -877,11 +990,22 @@ def main() -> int:
             "break_even_price": round(be, 2),
             "markup_price": round(model.markup_price(cost), 2),
             "at": [model.point(k, market[k], cost) for k in ("p25", "median", "p75")],
+            # The same at the unit of sale: a pack costs units x unit cost, the fixed Etsy
+            # fees are paid once per sale, so its break-even is solved on the pack, not
+            # multiplied up. The verdict and price_candidates.py read this block.
+            "offer": {
+                "units": units,
+                "cost": round(pack_cost, 2),
+                "break_even_price": round(be_pack, 2),
+                "markup_price": round(model.markup_price(pack_cost), 2),
+                "at": [model.point(k, offer["market"][k], pack_cost, per_unit=round(market[k], 2), units=units)
+                       for k in ("p25", "median", "p75")],
+            },
         })
 
     # Stock economics: what a production run costs and how many sales pay it
     # back at each band price. Plates are whole, and the last plate's unit
-    # price applies to every unit (dapi's curve is per plate count).
+    # price applies to every unit (3DAPI's curve is per plate count).
     stock = None
     units = int(policy.get("stock_units") or 0)
     if units > 0:
@@ -910,11 +1034,13 @@ def main() -> int:
             and demand["units_per_day"] < DEMAND_MIN_UNITS_PER_DAY:
         unreliable.append(f"total demand {demand['units_per_day']:.3f} units a day, "
                           f"{demand['listings_with_reviews']} of {demand['n']} listings with any review")
+    # Judged at the unit of sale: the market's pack price against the pack's break-even.
+    med_offer = offer["market"]["median"]
     if unreliable:
         verdict = "unreliable"
-    elif med < s0["break_even_price"]:
+    elif med_offer < s0["offer"]["break_even_price"]:
         verdict = "not_viable"
-    elif med < s0["markup_price"]:
+    elif med_offer < s0["offer"]["markup_price"]:
         verdict = "thin"
     else:
         verdict = "viable"
@@ -927,6 +1053,9 @@ def main() -> int:
         "identity": comps.get("identity"),
         "comparables_mode": comps.get("mode", "hand"),
         "market": market,
+        # The unit of sale we list, decided from the comparables (offer_of). Everything
+        # downstream that sells, designs, writes or orders reads offer.units.
+        "offer": offer,
         "cost_basis": cb["basis"],
         "ours": {
             "quote_unit_price_one_off": round(unit_1, 2),
@@ -947,7 +1076,7 @@ def main() -> int:
         "verdict": verdict,
         "verdict_reason": market["verdict_reason"],
         "verdict_rule": "unreliable when one shop holds 0.6 of the weight, demand is under 0.1 units a day, or fewer than 2 comparables remain; "
-                        "else market median vs break-even (not_viable below) and vs quote plus markup (thin below, viable at or above)",
+                        "else, at the unit of sale (offer.units), market median vs break-even (not_viable below) and vs cost plus markup (thin below, viable at or above)",
     }
     if rules is not None:
         out["selection"] = {"rules": rel_to(wd, wd_path(wd, args.rules)), "full": rel_to(wd, full_path),
@@ -957,10 +1086,12 @@ def main() -> int:
     line = {"ok": True, "out": str(dst), "verdict": verdict, "verdict_reason": market["verdict_reason"],
             "n": len(rows), "n_collapsed": market["n_collapsed"], "outliers": len(outliers),
             "demand_units_per_day": demand.get("units_per_day"), "top_shop_share": conc.get("top_shop_share"),
-            "basis": basis, "median": med,
-            "unweighted_median": unweighted["median"], "unit_cost": s0["unit_cost"],
-            "break_even": s0["break_even_price"], "markup_price": s0["markup_price"],
-            "margin_pct_at_median": s0["at"][1]["margin_pct"]}
+            "basis": basis, "median": med, "price_basis": "per_unit",
+            "offer_units": offer["units"], "offer_source": offer["source"], "offer_median": round(med_offer, 2),
+            "unknown_units": len(unknown),
+            "unweighted_median": unweighted["median"], "unit_cost": s0["unit_cost"], "offer_cost": s0["offer"]["cost"],
+            "break_even": s0["offer"]["break_even_price"], "markup_price": s0["offer"]["markup_price"],
+            "margin_pct_at_median": s0["offer"]["at"][1]["margin_pct"]}
     if rules is not None:
         line.update({"n_scored": comps["n_scored"], "n_selected": comps["n_selected"]})
     if summary_path is not None:

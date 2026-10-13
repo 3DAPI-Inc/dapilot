@@ -159,6 +159,106 @@ UNIT_MM = {"mm": 1.0, "cm": 10.0, "in": 25.4, "inch": 25.4, "inches": 25.4, '"':
            "ft": 304.8, "m": 1000.0}
 UNIT_G = {"g": 1.0, "kg": 1000.0, "oz": 28.3495, "lb": 453.592}
 
+# ---------------------------------------------------------------- unit of sale
+# How many of the product one purchase brings. Coasters sell as "Set of 6",
+# charms as "10pcs", and a band built on listing prices then compares six
+# units to our one (the kumiko coaster, 2026-10-12: a 31 USD set read as a
+# 31 USD coaster). The parse is words only and deterministic; market_stats.py
+# divides the price by it.
+WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+PACK_MAX = 50  # a count above this is a stock number or a mistake, not a pack
+_NUM = r"(\d{1,2}|" + "|".join(WORD_NUMBERS) + r")"
+_NOT_A_MEASURE = r"(?!\s*(?:mm|cm|in|inch|inches|\"|”|ft|oz|g|kg|lb|ml|%|x\s?\d|\d))"
+PACK_PATTERNS = (
+    # "set of 6", "Set 6 Coasters", "pack of four", "bundle of 3", "kit of 2"
+    ("set_of", re.compile(r"\b(?:sets?|packs?|box|bundle|lot|kit)\s+(?:of\s+)?" + _NUM + r"\b" + _NOT_A_MEASURE, re.I)),
+    # "6pc", "6 pcs", "6-piece", "4 pack", "2pk", "6 count", "3-piece set", "6pc set"
+    ("n_pack", re.compile(r"\b" + _NUM + r"\s?-?\s?(?:pcs?|pieces?|pc|packs?|pk|count|piece[\s-]?set|pc[\s-]?set|set)\b", re.I)),
+    # "x6", "x 4" at the end of a title; "4 x 4", "6x6 inch" and "2x" multipliers are excluded
+    ("x_n", re.compile(r"(?<![\w.])(?<!\d\s)x\s?(\d{1,2})\b" + _NOT_A_MEASURE, re.I)),
+)
+PACK_NAMES = (("half dozen", 6), ("dozen", 12), ("pair of", 2), ("pair", 2), ("twin pack", 2), ("trio", 3), ("quartet", 4))
+SET_HINT = re.compile(r"\b(?:sets?|packs?|bundle|pcs?|pieces?|lot|multipack)\b", re.I)
+EXTRA_WORDS = ("gift box", "holder", "stand", "tray", "storage", "base", "case", "pouch", "box")
+
+
+def _count(token):
+    t = (token or "").strip().lower()
+    n = WORD_NUMBERS.get(t) if t in WORD_NUMBERS else (int(t) if t.isdigit() else None)
+    return n if n and 1 <= n <= PACK_MAX else None
+
+
+def parse_pack(text, noun=None):
+    """(units, matched text) read from one string, or (None, None) when it names no count.
+
+    Patterns in order: "set of N" and "set N", "N pcs" and its spellings, "N
+    <noun>s" when the noun is known ("six coasters"), "xN", then pair, trio
+    and dozen. A count followed by a measure (6 inch, 2x3) is not a pack.
+    """
+    if not text:
+        return None, None
+    for _, pat in PACK_PATTERNS[:2]:
+        m = pat.search(text)
+        if m and _count(m.group(1)):
+            return _count(m.group(1)), m.group(0)
+    if noun:
+        n = re.escape(noun.strip().lower())
+        alts = n + r"(?:s|es)?" + (("|" + n[:-1] + "ies") if noun.endswith("y") and len(noun) > 2 else "")
+        m = re.search(r"\b" + _NUM + r"\s+(?:" + alts + r")\b", text, re.I)
+        if m and _count(m.group(1)):
+            return _count(m.group(1)), m.group(0)
+    m = PACK_PATTERNS[2][1].search(text)
+    if m and _count(m.group(1)):
+        return _count(m.group(1)), m.group(0)
+    for phrase, n in PACK_NAMES:
+        if has_word(text, phrase):
+            return n, phrase
+    return None, None
+
+
+def parse_offer(title, description=None, variant_text=None, noun=None):
+    """The unit of sale a listing offers: how many of the product one purchase brings, and the extras.
+
+    The chosen variant's property values come first ("Set of 4" / "Set of 6"
+    as options), then the title, then the description, but the description
+    only when the title says set, pack or pieces without a count: descriptions
+    say "fits 6 glasses" and "set of 6 available" for things sold singly. A
+    title that says set and no count turns up anywhere gives units null
+    (units_source "unparsed_set"): market_stats.py keeps the listing out of
+    the per-unit band and reports it. Anything else is one unit by default.
+    Extras are words for what ships alongside (a holder, a stand, a box),
+    never counted as units; "holder only" is not an extra.
+    """
+    title = title or ""
+    for src, text in (("variant", variant_text), ("title", title)):
+        n, hit = parse_pack(text, noun)
+        if n:
+            return {"units": n, "units_source": src, "text": hit, "extras": _extras(title)}
+    if SET_HINT.search(title):
+        n, hit = parse_pack((description or "")[:600], noun)
+        if n:
+            return {"units": n, "units_source": "description", "text": hit, "extras": _extras(title)}
+        return {"units": None, "units_source": "unparsed_set", "text": SET_HINT.search(title).group(0), "extras": _extras(title)}
+    return {"units": 1, "units_source": "default", "text": None, "extras": _extras(title)}
+
+
+def _extras(title):
+    low = (title or "").lower()
+    out = []
+    for w in EXTRA_WORDS:
+        if has_word(low, w) and not has_word(low, w + " only") and not any(w in o for o in out):
+            out.append(w)
+    return out
+
+
+def unit_price_of(price, offer):
+    """price / units (to 4 places, so six of them add back to the listing price), or None when the units are unknown."""
+    units = (offer or {}).get("units")
+    if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0 and isinstance(units, int) and units > 0:
+        return round(float(price) / units, 4)
+    return None
+
 
 def die(msg, code=1):
     print(json.dumps({"ok": False, "error": msg}), file=sys.stderr)
@@ -605,7 +705,9 @@ def variants_of(listing_id, rate, currency, key, bearer, quota):
         out.append({"props": props, "price": round(price * rate, 2), "currency": currency,
                     "shop_price": round(price, 2), "shop_currency": offers[0]["price"]["currency_code"],
                     "has_size_property": bool(size_props),
-                    "size_mm": size_from_text(" ".join(size_props.values()))})
+                    "size_mm": size_from_text(" ".join(size_props.values())),
+                    # "Set of 4" / "Set of 6" as a variation: the count this option brings, or None
+                    "units": parse_pack(" ".join(f"{k} {v}" for k, v in props.items()))[0]})
     return out
 
 
@@ -677,7 +779,7 @@ def target_of(args):
     return None
 
 
-def project(l, target_mm, desc_chars):
+def project(l, target_mm, desc_chars, noun=None):
     """The record the model sees. Everything else stays in the raw dump."""
     d = dims_mm(l)
     price, cur = price_of(l)
@@ -685,6 +787,7 @@ def project(l, target_mm, desc_chars):
     imgs = l.get("images") or []
     created = number(l.get("original_creation_timestamp"))
     age = round(max(1.0, (time.time() - created) / 86400), 1) if created else None
+    offer = parse_offer(l.get("title"), l.get("description"), None, noun)
     return {
         "listing_id": l["listing_id"],
         "url": l.get("url"),
@@ -695,6 +798,9 @@ def project(l, target_mm, desc_chars):
         "price": price,
         "currency": cur,
         "price_source": "listing",
+        # The unit of sale (see parse_offer) and the price of one unit of it.
+        "offer": offer,
+        "unit_price": unit_price_of(price, offer),
         "price_is_base_variant": bool(l.get("has_variations")),
         "price_range": None,
         "variants": None,
@@ -738,6 +844,7 @@ def compact_record(k):
         "listing_id": k["listing_id"], "url": k["url"], "title": k["title"],
         "price": k["price"], "currency": k["currency"], "price_source": k["price_source"],
         "price_range": k.get("price_range"),
+        "units": (k.get("offer") or {}).get("units"), "unit_price": k.get("unit_price"),
         "dims_mm": k.get("dims_mm"), "size_ratio": k.get("size_ratio"), "weight_g": k.get("weight_g"),
         "materials": (k.get("materials") or [])[:4], "tags": (k.get("tags") or [])[:6],
         "sold": (k.get("shop") or {}).get("sold"), "reviews": (k.get("shop") or {}).get("review_count"),
@@ -753,7 +860,7 @@ def compact_record(k):
     return rec
 
 
-def apply_inventory(rec, listing, target_mm, ratio_lo, ratio_hi, key, bearer, quota):
+def apply_inventory(rec, listing, target_mm, ratio_lo, ratio_hi, key, bearer, quota, noun=None):
     """Replace the base price with the right variant's. Returns a drop reason or None."""
     rate, currency = fx_rate(listing)
     variants = variants_of(rec["listing_id"], rate, currency, key, bearer, quota)
@@ -763,7 +870,11 @@ def apply_inventory(rec, listing, target_mm, ratio_lo, ratio_hi, key, bearer, qu
     rec["price_range"] = [min(v["price"] for v in variants), max(v["price"] for v in variants)]
     v, how = choose_variant(variants, target_mm)
     rec["variant_chosen"] = v
+    if v.get("units"):
+        rec["offer"] = parse_offer(rec.get("title"), rec.get("description"),
+                                   " ".join(f"{k} {val}" for k, val in v["props"].items()), noun)
     rec["price"], rec["currency"], rec["price_source"] = v["price"], v["currency"], how
+    rec["unit_price"] = unit_price_of(rec["price"], rec.get("offer"))
     rec["price_is_base_variant"] = how == "variant_unsized"
     if how == "variant_size_match":
         rec["dims_mm"], rec["dims_source"] = [v["size_mm"]], "variant"
@@ -779,9 +890,9 @@ def run_filter(survivors, dropped, args, query, total, quota, key=None, bearer=N
     target = target_of(args)
     kept, dropped = [], list(dropped)
     for l in survivors:
-        rec = project(l, target, args.desc_chars)
+        rec = project(l, target, args.desc_chars, noun)
         if bearer and l.get("has_variations"):
-            why = apply_inventory(rec, l, target, args.size_min_ratio, args.size_max_ratio, key, bearer, quota)
+            why = apply_inventory(rec, l, target, args.size_min_ratio, args.size_max_ratio, key, bearer, quota, noun)
             if why:
                 dropped.append({"listing_id": l["listing_id"], "url": l.get("url"), "reason": why})
                 continue
@@ -949,9 +1060,16 @@ def cmd_score(args):
         die(f"{args.full} is not a full search result (needs kept and dropped lists)")
     if not rules.get("noun"):
         die(f"{args.rules} has no noun")
+    noun = full.get("noun") or rules.get("noun")
     for k in full["kept"]:
         k["relevance"], excluded_by = relevance(k, rules)
         k["market_weight"] = market_weight(k)
+        # The unit of sale is re-read on every score, so a file searched before
+        # the field existed (or before a pattern was added) catches up.
+        chosen = k.get("variant_chosen") if isinstance(k.get("variant_chosen"), dict) else None
+        vtext = " ".join(f"{p} {v}" for p, v in (chosen or {}).get("props", {}).items()) if chosen else None
+        k["offer"] = parse_offer(k.get("title"), k.get("description"), vtext, noun)
+        k["unit_price"] = unit_price_of(k.get("price"), k["offer"])
         if excluded_by:
             k["excluded_by"] = excluded_by
         else:

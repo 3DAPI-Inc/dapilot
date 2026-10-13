@@ -59,7 +59,7 @@ No level talks sideways.
 |---|---|---|---|
 | Supervisor | the decision to run; every gate; skill definitions | start and stop runs, approve proposed actions, delete stale outputs to force a redo, edit `SKILL.md` | be needed for a stage to complete unless that stage is gated |
 | Director | the run: `ledger.py init`, the budget, the final report | spawn one lead per enabled department, validate the lead's result line, write the report | any domain work, spawning workers, re-running a lead that stopped |
-| Lead | its department's loop: `ledger.py next`, `record`, `status`, `report` | dispatch exactly the briefs the ledger returns, in parallel, record every result, stop when `work_left` is false | open a mesh, look at a render, write copy, compute a price, call dapi, change a gate, edit `state.json`, dispatch anything the ledger did not return |
+| Lead | its department's loop: `ledger.py next`, `record`, `status`, `report` | dispatch exactly the briefs the ledger returns, in parallel, record every result, stop when `work_left` is false | open a mesh, look at a render, write copy, compute a price, call 3DAPI, change a gate, edit `state.json`, dispatch anything the ledger did not return |
 | Worker | one `work/<hash>/` for the duration of one stage | run scripts, read inputs named in the brief, write the stage's named outputs, append to `log.md`, return the result JSON | touch any other work dir, run any stage other than the one in the brief, dispatch anything, retry itself, pass `--confirm` to a script |
 | Script | its own stdout and the file it was told to write | read env and args, do one thing, print JSON, exit non-zero on any failure | prompt, guess, fall back to a default host, print a credential |
 
@@ -89,7 +89,7 @@ slice and eight 320 px frames, never a hero render or a video. `price.json`
 exists only for a sellable item, which is what keeps design, copy and
 publish from ever running for the rest.
 
-2026-09-13: `design` replaced `render`. The storefront is Etsy, not dapi, so
+2026-09-13: `design` replaced `render`. The storefront is Etsy, not 3DAPI, so
 copy and publish are disabled until they are rebuilt for Etsy. A stage may
 name its own worker agent in `stages.json` (`"agent"`); the ledger copies it
 into the brief and `run_intake.py` launches that agent instead of the
@@ -174,7 +174,7 @@ files.
 2. Outputs are never overwritten by an agent. To redo a stage, the supervisor
    deletes its output file. That is the only path to a second run of a stage,
    and it is a human action.
-3. `quote-model` additionally records the dapi quote id in `quote.json` and
+3. `quote-model` additionally records the 3DAPI quote id in `quote.json` and
    checks `GET /quotes` for an existing quote on the same upload before
    creating one, so even a deleted local file does not cause a second slice.
 

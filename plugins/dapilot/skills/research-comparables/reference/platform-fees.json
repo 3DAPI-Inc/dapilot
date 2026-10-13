@@ -26,7 +26,7 @@
     }
   },
   "shipping": {
-    "comment": "Buyer pays shipping at cost unless seller_pays is true. packaging_g is added to model_g for the parcel. table_usd is optional [{max_g, usd}] brackets; empty means viability.json reports shipping as unknown. dapi's shipping rates by zone are the right source once an ORDER-scoped key exists.",
+    "comment": "Buyer pays shipping at cost unless seller_pays is true. packaging_g is added to model_g for the parcel. table_usd is optional [{max_g, usd}] brackets; empty means viability.json reports shipping as unknown. 3DAPI's shipping rates by zone are the right source once an ORDER-scoped key exists.",
     "packaging_g": 30,
     "seller_pays": false,
     "table_usd": []

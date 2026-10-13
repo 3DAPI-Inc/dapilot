@@ -7,7 +7,7 @@ is in `docs/agents.md` and the skill rules in `docs/skills.md`.
 
 ## 1. The question
 
-Given one model file, dapi's quote for printing it, and the market on Etsy:
+Given one model file, 3DAPI's quote for printing it, and the market on Etsy:
 can it be listed at a price that clears cost, fees and tax, and if so at
 which price. Everything below exists to answer that with numbers a script
 computed and a judgement a model wrote down.
@@ -19,7 +19,7 @@ Since 2026-09-09 intake runs in this fixed order:
 | Stage | Skill | Produces | What it costs |
 |---|---|---|---|
 | analyze | `analyze-model` | `analysis.json` | seconds |
-| quote | `quote-model` | `quote.json` | one dapi slice, 15 to 40 s |
+| quote | `quote-model` | `quote.json` | one 3DAPI slice, 15 to 40 s |
 | preview | `preview-model` | `renders/draft_00..07.png` | about 30 to 70 s of CPU |
 | research | `research-comparables` | `comparables.json`, `viability.json` | one to three Etsy searches, about 0.45 USD of worker |
 | price | `propose-price` | `price.json` or `price.rejected.json` | about 0.20 USD of worker |
@@ -105,8 +105,8 @@ disagree.
 
 ```
 manufacturing  = setup + grams x filament rate + hours x time rate + post-processing + extras
-quote          = manufacturing x (1 + api_commission / 100)        dapi's price for one unit
-plate unit     = the unit price at max_per_plate from dapi's batch curve  what a plate of them costs each
+quote          = manufacturing x (1 + api_commission / 100)        3DAPI's price for one unit
+plate unit     = the unit price at max_per_plate from 3DAPI's batch curve  what a plate of them costs each
 cost           = plate unit (policy cost_basis full_plate), VAT added if the seller cannot reclaim it
 net(P)         = P / (1 + VAT rate) when VAT sits inside the price, else P
 fees(P)        = listing fee + payment fixed + P x (transaction pct + payment pct + extra pct)
@@ -115,11 +115,11 @@ margin pct     = margin(P) / net(P)
 break-even     = (cost + listing fee + payment fixed) / (k - pct),  k = 1 / (1 + VAT rate) or 1
 ```
 
-The first two lines happen inside dapi and arrive as `unit_price`; dapilot
+The first two lines happen inside 3DAPI and arrive as `unit_price`; dapilot
 never sees the terms. Fees and VAT are both functions of the price the
 buyer pays, so the break-even is solved, not looked up.
 
-With the policy in force for dapi's own shop (Etsy, EU seller, 21 percent
+With the policy in force for 3DAPI's own shop (Etsy, EU seller, 21 percent
 VAT inside every sale, purchase VAT reclaimable, Offsite Ads at 0):
 
 ```
@@ -133,7 +133,7 @@ break-even = (cost + 0.53) / 0.7214
   entry of the batch curve on the quote. The shop buys in runs of about
   100 (`stock_units`) and sells from stock, so that is the real unit cost.
   For an object that fits one per plate it equals the one-off quote.
-  dapi's commission is never backed out: whoever produces on the platform
+  3DAPI's commission is never backed out: whoever produces on the platform
   pays it, us included. The one-off basis is reported beside it in every
   file (`cost_bases`, `scenarios`) as the road not taken, and
   `--cost-basis` overrides the policy for one run. Section 7b has the
@@ -285,14 +285,14 @@ on (a), (b) and (c), not on the 2.89 USD of extra margin.
 `$DAPILOT_STORE_DIR/products/<sha256>.json` once a price is approved, and
 again when the design stage finishes (the server refreshes a record older
 than `design.json`). It copies and decides nothing. The record holds the
-name, the approved price with its margin, the dapi quote, the media in
+name, the approved price with its margin, the 3DAPI quote, the media in
 listing order, a `storefront` block for the Etsy listing, the API key it
 belongs to (`GET /me` through `dapi.py`), and `order_item`: the quote
-`publicId` and filament slot count that dapi's `createOrder` needs. dapi
+`publicId` and filament slot count that 3DAPI's `createOrder` needs. 3DAPI
 builds the design and the SKU from the quote when an order is placed, so an
-order for an end customer needs nothing else to exist on dapi first.
+order for an end customer needs nothing else to exist on 3DAPI first.
 
-`dapi_listing` in the record is the same product in the shape dapi's
+`dapi_listing` in the record is the same product in the shape 3DAPI's
 product save expects (`listing`, `manufacture`, `designs`, `skus`, `images`,
 `extraFiles`, `complianceFiles`, `materialConfigs`, `imageAssignments`).
 It is not sent anywhere: the public API has no product route, files carry
@@ -314,7 +314,7 @@ Shipping on Etsy is charged to the buyer on top of the item price through
 the seller's shipping profile, and Etsy takes its percentage on it too.
 Listing prices in the band are item prices. Other shops' shipping profiles
 cannot be read through the API any more, so shipping is compared at cost on
-both sides until dapi's shipping rates feed the fee file.
+both sides until 3DAPI's shipping rates feed the fee file.
 
 ## 5. What the first runs showed
 
@@ -339,7 +339,7 @@ Lessons, all now in code or config:
   the floor are the ones the market pays well per gram.
 - The 50 percent markup candidate is rejected for margin on every small
   quote, so the median is usually the only live candidate.
-- Foreign 3mf projects (Creality Print, Orca, Prusa) fail on dapi's slicer
+- Foreign 3mf projects (Creality Print, Orca, Prusa) fail on 3DAPI's slicer
   until `strip_3mf.py` removes their settings. The server does this on
   upload.
 - Quote metrics were per plate, not per unit, on batched quotes until the
@@ -404,8 +404,9 @@ unweighted band beside it, `spread_ratio` and a `thin` flag.
 **Review by count.** The model checks the selected comparables in
 `top_by_market_weight` against the drafts once and tightens the words once
 at most: more than 4 of 20 not our product, or more than 1 when fewer than
-10 are listed. A set or bundle counts as not ours; if words cannot remove it
-without removing genuine comparables, it stays and the log says so.
+10 are listed. A set of our product is ours, read per unit through
+`units` (since 2026-10-12, section 7d); only a bundle of different products
+counts as not ours, and it is removed by naming the other product.
 
 **p75 as a third candidate.** `price_candidates.py` adds the band's p75,
 skipped when it rounds to another candidate's price, and reports
@@ -446,7 +447,7 @@ priced higher.
 
 ## 7b. Cost basis: the batch price (decided 2026-09-11)
 
-dapi's batch curve gives a unit price per quantity up to `max_per_plate`.
+3DAPI's batch curve gives a unit price per quantity up to `max_per_plate`.
 Until 2026-09-11 every floor used the one-off quote. `pricing-policy.json`
 now has `cost_basis: full_plate` (the unit price at a full plate, what a
 stock run costs each) with `one_off` kept as the print-to-order
@@ -460,7 +461,7 @@ rules, 42 named shops at or above the p75.
 
 | | one-off | full plate |
 |---|---|---|
-| dapi unit price | 4.97 | 1.83 |
+| 3DAPI unit price | 4.97 | 1.83 |
 | floor | 7.99 | 3.99 |
 | weighted median 8.00 | rejected, 4 percent margin | 7.99 at 52 percent |
 | weighted p75 11.99 | 32 percent margin, sole candidate | 63 percent |
@@ -665,18 +666,75 @@ fold to 1, demand 0.006 a day, verdict unreliable, markup 3.99 under the
 reason instead of proposing 30.99. The offer block and the launch
 candidate stay open: they change the pricing policy and want a decision.
 
+**The unit of sale, built 2026-10-12.** Decided with the shop: the band is
+per unit, the offer is the market's pack, 3DAPI's full-plate price stays
+the cost basis, and one Etsy sale of a set becomes one 3DAPI order line
+with that quantity (createOrder prices N units off the batch curve in
+whole plates, so no second quote). What changed:
+
+- `etsy_search.py parse_offer` reads every listing's unit of sale into
+  `offer` (`units`, `units_source`, `text`, `extras`) and `unit_price`:
+  the chosen variant's properties first ("Set of 4" / "Set of 6" as an
+  option), then the title ("set of 6", "Set 6", "6pc", "6 pcs", "3-piece
+  set", "x4", "six coasters" when the noun is known, pair, trio, dozen),
+  then the description, but only when the title says set, pack or pieces
+  without a count. A count followed by a measure (4 x 4 inch, 2x) is not
+  a pack. A title that says set with no count anywhere gives `units`
+  null. `score` re-reads it on every run, so old files catch up.
+- `market_stats.py` builds `market` on `unit_price` (`price_basis:
+  per_unit`), keeps the checkout band as `market.per_listing`, lists the
+  unknown-count listings under `market.unknown_units`, and when clones
+  collapse a head whose title only says "Set" takes the count from a clone
+  that says "Set of 6". `offer_of` picks the unit of sale: the modal
+  `units` by market weight when its share is at least
+  `offer.adopt_share` (pricing policy, 0.5) and at most `offer.max_units`
+  (24), else 1; `viability.json` `offer` carries it with the distribution,
+  the common extras ("holder") and `offer.market`, the band at the pack
+  from the unrounded unit prices. Each scenario gains an `offer` block:
+  cost is units x the unit cost, break-even solved on the pack because
+  Etsy's fixed fees are paid once per sale. The verdict is judged there.
+- `price_candidates.py` prices the pack: every candidate is one purchase
+  of `offer.units` with `per_unit` beside it, the floor is the pack's
+  break-even, `p75_sellers` reads `unit_price`, and the `margin`
+  candidate (lowest price at the minimum margin) now also appears for an
+  unreliable band, because 50% markup on a pack lands under the minimum
+  margin and the band was not evidence. `--check` reads `offer.units` in
+  `price.json`: the model copies it; a person may change it with an
+  override block and the floor follows the new pack.
+- Downstream: `price.approved.json` and the product record carry `offer`
+  (`units`, `per_unit`), the record's `order_item.quantity` is `units`,
+  `etsy_listing.py` divides the stock quantity by it, `listing_copy.py`
+  puts `offer` in the copy context and `check` refuses a title whose count
+  does not read back as the offer, `design_product.py` tells the designer
+  the scenes show the whole set, the console shows the price and cost
+  "for a set of 6" with the per-unit figure.
+
+Rerun on the coaster: four listings fold to one with `units` 6 (one title
+said only "Set"; its clone's "6-piece" settled it), unit median 5.17,
+offer median 31.00, pack cost 14.94, floor 21.99, verdict still
+unreliable (one shop, no sales), candidates: markup 22.99 rejected under
+the minimum margin, median 30.99 rejected as unreliable, `margin` 24.99 at
+12.4% proposed, 4.17 a coaster. Fixtures with single-unit comparables are
+unchanged to the cent.
+
+Not built: quantity variations (1, 2, 6) on one listing, which need
+Etsy inventory writes; a compact plate layout before quoting (3DAPI
+measured 2 coasters per plate from the file's 386 mm row, so a set of
+six is three plates); the model's own correction of a misread count,
+which today is reported in the summary and not fixable from the rules.
+
 ## 8. Open decisions
 
 - The VAT share of sales in the pricing policy.
-- Whether dapi's own shop pays itself the commission (today: yes, by
+- Whether 3DAPI's own shop pays itself the commission (today: yes, by
   keeping the quote as cost).
 - `stock_units` is a single number for the whole shop; per-item batch
   sizes would need a field on the item.
-- Shipping: dapi's rates by zone into the fee file, which needs an
+- Shipping: 3DAPI's rates by zone into the fee file, which needs an
   ORDER-scoped key and account approval.
 - The six old fixture work dirs that a blanket resume would spend money on.
-- The offer block (set sizes as Etsy quantity variations) and the `launch`
-  candidate from section 7d; both change the pricing policy.
+- Quantity variations (1, 2, 6) on one listing, and the `launch`
+  candidate from section 7d. The offer itself is built (2026-10-12).
 - Fresh quotes return no batch curve (`max_per_plate` 1, or 2 for a
   coaster); the full-plate cost basis, the stock block and any set price
   depend on it.

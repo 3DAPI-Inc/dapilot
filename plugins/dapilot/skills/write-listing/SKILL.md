@@ -28,12 +28,13 @@ A brief with `stage: copy`. The work dir has `design.json`,
    `reference/voice.md`. Read `copy/context.json` and `design/review.png`.
    - `title`: what a buyer types, most important words first; the noun, the
      pattern or style, what it is made by ("3D printed"), one use or gift
-     phrase. No keyword pile, at most 140 characters
-   - `description`: what it is in two sentences, then DETAILS (one item or
-     how many, the size from `size_mm` in cm and inches, material, colours
-     as the photos show them), then CARE, then MADE TO ORDER. Every number
-     comes from the context. If `identity.confidence` is not high, describe
-     only what the photos show
+     phrase, and the count when `offer.units` is more than one ("Set of 6").
+     No keyword pile, at most 140 characters
+   - `description`: what it is in two sentences, then DETAILS (how many the
+     buyer receives, from `offer.units`; the size from `size_mm` in cm and
+     inches, material, colours as the photos show them), then CARE, then
+     MADE TO ORDER. Every number comes from the context. If
+     `identity.confidence` is not high, describe only what the photos show
    - `tags`: 13 when you can, each 20 characters or fewer, phrases a buyer
      searches, taken from the comparables' tags where they fit this product;
      never a competitor's shop name or a trademark
@@ -83,8 +84,12 @@ Auto. Nothing is sent anywhere; the publish stage sends it.
   listing carries them as fields.
 - Do not claim anything in `limits.never_claim`, and nothing about safety,
   certification or heat that the context does not state.
-- Do not mention sets, bundles or quantities other than the one item, unless
-  the context's parts say the buyer receives several.
+- Do not mention sets, bundles or quantities other than what `offer.units`
+  in the context says one purchase brings. One unit: no set wording at all.
+  A set: the title carries the count ("Set of 6"), the description says what
+  the buyer receives, and `check` refuses a draft where the two disagree.
+  Extras the comparables ship with (`offer.extras_common`, a holder) are
+  never implied unless the parts list has them.
 - Do not name a designer, a brand, a film, a game or a character.
 - Do not use an em dash.
 - Do not edit `listing.json` or `social/posts.json`; the script writes them.

@@ -50,7 +50,9 @@ export function BuyBox({ job }: { job: Job }) {
 
   const match = headline != null ? p?.candidates.find((c) => Math.abs(c.price - headline) < 0.005) : undefined;
   const margin = approved ? { usd: approved.margin, pct: approved.margin_pct } : match ? { usd: match.margin, pct: match.margin_pct } : null;
-  const unitCost = approved?.unit_cost ?? v?.unitCost ?? null;
+  // The unit of sale: one purchase brings `units` printed units (a set of six). The price and its cost are per purchase.
+  const units = approved?.offer?.units ?? p?.offer?.units ?? 1;
+  const unitCost = approved?.unit_cost ?? (units > 1 ? p?.offer?.cost : undefined) ?? v?.unitCost ?? null;
   // The same name the catalogue files it under: the designer's, else what research called it, else the file.
   const noun = job.comparables?.product ?? v?.product ?? null;
   const name = job.design?.name ?? (noun ? noun.replace(/^./, (ch) => ch.toUpperCase()) : job.fileName);
@@ -78,6 +80,9 @@ export function BuyBox({ job }: { job: Job }) {
           <>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="font-display text-[2.75rem] font-semibold leading-none tabular-nums tracking-tight">{money(headline)}</span>
+              {units > 1 ? (
+                <span className="font-sans text-sm text-slate">for a set of {units} · {money(headline / units)} each</span>
+              ) : null}
               {approved ? (
                 <span className="inline-flex items-center gap-1 font-sans text-sm font-medium text-ok">
                   <Check className="size-4" aria-hidden="true" />
@@ -124,11 +129,11 @@ export function BuyBox({ job }: { job: Job }) {
           <span className="first-letter:uppercase">{headline == null ? job.reason.replace(/^no sellable price:\s*/i, '') : job.reason}</span>
         </p>
       ) : null}
-      {job.status === 'failed' ? (
+      {job.status === 'failed' || job.idle ? (
         <div className="mt-3">
           <Button variant="outline" size="sm" disabled={retry.isPending} onClick={() => retry.mutate()}>
             {retry.isPending ? <Spinner className="size-4" /> : null}
-            Try again
+            {job.status === 'failed' ? 'Try again' : 'Continue'}
           </Button>
           {retry.isError ? <p className="mt-2 font-sans text-sm text-destructive">{errorText(retry.error)}</p> : null}
         </div>
@@ -166,7 +171,9 @@ export function BuyBox({ job }: { job: Job }) {
         {unitCost != null ? (
           <Fact label="Cost to make">
             {money(unitCost)}
-            {v?.costBasis === 'full_plate' && job.price != null && Math.abs(job.price - unitCost) > 0.005 ? (
+            {units > 1 ? (
+              <span className="text-slate"> for {units} · {money(unitCost / units)} each on a full plate</span>
+            ) : v?.costBasis === 'full_plate' && job.price != null && Math.abs(job.price - unitCost) > 0.005 ? (
               <span className="text-slate"> on a full plate · {money(job.price)} alone</span>
             ) : null}
           </Fact>
@@ -180,7 +187,15 @@ export function BuyBox({ job }: { job: Job }) {
         ) : null}
         {v?.market ? (
           <Fact label="Etsy sells it for">
-            {money(v.market.median)} <span className="text-slate">median of {v.market.n}</span>
+            {units > 1 && p?.offer?.market?.median != null ? (
+              <>
+                {money(p.offer.market.median)} <span className="text-slate">for {units} · {money(v.market.median)} each, median of {v.market.n}</span>
+              </>
+            ) : (
+              <>
+                {money(v.market.median)} <span className="text-slate">median of {v.market.n}</span>
+              </>
+            )}
           </Fact>
         ) : null}
         {size ? <Fact label="Size">{size.map((n) => n.toFixed(0)).join(' × ')} mm</Fact> : null}

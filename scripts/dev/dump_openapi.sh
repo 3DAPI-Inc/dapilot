@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generate openapi.json from the dapi public API without a database or AWS.
+# Generate openapi.json from the 3DAPI public API without a database or AWS.
 # Usage: dump-openapi.sh <path-to-3dapi/public-api/v1> <out.json>
 set -euo pipefail
 API="$1"; OUT="$2"; HERE="$(cd "$(dirname "$0")" && pwd)"

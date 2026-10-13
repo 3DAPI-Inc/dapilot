@@ -30,6 +30,9 @@ import sys
 import unicodedata
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from etsy_search import parse_offer  # noqa: E402  the same reading of "Set of 6" research applies to the comparables
+
 TITLE_MAX, TAG_MAX, TAGS_MAX, MATERIALS_MAX = 140, 20, 13, 13
 SOCIAL = {"instagram": {"caption_max": 2200, "hashtags_max": 30,
                         "formats": {"reel": ["video"], "carousel": "photos"}}}
@@ -136,6 +139,19 @@ def cmd_taxonomy(a) -> int:
     return emit({"ok": bool(rows), "candidates": rows} | ({} if rows else {"reason": "no seller taxonomy in the store, or no node matches"}), 0 if rows else 1)
 
 
+def offer_of(wd: Path, approved: dict | None) -> dict:
+    """How many of the product one purchase brings, from the approval, else research; 1 before 2026-10-12."""
+    viab = read(wd / "viability.json") or {}
+    units = next((o["units"] for o in ((approved or {}).get("offer"), viab.get("offer"))
+                  if isinstance(o, dict) and isinstance(o.get("units"), int) and o["units"] > 0), 1)
+    price = (approved or {}).get("price")
+    return {"units": units, "price": price, "per_unit": round(price / units, 2) if isinstance(price, (int, float)) else None,
+            "extras_common": (viab.get("offer") or {}).get("extras_common") or [],
+            "note": "one item per purchase; do not mention sets or quantities" if units == 1 else
+            f"a set of {units}: the title says the count (\"Set of {units}\"), the description says what the buyer receives, "
+            "and nothing suggests extras the comparables ship with (a holder, a stand) unless the parts list has them"}
+
+
 def cmd_context(a) -> int:
     wd = Path(a.workdir)
     design, approved = read(wd / "design.json"), read(wd / "price.approved.json")
@@ -150,6 +166,9 @@ def cmd_context(a) -> int:
     words = " ".join(str(x) for x in (design.get("name"), comps.get("product"), identity.get("object")) if x)
     ctx = {
         "ok": True, "name": design.get("name"), "identity": comps.get("identity"),
+        # The unit of sale: `units` of the product per purchase at the approved price. The title and
+        # description say the count when it is more than one; `check` refuses a draft that does not.
+        "offer": offer_of(wd, approved),
         "size_mm": sorted(size, reverse=True) if size else None,
         "weight_g": ((read(wd / "quote.json") or {}).get("metrics") or {}).get("model_g"),
         "parts": [{"name": i.get("name"), "colour": i.get("colour")} for i in assembly.get("items") or []] or None,
@@ -192,6 +211,15 @@ def cmd_check(a) -> int:
         e.append(f"title has characters Etsy refuses: {bad}")
     if sum(1 for w in title.split() if len(w) > 1 and w.isupper()) > 3:
         e.append("title has more than three words in capitals")
+    # The unit of sale, read back the way research reads the comparables: a set's title must carry the count,
+    # and a single's title must not read as a set.
+    units = offer_of(wd, read(wd / "price.approved.json"))["units"]
+    said = parse_offer(title, description, None, None)
+    if units > 1 and said.get("units") != units:
+        e.append(f"the listing sells {units} per purchase but the title reads as {said.get('units') or 'a set with no count'}: "
+                 f"say \"Set of {units}\" (or \"{units} pcs\") in the title")
+    if units == 1 and said.get("units") != 1:
+        e.append(f"the listing sells one per purchase but the title reads as {said.get('units') or 'a set'}; drop the set wording")
     if len(description) < 200:
         e.append("description is under 200 characters; say what it is, its size, its material and its care")
     if not 5 <= len(tags) <= TAGS_MAX:

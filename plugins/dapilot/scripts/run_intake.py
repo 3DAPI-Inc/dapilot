@@ -55,6 +55,8 @@ def env_value(raw: str) -> str:
     v = raw.strip()
     if v[:1] in "\"'" and v[:1] and v.find(v[0], 1) > 0:
         return v[1:v.find(v[0], 1)]
+    if v.startswith("#"):  # `KEY=   # comment` is an empty value, not a comment as the value
+        return ""
     return re.split(r"\s#", v, maxsplit=1)[0].strip()
 
 

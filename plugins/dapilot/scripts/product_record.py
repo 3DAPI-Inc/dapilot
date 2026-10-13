@@ -3,7 +3,7 @@
 
 Deterministic. Nothing here is judged: every field is copied from files the
 pipeline already wrote. The record is what the shop sells, the middle between
-dapi (who makes it) and the storefront listing (who sells it), and it holds
+3DAPI (who makes it) and the storefront listing (who sells it), and it holds
 what an order for an end customer needs.
 
     product_record.py --workdir work/<hash> [--verify-key] [--out FILE]
@@ -20,24 +20,24 @@ existing record are kept, everything else is rebuilt.
 The record:
   id              the model file's sha256, the key of everything else
   status          awaiting_media until design.json exists, then ready
-  owner           the dapi API key this product belongs to, from GET /me
-                  (--verify-key; through dapi.py like every other dapi call)
+  owner           the 3DAPI API key this product belongs to, from GET /me
+                  (--verify-key; through dapi.py like every other 3DAPI call)
   name, price, cost, quote
-  order_item      what dapi's createOrder needs per item: the quote publicId
+  order_item      what 3DAPI's createOrder needs per item: the quote publicId
                   and how many filaments the design takes. The filament codes
-                  and the customer are chosen per order. dapi creates the
+                  and the customer are chosen per order. 3DAPI creates the
                   design and the SKU itself from the quote when the order is
-                  placed, so no product has to exist on dapi first.
+                  placed, so no product has to exist on 3DAPI first.
   media           photos in listing order and the listing video, as paths
                   relative to the work dir
   storefront      where it is listed (Etsy); filled by whoever lists it
-  dapi_listing    the same product in the shape dapi's product save expects
+  dapi_listing    the same product in the shape 3DAPI's product save expects
                   (listing, manufacture, designs, skus, images, ...). Files
                   carry tempKey null and are repeated under pending_uploads:
                   a tempKey comes from an upload, and the public API has no
                   product route yet, so nothing is uploaded here. skus is
                   empty for the same reason: a SKU names platform material
-                  ids, and dapi makes one per filament choice at order time.
+                  ids, and 3DAPI makes one per filament choice at order time.
 
 Exit 0 with the record written, 1 on error (no approved price, missing quote).
 """
@@ -97,7 +97,7 @@ def content_type(name: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True)
-    ap.add_argument("--verify-key", action="store_true", help="ask dapi who the API key belongs to and record it as the owner")
+    ap.add_argument("--verify-key", action="store_true", help="ask 3DAPI who the API key belongs to and record it as the owner")
     ap.add_argument("--out", help="default $DAPILOT_STORE_DIR/products/<sha256>.json")
     a = ap.parse_args()
     wd = Path(a.workdir)
@@ -137,6 +137,10 @@ def main() -> int:
     source_name = meta.get("file") or sources[0]
 
     name = design.get("name") or comps.get("product") or viab.get("product") or Path(source_name).stem
+    # The unit of sale (decided 2026-10-12): one sale brings `units` printed units. The approval
+    # carries it, else the proposal, else research's offer; a record from before carries none and sells singles.
+    units = next((o["units"] for o in (approved.get("offer"), price.get("offer"), viab.get("offer"))
+                  if isinstance(o, dict) and isinstance(o.get("units"), int) and o["units"] > 0), 1)
     photos = [{"id": p.get("id"), "kind": p.get("kind"), "file": p.get("file")} for p in design.get("photos", []) if p.get("file")]
     video = design.get("video") if isinstance(design.get("video"), dict) and design["video"].get("file") else None
 
@@ -161,14 +165,19 @@ def main() -> int:
         "name": name,
         "source_file": source_name,
         "price": {k: approved.get(k) for k in ("price", "currency", "by", "at", "source", "floor", "unit_cost", "margin", "margin_pct")},
+        # What one sale is: `units` printed units for `price`. Everything that sells or orders reads this.
+        "offer": {"units": units, "per_unit": round(approved["price"] / units, 2),
+                  "source": (viab.get("offer") or {}).get("source") if units > 1 else "single",
+                  "extras_common": (viab.get("offer") or {}).get("extras_common") or []},
         "rationale": price.get("rationale"),
         "quote": {"publicId": quote["publicId"], "unit_price": quote.get("unit_price"), "store_id": quote.get("store_id"),
                   "max_per_plate": (quote.get("batch") or {}).get("max_per_plate"),
                   "model_g": metrics.get("model_g"), "print_time_s": metrics.get("print_time_s")},
         # the assembled product when assembly_3mf.py built one; analysis.json's bbox is the print layout
         "size_mm": (display.get("bbox_mm") if display.get("pose") == "assembled" else None) or analysis.get("bbox_mm"),
-        "order_item": {"quoteId": quote["publicId"], "filament_slots": metrics.get("filament_count") or 1, "quantity": 1,
-                       "note": "createOrder takes one filament code per slot, chosen per order from listFilaments"},
+        "order_item": {"quoteId": quote["publicId"], "filament_slots": metrics.get("filament_count") or 1, "quantity": units,
+                       "note": "one line per sale: quantity is the units one purchase brings, times the storefront quantity sold; "
+                               "createOrder takes one filament code per slot, chosen per order from listFilaments"},
         "media": {"photos": photos, "video": {"id": video.get("id"), "file": video["file"]} if video else None,
                   "color": design.get("color")},
         "storefront": old.get("storefront") or {"platform": "etsy", "state": "not_listed", "listing_id": None, "url": None},

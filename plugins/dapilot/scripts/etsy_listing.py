@@ -273,6 +273,12 @@ def cmd_draft(args) -> int:
     floor = price.get("floor")
     if isinstance(floor, (int, float)) and amount < floor:
         die(f"approved price {amount} is below the break-even floor {floor}")
+    # Etsy's quantity counts sales, and one sale is offer.units printed units (a set of six), so the
+    # stock run divides by it. An approval from before 2026-10-12 carries no offer and sells singles.
+    units = (price.get("offer") or {}).get("units") if isinstance(price.get("offer"), dict) else None
+    units = units if isinstance(units, int) and units > 0 else 1
+    if units > 1 and isinstance(listing.get("quantity"), int):
+        listing["quantity"] = max(1, listing["quantity"] // units)
 
     c = sid = None
     if not args.dry_run:

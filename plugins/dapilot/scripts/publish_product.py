@@ -83,8 +83,12 @@ def main() -> int:
     if (wd / "published.json").exists():
         return emit({"ok": True, "cached": True, "published": "published.json"})
 
-    cfg = (read(Path(store) / "config.json") or {}).get("publish") or {}
+    store_cfg = read(Path(store) / "config.json") or {}
+    cfg = store_cfg.get("publish") or {}
     auto_activate, auto_post = cfg.get("auto_activate", True), cfg.get("auto_post", True)
+    # A platform switched off in config (Instagram while its browser adapter is not built, 2026-09-23) is
+    # skipped by name, not failed: the post stays a draft in social/posts.json for the Social tab.
+    platforms_on = {k for k, v in ((store_cfg.get("social") or {}).get("platforms") or {}).items() if v.get("enabled", True)}
     approved = read(wd / "price.approved.json") or {}
     by = approved.get("by") or "console"
     since = cfg.get("auto_since")
@@ -100,7 +104,8 @@ def main() -> int:
                "approve it again to publish"] if stale else [
                 (f"activate the listing at {approved.get('price')} {approved.get('currency')}, approved by {by}"
                  if auto_activate else "leave the listing a draft (publish.auto_activate is off)"),
-                *([f"post {p['platform']}.{p['format']}" for p in posts] if auto_post else ["post nothing (publish.auto_post is off)"])]),
+                *([f"post {p['platform']}.{p['format']}" if p['platform'] in platforms_on else f"skip {p['platform']}.{p['format']} (platform disabled in config)"
+                   for p in posts] if auto_post else ["post nothing (publish.auto_post is off)"])]),
         ]})
 
     steps: list[dict] = []
@@ -143,6 +148,9 @@ def main() -> int:
     pending = False
     if auto_post and pub.get("state") == "active":
         for p in posts:
+            if p["platform"] not in platforms_on:
+                skipped.append(f"{p['platform']}.{p['format']} (platform disabled in config)")
+                continue
             code, res = run("social_post.py", "post", "--workdir", str(wd), "--platform", p["platform"],
                             "--format", p["format"], "--confirm")
             if code == 3:

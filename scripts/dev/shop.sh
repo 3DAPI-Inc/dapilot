@@ -303,7 +303,7 @@ setup_store() {
     log "pricing policy present: $("$PY" -c 'import json,sys; p=json.load(open(sys.argv[1])); print(", ".join(f"{k} {p.get(k)}" for k in ("cost_basis", "markup_pct", "seller_region", "currency")) + ", vat " + str((p.get("vat") or {}).get("rate")))' "$STORE/reference/pricing-policy.json" 2>&1)"
   else
     cp "$ROOT/store/pricing-policy.example.json" "$STORE/reference/pricing-policy.json" || return 1
-    log "${Y}created reference/pricing-policy.json from store/pricing-policy.example.json: dapi's own policy (EU seller, 21% VAT, 50% markup, full-plate cost).${N}"
+    log "${Y}created reference/pricing-policy.json from store/pricing-policy.example.json: 3DAPI's own policy (EU seller, 21% VAT, 50% markup, full-plate cost).${N}"
     log "${Y}review it before approving any price; every price proposal and the break-even floor come from it${N}"
   fi
 }

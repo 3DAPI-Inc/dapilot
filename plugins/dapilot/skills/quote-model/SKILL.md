@@ -1,6 +1,6 @@
 ---
 name: quote-model
-description: Prices one model through dapi's slicer by running the bundled quote script (upload, create, poll) and judging the outcome. Use as the quote stage after analysis.json exists. The slicer's verdict on printability is final; this skill never estimates a price.
+description: Prices one model through 3DAPI's slicer by running the bundled quote script (upload, create, poll) and judging the outcome. Use as the quote stage after analysis.json exists. The slicer's verdict on printability is final; this skill never estimates a price.
 allowed-tools: Read, Bash, Write
 ---
 
@@ -48,7 +48,7 @@ and `analysis.json`, and no `quote.json`.
 - `quote.pending.json` while a quote is in flight; the script owns it.
 
 ## Gate
-Auto. A quote is one slicer run on dapi and counts against the daily quote
+Auto. A quote is one slicer run on 3DAPI and counts against the daily quote
 limit; the script never creates a second quote for the same file.
 
 ## Failure
@@ -58,7 +58,7 @@ limit; the script never creates a second quote for the same file.
 
 ## Do not
 - Do not estimate, guess or compute a price. `unit_price` comes from dapi.
-- Do not call dapi routes yourself; only through `quote.py`.
+- Do not call 3DAPI routes yourself; only through `quote.py`.
 - Do not create a quote when one is pending. The script handles resumption.
 - Do not treat a slicer file error as transient to "try again". That wastes
   a slicer run and the daily limit.

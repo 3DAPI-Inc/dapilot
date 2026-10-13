@@ -8,7 +8,7 @@ reads the network; everything comes from three files:
   platform-fees.json    $DAPILOT_STORE_DIR/reference/platform-fees.json, else the
                         plugin copy next to research-comparables. Fee schedule
                         per platform and region.
-  quote.json            dapi's quote: the cost basis.
+  quote.json            3DAPI's quote: the cost basis.
 
 The model, per unit sold at item price P with the buyer paying shipping at cost:
 
@@ -89,7 +89,7 @@ def load_fees(policy: dict, path: str | None = None) -> tuple[dict, Path]:
 
 
 def unit_cost_basis(quote: dict, policy: dict, override: str | None = None) -> dict:
-    """Which dapi price is the unit cost: the one-off quote or the full-plate unit.
+    """Which 3DAPI price is the unit cost: the one-off quote or the full-plate unit.
 
     policy.cost_basis is "one_off" (the quote for one unit, what print-to-order
     costs) or "full_plate" (the unit price at max_per_plate from the batch

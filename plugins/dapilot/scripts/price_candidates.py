@@ -193,7 +193,8 @@ def p75_sellers(wd: Path, p75: float) -> tuple[dict | None, str | None]:
              if isinstance(c, dict) and _num(c.get("price")) is not None]
     if not comps:
         return None, "comparables.json has no priced comparables; (c) of the p75 rule cannot be judged"
-    at_or_above = [c for c in comps if float(c["price"]) + 1e-9 >= p75 and not c.get("outlier")]
+    # The band is per unit, so a comparable's unit_price (price when it has none) is what sits at or above p75.
+    at_or_above = [c for c in comps if float(c.get("unit_price") or c["price"]) + 1e-9 >= p75 and not c.get("outlier")]
     names = _shop_names(wd, at_or_above)
     weights = {}
     counts = {}
@@ -231,6 +232,26 @@ def _band_position(price: float, market: dict) -> str | None:
     return "below_p25" if price < p25 else "above_p75" if price > p75 else "within_p25_p75"
 
 
+def offer_of(viab: dict) -> dict:
+    """The unit of sale research decided (viability.json `offer`, market_stats.py offer_of): how many
+    printed units one purchase brings. A file from before 2026-10-12 has none and sells singles."""
+    o = viab.get("offer") if isinstance(viab.get("offer"), dict) else {}
+    u = o.get("units")
+    units = u if isinstance(u, int) and not isinstance(u, bool) and u > 0 else 1
+    return {"units": units, "source": o.get("source") or ("single" if units == 1 else "unknown"),
+            "modal_units": o.get("modal_units"), "modal_share": o.get("modal_share"),
+            "extras_common": o.get("extras_common") or [], "note": o.get("note")}
+
+
+def _scaled(viab: dict, market: dict, units: int) -> dict:
+    """The band at the unit of sale: what a buyer pays for the pack. market_stats.py writes it from the
+    unrounded unit prices (offer.market); a file without it is scaled from the per-unit quantiles."""
+    om = (viab.get("offer") or {}).get("market") if isinstance(viab.get("offer"), dict) else None
+    if isinstance(om, dict) and _num(om.get("median")) is not None:
+        return {k: _num(om.get(k)) for k in ("min", "p25", "median", "p75", "max") if _num(om.get(k)) is not None}
+    return {k: round(_num(market.get(k)) * units, 2) for k in ("min", "p25", "median", "p75", "max") if _num(market.get(k)) is not None}
+
+
 def generate(wd: Path, args) -> int:
     model, quote, viab, unit = build(wd, args)
     # No comparables is no competition, not no demand: price on cost alone. Only the market candidates drop
@@ -240,20 +261,33 @@ def generate(wd: Path, args) -> int:
     market = {} if no_market else (viab.get("market") if isinstance(viab.get("market"), dict) else {})
     basis = market.get("basis") or "unweighted"
     n = market.get("n")
-    median, p75 = _num(market.get("median")), _num(market.get("p75"))
-    cost = model.cost(unit)
+    # Since 2026-10-12 the band is per unit of sale and every candidate is the price of one
+    # purchase: `units` printed units (the market's modal pack, viability.json offer.units),
+    # costed at units x the unit cost, the fixed fees once. A single is units 1, as before.
+    offer = offer_of(viab)
+    units = offer["units"]
+    band = _scaled(viab, market, units) if market else {}
+    median, p75 = _num(band.get("median")), _num(band.get("p75"))
+    unit_cost = model.cost(unit)
+    cost = unit_cost * units
     floor = model.round_price(model.break_even(cost), "up")
+    pack = "" if units == 1 else f" for {units}"
 
     skipped = []
     raw = [("markup", model.round_price(model.markup_price(cost), "up"),
-            f"quote {unit:.2f} plus {model.markup * 100:.0f}% markup, rounded up")]
-    if no_market:
-        # With nothing to compare against, the lowest price that clears the minimum margin (and so the floor).
-        # Decided 2026-09-22: markup_pct alone lands on break-even once VAT and Etsy fees are counted.
+            f"cost {cost:.2f}{pack} ({unit:.2f} a unit) plus {model.markup * 100:.0f}% markup, rounded up")]
+    unreliable = viab.get("verdict") == "unreliable"
+    if no_market or unreliable:
+        # With nothing to compare against, or a band that is not evidence (one shop, no sales), the
+        # lowest price that clears the minimum margin (and so the floor). Decided 2026-09-22 for no
+        # market, extended to the unreliable band 2026-10-12: markup_pct alone lands on break-even
+        # once VAT and Etsy fees are counted, so without this an unreliable band had no candidate.
         m_price = model.round_price(model.price_for_margin_pct(cost, model.min_margin), "up")
         if abs(m_price - raw[0][1]) >= 0.005:
-            raw.append(("margin", m_price, f"no comparables: the lowest price at the {model.min_margin * 100:.0f}% "
-                                           f"minimum margin on a unit cost of {cost:.2f}, rounded up"))
+            why = "no comparables" if no_market else "the band is not evidence"
+            raw.append(("margin", m_price, f"{why}: the lowest price at the {model.min_margin * 100:.0f}% "
+                                           f"minimum margin on a cost of {cost:.2f}{pack}, rounded up"))
+    if no_market:
         skipped.append({"label": "median", "reason": f"no market: {viab.get('reason')}"})
     elif not market:
         skipped.append({"label": "median", "reason": "viability.json has no market block"})
@@ -261,7 +295,7 @@ def generate(wd: Path, args) -> int:
         skipped.append({"label": "median", "reason": "viability.json market has no median"})
     else:
         raw.append(("median", model.round_price(median, "nearest"),
-                    f"market median of {n} comparables, {median:.2f}, {basis} band, rounded"))
+                    f"market median of {n} comparables, {median:.2f}{pack}, {basis} band, rounded"))
     if no_market:
         skipped.append({"label": "p75", "reason": f"no market: {viab.get('reason')}"})
     elif not market:
@@ -272,17 +306,17 @@ def generate(wd: Path, args) -> int:
         p75_price = model.round_price(p75, "nearest")
         same = [label for label, price, _ in raw if abs(price - p75_price) < 0.005]
         if same:
-            skipped.append({"label": "p75", "reason": f"market p75 {p75:.2f} rounds to {p75_price:.2f}, "
+            skipped.append({"label": "p75", "reason": f"market p75 {p75:.2f}{pack} rounds to {p75_price:.2f}, "
                                                       f"the same price as the {' and '.join(same)} candidate"})
         else:
-            raw.append(("p75", p75_price, f"market p75 of {n} comparables, {p75:.2f}, {basis} band, rounded"))
+            raw.append(("p75", p75_price, f"market p75 of {n} comparables, {p75:.2f}{pack}, {basis} band, rounded"))
 
     candidates, rejected = [], []
-    unreliable = viab.get("verdict") == "unreliable"
     for label, price, how in raw:
         pt = model.point(label, price, cost, how=how,
                          vs_median=round(price / median, 2) if median else None,
-                         position_in_band=_band_position(price, market))
+                         position_in_band=_band_position(price, band),
+                         units=units, per_unit=round(price / units, 2))
         if unreliable and label in ("median", "p75"):
             pt["rejected_because"] = "unreliable_band"
             pt["band_reason"] = market.get("verdict_reason")
@@ -301,7 +335,7 @@ def generate(wd: Path, args) -> int:
     if p75 is None:
         sellers, sellers_note = None, "viability.json market has no p75; (c) of the p75 rule cannot be judged"
     else:
-        sellers, sellers_note = p75_sellers(wd, float(p75))
+        sellers, sellers_note = p75_sellers(wd, float(_num(market.get("p75"))))  # per unit, as the comparables are
         if sellers is not None and not any(c["label"] == "p75" for c in candidates):
             sellers_note = "p75 is not a candidate (see skipped and rejected); kept for the record"
 
@@ -310,6 +344,8 @@ def generate(wd: Path, args) -> int:
         "product": viab.get("product"),
         "currency": market.get("currency"),
         "quote_unit_price": round(unit, 2),
+        # Every candidate prices one purchase of offer.units printed units; per_unit on each point divides it back.
+        "offer": {**offer, "cost": round(cost, 2), "market": band or None},
         "cost_basis": args._cost_basis["basis"],
         "cost_bases": {
             "one_off": {"quote_unit_price": round(args._cost_basis["one_off"], 2),
@@ -319,12 +355,14 @@ def generate(wd: Path, args) -> int:
                            "max_per_plate": args._cost_basis["max_per_plate"],
                            "plate_discount_pct": args._cost_basis["plate_discount_pct"]},
         },
-        "unit_cost": round(cost, 2),
+        "unit_cost": round(unit_cost, 2),
+        "offer_cost": round(cost, 2),
         "floor": floor,
-        "floor_rule": "break-even (cost + fees + VAT owed) rounded up to the policy ending; a price below it is refused by --check for any author",
+        "floor_rule": "break-even (cost of the offer + fees + VAT owed) rounded up to the policy ending; a price below it is refused by --check for any author",
         "min_margin_pct": model.min_margin,
         "min_margin_rule": "candidates under this margin are rejected for the model; a person may still choose one with an override block",
-        "market": {**{k: market.get(k) for k in ("n", "min", "p25", "median", "p75", "max")}, "basis": basis},
+        "market": {**{k: market.get(k) for k in ("n", "min", "p25", "median", "p75", "max")}, "basis": basis,
+                   "price_basis": market.get("price_basis") or "per_listing", "offer": band or None},
         "candidates": candidates,
         "rejected": rejected,
         "skipped": skipped,
@@ -337,7 +375,7 @@ def generate(wd: Path, args) -> int:
     if candidates:
         dst = Path(args.out) if args.out else wd / "price.candidates.json"
         dst.write_text(json.dumps(out, indent=2))
-        print(json.dumps({"ok": True, "out": str(dst), "floor": floor, "basis": basis,
+        print(json.dumps({"ok": True, "out": str(dst), "floor": floor, "basis": basis, "units": units,
                           "candidates": [(c["label"], c["price"], c["margin_pct"]) for c in candidates],
                           "rejected": [(c["label"], c["price"], c["rejected_because"]) for c in rejected],
                           "skipped": [s["label"] for s in skipped],
@@ -347,7 +385,7 @@ def generate(wd: Path, args) -> int:
                      "does not clear the floor" if unreliable else "no candidate clears break-even and the minimum margin")
     dst = wd / "price.rejected.json"
     dst.write_text(json.dumps(out, indent=2))
-    print(json.dumps({"ok": False, "out": str(dst), "reason": out["reason"], "floor": floor,
+    print(json.dumps({"ok": False, "out": str(dst), "reason": out["reason"], "floor": floor, "units": units,
                       "rejected": [(c["label"], c["price"], c["rejected_because"]) for c in rejected]}))
     return 2
 
@@ -367,13 +405,24 @@ def check(wd: Path, args) -> int:
     price = chosen.get("price")
     if not isinstance(price, (int, float)) or price <= 0:
         die("price.json has no positive `price`")
-    cost = model.cost(unit)
-    floor = model.round_price(model.break_even(cost), "up")
-    errors = []
-    if price + 1e-9 < floor:
-        errors.append(f"price {price:.2f} is below the hard floor {floor:.2f} (break-even); refused for any author")
-    listed = [c["price"] for c in cands.get("candidates", [])]
     override = chosen.get("override")
+    errors = []
+    # The price is for one purchase of offer.units printed units. The model copies the units from the
+    # candidates; a person may sell a different pack with an override block, and the floor then moves with it.
+    units = offer_of(viab)["units"]
+    o = chosen.get("offer")
+    chosen_units = o.get("units") if isinstance(o, dict) else None
+    if isinstance(chosen_units, int) and not isinstance(chosen_units, bool) and chosen_units > 0 and chosen_units != units:
+        if isinstance(override, dict) and override.get("by") and override.get("reason"):
+            units = chosen_units
+        else:
+            errors.append(f"price.json offer.units {chosen_units} differs from the market's unit of sale {units}; "
+                          "only a person may change the pack, with an override block")
+    cost = model.cost(unit) * units
+    floor = model.round_price(model.break_even(cost), "up")
+    if price + 1e-9 < floor:
+        errors.append(f"price {price:.2f} is below the hard floor {floor:.2f} (break-even{'' if units == 1 else f' for {units}'}); refused for any author")
+    listed = [c["price"] for c in cands.get("candidates", [])]
     if not any(abs(price - p) < 0.005 for p in listed):
         if isinstance(override, dict) and override.get("by") and override.get("reason"):
             note = f"price {price:.2f} is not a candidate; accepted on override by {override['by']}"
@@ -385,6 +434,7 @@ def check(wd: Path, args) -> int:
     if chosen.get("currency") and cands.get("currency") and chosen["currency"] != cands["currency"]:
         errors.append(f"currency {chosen['currency']} differs from candidates' {cands['currency']}")
     result = {"ok": not errors, "price": price, "floor": floor, "candidates": listed,
+              "units": units, "per_unit": round(price / units, 2), "offer_cost": round(cost, 2),
               "margin": round(model.margin(price, cost), 2), "margin_pct": model.margin_pct(price, cost) and round(model.margin_pct(price, cost), 3),
               "errors": errors, "note": note}
     print(json.dumps(result))

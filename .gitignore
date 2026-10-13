@@ -38,5 +38,10 @@ dist/
 /store/etsy_token*.json
 /store/social/
 /store/products/
+/store/integrations.json
+/store/integrations.etsy-login.log
 /intake/
 test-runs/
+
+# Marketing material: the LinkedIn film and its music, fonts and shots (170 MB). Not part of the product.
+/marketing/

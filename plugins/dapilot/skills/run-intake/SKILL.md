@@ -1,8 +1,8 @@
 ---
 name: run-intake
-description: Starts an intake run over a folder of model files, acting as director for the catalogue department. A person starts it; it spawns catalogue-lead and writes runs/<id>/report.md.
+description: Starts an intake run over a folder of model files, acting as director for the catalogue department. A person starts it; it spawns catalogue-lead and writes report.md in the run's directory under runs/.
 disable-model-invocation: true
-argument-hint: <folder> [run-id]
+argument-hint: "[folder] [run-id]"
 allowed-tools: Read, Write, Bash, Agent(dapilot:catalogue-lead)
 ---
 

@@ -13,8 +13,12 @@ A brief with `stage: price`. The work dir has `quote.json`,
 
 ## Inputs
 - `price.candidates.json`, written by step 2: the only prices this skill may
-  choose from, `skipped` with its reasons, and `p75_sellers` (who holds the
-  weight at or above the p75)
+  choose from, `skipped` with its reasons, `p75_sellers` (who holds the
+  weight at or above the p75), and `offer`: the unit of sale. Every
+  candidate is the price of one purchase of `offer.units` printed units
+  (the market's usual pack, six coasters; one for most products), costed
+  at `offer.cost`, and carries `per_unit`. The band in `market` is per
+  unit; `market.offer` is the same band at the pack
 - `comparables.json`: the listings, their prices, sales, favourites, shop
   and market weight (estimated units sold per day, from the shop's recent
   reviews; `sales_est` shows the reviews and window behind it), heaviest
@@ -59,11 +63,13 @@ with a message when it is missing; pass it on.
    Which case applies is read from the candidates, in this order:
    - `verdict` is `unreliable`: the script has already put `median` and
      `p75` under `rejected` with `unreliable_band` and `band_reason`, so
-     `markup` is the only candidate there can be. Propose it with position
-     `cost_anchored` and a rationale that repeats `band_reason`: the band
-     was one shop's price, or nobody is known to buy, or too few listings
-     remained once clones were folded. No `markup` candidate means the
-     script wrote `price.rejected.json`; step 2 covers it.
+     only `markup` and `margin` (the lowest price at the minimum margin,
+     listed since 2026-10-12 for this case as for no market) can stand.
+     Propose the lowest of them with position `cost_anchored` and a
+     rationale that repeats `band_reason`: the band was one shop's price,
+     or nobody is known to buy, or too few listings remained once clones
+     were folded. Neither listed means the script wrote
+     `price.rejected.json`; step 2 covers it.
    - `market.thin` is true: `markup` when it is a candidate. Otherwise the
      `median` when it is one, otherwise the sole candidate. The rationale
      says the band is thin, as printed. A thin band never picks `p75` over
@@ -82,12 +88,16 @@ with a message when it is missing; pass it on.
    ```json
    {"price": 19.99, "currency": "USD", "candidate": "p75",
     "position": "premium",
+    "offer": {"units": 1},
     "rationale": "three sentences: what the comparables sell at and how well, what ours has or lacks, which of (a) (b) (c) held or failed and why this candidate",
     "runner_up": {"candidate": "median", "price": 13.99, "why_not": "one sentence"},
     "floor": 8.99, "verdict": "viable"}
    ```
-   `price` is copied from the candidate, never typed. `runner_up` is null
-   when there was one candidate.
+   `price` is copied from the candidate, never typed; `offer.units` is
+   copied from the candidates file, and when it is more than one the
+   rationale's first sentence says what one purchase is ("a set of six at
+   24.99, 4.17 a coaster"), so the person approving reads the pack before
+   the number. `runner_up` is null when there was one candidate.
 4. Run `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/price_candidates.py --workdir $WORKDIR --check`.
    Exit 0: continue. Any other exit: delete `price.json`, return `ok:false`
    with the check's `errors` as the reason. Do not adjust the price to pass.
@@ -106,7 +116,7 @@ with a message when it is missing; pass it on.
 ## Gate
 Auto to write the proposal. A person approves or overrides it afterwards,
 which writes `price.approved.json`; the design stage requires that file, so
-the proposal alone starts nothing. Nothing here touches dapi or Etsy.
+the proposal alone starts nothing. Nothing here touches 3DAPI or Etsy.
 
 ## Failure
 - Missing `DAPILOT_STORE_DIR` or the policy file: script exits 1; `ok:false`.
@@ -125,6 +135,9 @@ the proposal alone starts nothing. Nothing here touches dapi or Etsy.
 - Do not write a price that is not in `candidates`. Not rounded, not
   averaged, not "a bit above". The check will refuse it.
 - Do not write an `override` block. Only a person does, by hand.
+- Do not change `offer.units`. The pack is the market's, decided by
+  `market_stats.py`; a person who wants to sell singles of a set product
+  writes another `units` with an override block, and the floor follows.
 - Do not compute margins, break-even, shares or a spread. Read them; thin
   comes from `market.thin` and nowhere else.
 - Do not pick the higher candidate because it earns more. When `median`
