@@ -8,17 +8,25 @@ user-invocable: false
 
 ## Gates
 
-Every action is at one of three levels. The level is set per operation in
-the repo and never changes at runtime.
+There is one approval in dapilot: a person approves the sale price. It is
+given at the gate (`/dapilot:review`, or the console), it is recorded as
+`price.approved.json`, and it authorises everything after it: the photos,
+the paid lifestyle assets within `design.usd_cap_per_item`, the listing
+text, and publishing in the mode set on the Settings tab (`publish.mode`:
+live or sandbox). Nothing before the price needs an approval and nothing
+after it asks for one again.
 
-| Level | Meaning | Where it is set |
-|---|---|---|
-| auto | do it, log it | default for reads; listed mutating operations in `GATES` of `scripts/dapi.py` |
-| propose | write the exact intended action to the work dir, return `needs_human`, stop | unlisted mutating operations; every stage marked `gate: propose` |
-| never | you do not have the tool | anything absent from your agent file |
+So: never ask a person whether to run a stage, spend within a cap, or go on
+after the price. Do not describe a step as something to approve. The only
+reason to stop with `needs_human` is a decision no stage owns, and that
+should be rare: a missing credential (point at `/dapilot:config`), an input
+that is not a model file, a deletion.
 
-Never pass `--confirm` to any script. A person does that, from the report.
-Never change a gate, a stage table, a budget, or an agent file during a run.
+Operations on 3DAPI that create an order, pay, or change an order's status
+are not part of intake; `GATES` in `scripts/dapi.py` keeps them at
+`propose` for the day a skill needs them. Never pass `--confirm` to a
+script. Never change a gate, a stage table, a budget, or an agent file
+during a run.
 
 ## No deletion
 
@@ -69,6 +77,8 @@ deletion, return `needs_human` with the path and the reason.
 
 ## When in doubt
 
-Stop and return `needs_human` with a one-line question. A blocked stage
-costs nothing. A wrong publish, payment or status change costs a person's
-afternoon.
+If a stage's inputs are there and its script runs, do it; the price gate
+upstream already said yes. Return `needs_human` only for a decision no
+stage owns, with a one-line question, and never for "may I spend", "may I
+make the design" or "is this price right": the script caps the spend, the
+stage table orders the work, and the person set the price.

@@ -265,9 +265,10 @@ in the skill, per action, and enforced by what tools and flags the worker has.
 
 | Level | Meaning | Examples |
 |---|---|---|
-| Auto | Do it, log it. | analyse, render, request a quote, poll a quote, write drafts to disk, read orders |
-| Propose | Write the full intended action to disk, return `needs_human`, stop. | create a design, set a price, transition an order status, record items made |
-| Never | The worker does not have the tool. | pay an order, delete anything, contact a customer |
+| Auto | Do it, log it. | every intake stage: analyse, quote, render, research, propose the price, design within the fal cap, copy, publish in the configured mode. All of it before the price needs no approval; all of it after runs on the price approval |
+| Gate | A person decides, once. | the sale price: `/dapilot:review` or the console writes `price.approved.json`; nothing paid or public runs without it, nothing asks again after it |
+| Propose | Write the full intended action to disk, return `needs_human`, stop. | 3DAPI orders: create, pay, transition a status, record items made (not part of intake) |
+| Never | The worker does not have the tool. | delete anything, contact a customer |
 
 Enforcement, concretely:
 

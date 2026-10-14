@@ -472,3 +472,32 @@ each carries its own date.
   rejected value, config written with the template's other keys intact,
   status line; publish script in sandbox on a fake work dir, cached rerun,
   and a live dry run that proceeds past the sandbox file.
+- **One gate, asked in the session (2026-10-14).** The person's approvals
+  during a run are now exactly one: the sale price. `scripts/approve_price.py`
+  is the console's `POST /jobs/{id}/price` without the console: `pending`
+  scans `work/` and returns every item with a proposal and no answer
+  (proposal, candidates in the script's order with the proposed one first,
+  floor, pack, market), plus `running`, `rejected`, `declined` and
+  `before_price`; `--wait` polls until something is pending, or nothing
+  runs and nothing has changed for 30 s, or the seconds run out. `approve`
+  takes a candidate or a typed price, runs `price_candidates.py --check` on
+  an override, refuses below the floor with the floor in the JSON, writes
+  `price.approved.json`, files the product record and starts
+  `run_intake.py --items <hash>` detached. `decline` writes
+  `design.blocked.json`. New command `/dapilot:review` turns `pending` into
+  one AskUserQuestion per item: candidates as options (price, currency,
+  label; the proposal first and marked Recommended; margin and the
+  script's `how` as description), `Not now` last, the Other field for a
+  typed price; a refusal is re-asked once with the floor. Quickstart holds
+  the same gate after it starts a run (`pending --wait 540`, three empty
+  waits, then it points at review). Text brought in line: guardrails'
+  Gates and When-in-doubt sections, hierarchy's needs_human rule, the
+  guardrail table in `docs/agents.md`, two rules in CLAUDE.md, and a note
+  on the in-session `run-intake` skill saying that its "approve this
+  command" prompts are the session's permission mode, which the headless
+  director never shows (its workers run with permissions skipped). Tested
+  on a fixture work dir: pending, immediate return of `--wait`, refusal at
+  5.00 against an 8.99 floor, override to the p75 candidate with the
+  proposal kept inside price.json, cached second approve, decline and its
+  listing. The product record step reports a note when it fails, which it
+  did on the fixture for lack of a source file.

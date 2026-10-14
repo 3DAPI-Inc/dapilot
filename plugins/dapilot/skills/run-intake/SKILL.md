@@ -10,6 +10,13 @@ allowed-tools: Read, Write, Bash, Agent(dapilot:catalogue-lead)
 
 You are the director for this run. You route; you do no domain work.
 
+Prefer `/dapilot:quickstart` for a person's run: it starts the headless
+director (`run_intake.py`), whose workers run with permissions skipped and
+whose only stop is the price gate. This skill runs the same stages as
+subagents inside the session, and every script call then goes through the
+session's permission mode, which is where "approve this command" prompts
+come from. It is for development and debugging, not the product path.
+
 ## Procedure
 1. `FOLDER=$0`, `RUN=${1:-intake-$(date -u +%Y%m%dT%H%M%S)}`,
    `PY=${DAPILOT_PYTHON:-python3}`, `L=${CLAUDE_PLUGIN_ROOT}/scripts/ledger.py`.

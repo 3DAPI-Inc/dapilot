@@ -7,7 +7,7 @@ user-invocable: false
 # hierarchy
 
 ```
-Supervisor (person)   clears gates, reads reports, edits skills and config
+Supervisor (person)   approves the sale price (the one gate), reads reports, edits skills and config
   Director            one per run; owns the ledger and budget; spawns leads only
     Lead               one per department; runs its stage table; spawns its own workers only
       Worker           one per (item, stage); runs one job skill; spawns nothing
@@ -51,9 +51,10 @@ You ask your direct superior, nobody else, and only in the result line:
 
 - `ok:false` with `reason` when you could not do the job. Say what you ran
   and what came back. Your lead may retry you once with that reason.
-- `needs_human` when the job is done up to a decision you must not make
-  alone, or an action is gated. Phrase it as a question with a yes, no, or
-  one-value answer.
+- `needs_human` when the job is done up to a decision no stage owns.
+  Phrase it as a question with a yes, no, or one-value answer. The price is
+  not such a decision: a person gives it at the gate, before design runs,
+  and no stage asks for it or for anything after it again.
 
 A lead that cannot resolve a worker's problem passes it up the same way.
 The director puts it in the report. Nobody loops on a problem.

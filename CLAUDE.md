@@ -117,7 +117,7 @@ sell, and nothing after the price runs until a person approves it.
 | preview | worker, `preview-model` | source, analysis | `renders/draft_00.png` and 7 more | `render_model.py`: 8-frame Blender draft turntable. No judgement |
 | research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict |
 | price | worker, `propose-price` | quote, comparables, viability, drafts | `price.json` | `price_candidates.py` computes the candidates and the break-even floor; the model picks one; `--check` refuses anything below the floor |
-| gate | a person | `price.json` | `price.approved.json` | Approve or override on the job page (`POST /jobs/{id}/price`, floor enforced). Files the product record and starts the rest |
+| gate | a person | `price.json` | `price.approved.json` | The one approval. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
 | design | `product-designer`, `design-product` | source, analysis, drafts, price, approval, comparables | `design.json`, `design/` | The model names the product and writes one brief; `design_product.py` captures stills and makes four lifestyle photos and one clip on fal; the model reviews the contact sheet and rejects what misrepresents the product |
 | copy | worker, `write-listing` | design, approval, comparables, quote | `listing.json`, `social/posts.json` | One draft of Etsy title, description, tags, materials and social captions; `listing_copy.py check` validates and splits it |
 | publish | script, no worker | listing, design, approval | `published.json`, `publish.json` | `publish_product.py`: Etsy draft, media upload, activate (0.20 USD), then every enabled social post |
@@ -308,9 +308,13 @@ Rules that follow from the split:
 - **State lives on disk, keyed by content hash.** Skills talk to each other
   through files under `work/<sha256>/`, never through conversation context.
   The same upload must never be analysed, rendered or quoted twice.
-- **Anything that spends money or changes platform state goes through a
-  gate.** See the guardrail table in `docs/agents.md`. Today the one gate is
-  the price approval; everything after it is authorised by that approval.
+- **One gate: the price.** A person approves the sale price, at
+  `/dapilot:review` (an AskUserQuestion per item, built from
+  `approve_price.py pending`; the script enforces the floor and writes
+  `price.approved.json`) or in the console. Nothing before it asks for
+  approval and nothing after it asks again: design spends within its cap,
+  copy writes, publish does what `publish.mode` says. See the guardrail
+  table in `docs/agents.md`.
 
 ## Shop processes
 
@@ -537,8 +541,10 @@ constructor parameter properties.
   script should be a script.
 - Renders, analysis and quotes are cacheable on the content hash of the model
   file. The same upload must not be processed twice.
-- A skill never sets a price, publishes a design, or changes an order state
-  without passing a gate. Proposing is fine. Doing is not.
+- A skill never sets a price. It proposes; a person approves at the gate,
+  and that one approval authorises the rest of intake. No stage asks a
+  person for anything else: not to spend within a cap, not to make the
+  design, not to publish. Order-side changes on 3DAPI stay at `propose`.
 - One skill, one decision. If a SKILL.md describes two jobs, split it.
 - Never guess a 3DAPI route. Read `public-api/v1`. If it is not there, add it
   there.
