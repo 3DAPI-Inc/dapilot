@@ -34,7 +34,7 @@ stage are scripts. Research, price, design and copy are Claude workers, one
 stage on one item each. The console (`frontend/`, `server/app.py`) uploads,
 shows every stage's output, holds the price gate and files approved products
 into the catalogue. `scripts/dev/shop.sh` sets a fresh machine up and runs the
-whole thing from one terminal. `/dapilot:integrate` (2026-10-13, a command in `commands/`, not a skill) opens a local
+whole thing from one terminal. `/dapilot:config` (2026-10-13, a command in `commands/`, not a skill) opens a local
 Integrations page, one table in 3dapi's glacier-and-navy palette with a row
 per integration and columns for status, values and actions, where a person
 pastes each credential (3DAPI, Etsy, fal, Claude, Instagram) with the steps

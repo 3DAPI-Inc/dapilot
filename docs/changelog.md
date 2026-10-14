@@ -309,7 +309,7 @@ each carries its own date.
   slice preview research price design copy publish`). The browser no longer
   calls dapi. Review is a placeholder; approve and catalogue are real since
   2026-09-17.
-- **Integrations page (2026-10-13).** `/dapilot:integrate` runs
+- **Integrations page (2026-10-13).** `/dapilot:config` runs
   `integrate.py serve`: a stdlib HTTP server on 127.0.0.1 that opens one page
   listing the current integrations (3DAPI, Etsy, fal, Claude for headless
   workers, Instagram API as optional), the steps to obtain each value on the
@@ -399,3 +399,14 @@ each carries its own date.
   taxonomy. The winget branch is written against the package ids
   (BlenderFoundation.Blender, Google.Chrome, Gyan.FFmpeg) and awaits a run
   on a Windows machine.
+- **config opens the page, quickstart checks and starts (2026-10-14).** The
+  Integrations page is `/dapilot:config` (`integrate.py serve --wait`: opens
+  the page, waits while it is open, prints the table when it closes).
+  `/dapilot:quickstart [file or folder]` seeds the store, runs `setup_env.py`
+  (and `shop.sh setup` from a checkout on macOS or Linux), verifies every
+  account against its platform, prints the table, and stops naming the
+  required accounts that are not connected; optional ones such as Instagram
+  never block. With a file or folder and everything connected it starts
+  `run_intake.py` on it in the background under `runs/quickstart-<time>/`
+  and says so; the run stops at the price gate as before. The
+  `/dapilot:integrate` name is gone.

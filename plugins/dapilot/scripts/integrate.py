@@ -489,15 +489,15 @@ def state() -> dict:
             fields.append({"key": f["key"], "label": f["label"], "secret": f["secret"], "optional": f.get("optional", False),
                            "set": bool(v), "value": (v if v and not f["secret"] else None), "placeholder": f.get("placeholder", "")})
         res = results.get(integ["id"], {})
-        required_set = all(fl["set"] for fl in fields if not fl["optional"])
+        any_set = any(fl["set"] for fl in fields)
         if res.get("ok"):
             status = "done"
-        elif res and required_set:
+        elif not any_set:
+            status = "empty"        # nothing entered: not connected, whatever an earlier check said
+        elif res.get("checked_at"):
             status = "failed"
-        elif any(fl["set"] for fl in fields):
-            status = "untested"
         else:
-            status = "empty"
+            status = "untested"
         rows.append({"id": integ["id"], "name": integ["name"], "required": integ["required"], "hidden": integ.get("hidden", False), "icon": integ.get("icon"), "what": integ["what"],
                      "steps": integ["steps"], "fields": fields, "actions": integ.get("actions", []),
                      "status": status, "result": {k: res.get(k) for k in ("ok", "summary", "detail", "checked_at", "fields", "action")}})
@@ -755,6 +755,20 @@ def stop_page(port: int, token: str) -> None:
         time.sleep(0.2)
 
 
+WAIT_BUDGET = 540   # seconds a --wait may hold a command: the Bash tool allows 600
+
+
+def wait_then_status(port: int) -> int:
+    """Hold until the page on `port` is closed (Done, or the tab closed), then print the table."""
+    deadline = time.time() + WAIT_BUDGET
+    while time.time() < deadline:
+        if our_page(port) is None:
+            return status(argparse.Namespace(json=False, all=False))
+        time.sleep(2)
+    print("The page is still open. Say when you are done and the connections will be checked again.")
+    return 0
+
+
 def serve(args) -> int:
     store = store_dir()
     store.mkdir(parents=True, exist_ok=True)
@@ -765,8 +779,9 @@ def serve(args) -> int:
             if found and found[0] == plugin_version():
                 if not args.no_browser:
                     webbrowser.open(url)
-                print(json.dumps({"ok": True, "url": url, "store": str(store), "note": "the page was already open; reused"}))
-                return 0
+                print(json.dumps({"ok": True, "url": url, "store": str(store), "note": "the page was already open; reused"}) if not args.wait
+                      else f"Your Integrations page is open: {url}\nFill in each account there, then close the page or press Done.\n", flush=True)
+                return wait_then_status(port) if args.wait else 0
             if found:
                 stop_page(port, found[1])   # an earlier version's page: replaced by this one on the same port
             child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve", "--foreground", "--port", str(port)]
@@ -776,9 +791,11 @@ def serve(args) -> int:
             time.sleep(0.6)
             if child.poll() is None:
                 print(json.dumps({"ok": True, "url": url, "store": str(store),
-                                  "note": "the page runs until its tab is closed; then run `integrate.py status`"}))
-                return 0
-        print(json.dumps({"ok": False, "reason": f"ports {args.port} to {args.port + 5} are all in use"}))
+                                  "note": "the page runs until its tab is closed; then run `integrate.py status`"}) if not args.wait
+                      else f"Your Integrations page is open: {url}\nFill in each account there, then close the page or press Done.\n", flush=True)
+                return wait_then_status(port) if args.wait else 0
+        print(json.dumps({"ok": False, "reason": f"ports {args.port} to {args.port + 5} are all in use"}) if not args.wait
+              else f"The page could not start: ports {args.port} to {args.port + 5} are all in use. Try: integrate.py serve --wait --port {args.port + 6}")
         return 2
     Handler.token = secrets.token_urlsafe(24)
     try:
@@ -855,6 +872,7 @@ def main() -> int:
     s.add_argument("--port", type=int, default=DEFAULT_PORT)
     s.add_argument("--no-browser", action="store_true")
     s.add_argument("--foreground", action="store_true", help="run in this process instead of detaching")
+    s.add_argument("--wait", action="store_true", help="after opening the page, wait until it is closed, then print the status table")
     st = sub.add_parser("status")
     st.add_argument("--json", action="store_true")
     st.add_argument("--all", action="store_true", help="every integration, hidden and unset optional ones included")

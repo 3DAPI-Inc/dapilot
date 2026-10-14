@@ -2,7 +2,7 @@
 
 **Decided 2026-10-13, after review:** the scope is reduced to what section 1
 calls the `key` mechanism, plus Etsy's existing authorization. Built the same
-day: `/dapilot:integrate` opens a local page (`scripts/integrate.py serve`)
+day: `/dapilot:config` opens a local page (`scripts/integrate.py serve`)
 listing the current integrations with the steps to obtain each value and one
 field per value; the page posts to a local server that writes `store/.env`,
 verifies each value against its platform with a free request, and records the
@@ -22,7 +22,7 @@ inline where a fact comes from outside the repo.
 The question this answers: a user installs dapilot and wants to connect their
 Etsy shop, their Instagram, their X and the rest. Today that is a developer
 portal per platform, a keystring pasted into `store/.env`, and an OAuth flow
-run from a terminal. The target is one command, `/dapilot:integrate`, or one
+run from a terminal. The target is one command, `/dapilot:config`, or one
 console page, where every platform is a Connect button: the user approves on
 the platform's consent page or signs in, and the row turns green. No key is
 typed into the agent. No secret enters the model's context.
@@ -51,7 +51,7 @@ To do, by a person:
 
 One page, one table. A row per platform with the account name, a status dot
 and phrase (connected, needs sign-in, expiring, not connected), and one
-button. The same table is what `/dapilot:integrate` prints and what
+button. The same table is what `/dapilot:config` prints and what
 `integrate.py status` returns as JSON.
 
 Connect does one of three things, and the user is not told which:
@@ -202,7 +202,7 @@ default it to false.
 `disable-model-invocation: true`, `argument-hint: <platform>`. Procedure:
 run `integrate.py describe` and show it, run `integrate.py connect`, run
 `integrate.py status` and show the table. The skill decides nothing. It
-exists so a user can type `/dapilot:integrate etsy` in a session and so the
+exists so a user can type `/dapilot:config etsy` in a session and so the
 behaviour is the same from the console. Absolute script paths are substituted
 into the skill text, because `${CLAUDE_PLUGIN_ROOT}` is not exported to Bash
 commands (documented; it explains the empty variable in the headless workers
@@ -325,7 +325,7 @@ Each step is a commit with a done test. Estimates are for one person.
 | I0 | Cowork test: open a URL, catch a loopback redirect, show a headed Chrome window from a plugin script | a written yes or no for each, in this document | hours |
 | I1 | Token hygiene: revoke and untrack the committed token, remove the browser key read, stop `etsy_auth.py token` printing | `git ls-files store/` shows only example files; `grep -r VITE_DAPI_API_KEY frontend/src` is empty | hours |
 | I2 | Contract: `login` and `logout` abstract, `mechanism`, default `refresh`; `OAuthSession` lifted from `etsy_auth.py`; `etsy` adapter; `enabled` defaults false everywhere | `etsy_auth.py login|refresh|whoami` behave as before through the new class; `social_post.py session status` lists Etsy | 1 day |
-| I3 | `integrate.py` with `status`, `connect`, `disconnect`, `set-key`, `describe`; the `integrations` config block; the `integrate` skill | from a fresh `store/`, `/dapilot:integrate etsy` ends with a green row and `etsy_listing.py shop` works, with no key in the transcript | 1 day |
+| I3 | `integrate.py` with `status`, `connect`, `disconnect`, `set-key`, `describe`; the `integrations` config block; the `integrate` skill | from a fresh `store/`, `/dapilot:config etsy` ends with a green row and `etsy_listing.py shop` works, with no key in the transcript | 1 day |
 | I4 | Hook guard in `hooks/hooks.json` plus the user-scope deny rules written by `integrate.py`; probe script that tries to read each protected path with each tool and expects refusal | the probe passes in a plain session and in a `claude -p` worker | half a day |
 | I5 | `BrowserSession` on CloakBrowser (pinned version, signature check, one concurrent session, scrubbed env, seed in the session JSON), with `instagram_web` as the first adapter: `login_url`, `home_url`, `logged_out_marker`, and the existing web uploader flow from the social plan | `integrate.py connect --platform instagram` opens a window, a person signs in, `status` says ok; `status` on a logged-out profile exits 4 | 2 to 3 days, the posting flow dominates |
 | I6 | Console: `/integrations` page and the four routes; `publish_product.py` records `needs_login`; the Social tab links to the page | every row's Connect works from the browser; a disconnected Instagram shows as needs sign-in on the job page instead of a failed step | 1 day |

@@ -80,7 +80,7 @@ def main() -> int:
                 p = Path(v) if os.path.isabs(v) else Path(cwd) / v
                 if protected(p, store) or protected(p, home_store):
                     print(f"{tool} on {v} refused: it holds credentials. Scripts use the file through --env; "
-                          f"people edit it on the Integrations page (/dapilot:integrate).", file=sys.stderr)
+                          f"people edit it on the Integrations page (/dapilot:config).", file=sys.stderr)
                     return 2
         if tool in ("Grep", "Glob") and not inp.get("path") and protected(Path(cwd), store):
             print(f"{tool} over the store dir refused: it holds credentials.", file=sys.stderr)
@@ -96,7 +96,7 @@ def main() -> int:
                 or any(re.search(t, stripped) for t in TEXT):
             print("Bash refused: the command names a credential file (store/.env, an Etsy token, a social session). "
                   "Pass it only as `--env <file>` to a plugin script; never read, print, copy or edit it. "
-                  "People change values on the Integrations page (/dapilot:integrate).", file=sys.stderr)
+                  "People change values on the Integrations page (/dapilot:config).", file=sys.stderr)
             return 2
     return 0
 

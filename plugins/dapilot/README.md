@@ -33,7 +33,7 @@ host project's `frontend/`, route `/studio`).
 
 Nothing falls back to a default host. Missing env is a hard error.
 
-The easy way to set these: `/dapilot:integrate` opens a local page
+The easy way to set these: `/dapilot:config` opens a local page
 (`scripts/integrate.py serve`, 127.0.0.1 only) that lists every integration
 with the steps to obtain each value and one field per value. The page writes
 `$DAPILOT_STORE_DIR/.env` (mode 0600), verifies each value against its
@@ -102,8 +102,8 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `research-comparables` | Finds the Etsy listings a model competes with, picks the true comparables, and writes the market band and our margin (`viability.json`). Needs Etsy credentials, no 3DAPI key. |
 | `propose-price` | Picks the sale price from the candidates `price_candidates.py` allows, with a rationale; the script's `--check` refuses anything below break-even or outside the candidates. Needs the store pricing policy. |
 | `run-intake` | Director skill for an interactive session; the headless equivalent is `scripts/run_intake.py`. |
-| `integrate` (command) | Opens the Integrations page where a person connects 3DAPI, Etsy, fal, Claude and Instagram; every value is verified against its platform and never passes through the model. `/dapilot:integrate status` only reports. |
-| `quickstart` (command) | First run: sets the computer up through `scripts/dev/shop.sh setup` when run from a checkout, prints the 3DAPI wordmark, opens the Integrations page on port 3106 and shows what is connected. Output is written for a person, not a developer. |
+| `config` (command) | Opens the Integrations page and waits while it is open; a person connects 3DAPI, Etsy, fal and optionally Instagram there, every value verified against its platform and never passing through the model. `/dapilot:config status` only reports. |
+| `quickstart` (command) | First run, or the start of a listing: seeds the store, sets the environment up on any system, checks every required account against its platform and stops with the names if one is not connected; with a model file or folder it starts the intake run, which stops at the price for approval. Output is written for a person. |
 
 ## Scripts
 
