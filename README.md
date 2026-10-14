@@ -7,7 +7,7 @@
 
 <p align="center">
   <!-- TAGLINE: one line, yours to write -->
-  <em>An agent that runs a 3D print shop on 3DAPI.</em>
+  <em>We know you like being lightning fast. We'll make you faster.</em>
 </p>
 
 <p align="center">
