@@ -13,6 +13,12 @@ In order, each step idempotent on its own files, so a rerun continues where the 
 
 and then published.json, whose existence completes the stage.
 
+`publish.mode` in store/config.json comes first. "live" (the default when the key is absent) runs the
+steps above. "sandbox" runs none of them: nothing is created on Etsy and nothing is posted, and
+published.json is written marked `sandbox` so the stage completes and the run ends. The Settings tab
+of /dapilot:config switches the mode. A sandbox published.json does not count as done once the mode
+is live: running this script again then publishes the item.
+
 The gate is upstream. A person approved the sale price (price.approved.json); since 2026-09-21
 that approval stands for everything that follows from it, which is why this script passes the
 approver's name to `activate` and `--confirm` to `post`. Either half can be switched back to a
@@ -80,11 +86,13 @@ def main() -> int:
     missing = [n for n in ("listing.json", "design.json", "price.approved.json") if not (wd / n).exists()]
     if missing:
         return emit({"ok": False, "reason": f"missing inputs: {missing}"}, 2)
-    if (wd / "published.json").exists():
-        return emit({"ok": True, "cached": True, "published": "published.json"})
-
     store_cfg = read(Path(store) / "config.json") or {}
     cfg = store_cfg.get("publish") or {}
+    mode = str(cfg.get("mode") or "live").lower()
+    sandbox = mode == "sandbox"
+    prev = read(wd / "published.json")
+    if prev is not None and not (prev.get("sandbox") and not sandbox):
+        return emit({"ok": True, "cached": True, "published": "published.json", **({"sandbox": True} if prev.get("sandbox") else {})})
     auto_activate, auto_post = cfg.get("auto_activate", True), cfg.get("auto_post", True)
     # A platform switched off in config (Instagram while its browser adapter is not built, 2026-09-23) is
     # skipped by name, not failed: the post stays a draft in social/posts.json for the Social tab.
@@ -95,6 +103,9 @@ def main() -> int:
     stale = bool(since and (approved.get("at") or "") < since)
     posts = (read(wd / "social" / "posts.json") or {}).get("posts") or []
 
+    if a.dry_run and sandbox:
+        return emit({"ok": True, "dry_run": True, "sandbox": True,
+                     "would": ["create nothing on Etsy and post nothing (publish.mode is sandbox)", "write published.json marked sandbox"]})
     if a.dry_run:
         pub = read(wd / "publish.json") or {}
         return emit({"ok": True, "dry_run": True, "would": [
@@ -114,6 +125,20 @@ def main() -> int:
         ok = code == 0 and res.get("ok", True) is not False
         steps.append({"step": name, "ok": ok, **{k: res[k] for k in ("listing_id", "state", "url", "post_id", "cached", "error", "reason") if k in res}})
         return ok
+
+    rec_p = Path(store) / "products" / f"{(read(wd / 'meta.json') or {}).get('sha256') or wd.name}.json"
+    if sandbox:
+        rec = read(rec_p)
+        if rec:
+            rec["storefront"] = {"platform": "etsy", "state": "sandbox", "listing_id": None, "url": None}
+            rec["updated_at"] = now()
+            rec_p.write_text(json.dumps(rec, indent=1, ensure_ascii=False) + "\n")
+        skipped = ["etsy draft", "etsy media", "etsy activate"] + [f"{p['platform']}.{p['format']}" for p in posts]
+        done = {"ok": True, "sandbox": True, "at": now(), "approved_by": by,
+                "etsy": {"listing_id": None, "state": "sandbox", "url": None}, "social": [], "skipped": skipped, "steps": []}
+        (wd / "published.json").write_text(json.dumps(done, indent=1, ensure_ascii=False) + "\n")
+        return emit({"ok": True, "sandbox": True, "published": "published.json", "etsy": done["etsy"], "posted": [], "failed": [],
+                     "skipped": skipped, "note": "publish.mode is sandbox: nothing was created on Etsy and nothing was posted"})
 
     env = ["--env", str(Path(store) / ".env")] if (Path(store) / ".env").exists() else []
     code, res = run("etsy_listing.py", *env, "draft", "--workdir", str(wd))
@@ -138,7 +163,6 @@ def main() -> int:
         skipped.append("etsy activate")
 
     pub = read(wd / "publish.json") or {}
-    rec_p = Path(store) / "products" / f"{(read(wd / 'meta.json') or {}).get('sha256') or wd.name}.json"
     rec = read(rec_p)
     if rec:
         rec["storefront"] = {"platform": "etsy", "state": pub.get("state"), "listing_id": pub.get("listing_id"), "url": pub.get("url")}

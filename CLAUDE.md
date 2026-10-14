@@ -194,6 +194,12 @@ Resume button picks up every work dir with a stage left and no live worker.
 
 ### Publish and social
 
+- `publish.mode` in store config comes first: `live` publishes, `sandbox`
+  runs every stage but creates nothing on Etsy and posts nothing, writing
+  `published.json` marked `sandbox` so the run completes. The Settings tab of
+  `/dapilot:config` switches it; the template seeds new stores as sandbox, a
+  store without the key is live. A sandbox `published.json` is not cached
+  once the mode is live: running `publish_product.py` again publishes.
 - The person's approval of the price is the gate for all of it.
   `publish.auto_activate` and `publish.auto_post` in config hand either half
   back to a person; `publish.auto_since` keeps an older approval from going

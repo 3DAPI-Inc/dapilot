@@ -1,5 +1,5 @@
 ---
-description: Open the Integrations page to connect 3DAPI, Etsy, fal and Instagram; or `status` to report what is connected
+description: Open the Integrations page to connect 3DAPI, Etsy, fal and Instagram and to set publishing to Live or Sandbox; or `status` to report what is connected
 argument-hint: "[status]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/*)
 ---
@@ -19,11 +19,18 @@ wherever `python3` is not found, use `python`.
    `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/integrate.py status`
    and show it as a two-column table, Integration and Status, one row per
    line with the phrase the script printed and, when it printed one, the
-   name after it. Nothing longer. Stop there.
+   name after it. The last line, `Publishing: live` or `Publishing:
+   sandbox`, goes under the table as one plain sentence. Nothing longer.
+   Stop there.
 2. Otherwise run, with a Bash timeout of 600000 ms:
    `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/integrate.py serve --wait`
    It opens the Integrations page in the browser, waits while the page is
    open, and prints the table once the person closes it or presses Done.
+   The page has two tabs: Integrations, and Settings, where publishing is
+   switched between Live (the listing is created on Etsy when a price is
+   approved) and Sandbox (every stage runs, nothing reaches Etsy or a social
+   platform). If the person asks how to stop listings going out, or to turn
+   publishing on, point them to that tab; do not edit the config yourself.
    Reply with its sentences as plain text and the table as above. Add
    nothing. If it says the page is still open, wait for the person to say
    they are done, then run `status` as in step 1.

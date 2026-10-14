@@ -131,7 +131,8 @@
   }
  },
  "publish": {
-  "comment": "What the approval of a sale price sets off. false hands that step back to a person in the console.",
+  "comment": "mode: live creates the Etsy listing when a price is approved; sandbox runs every stage but never touches Etsy or a social platform (the Settings tab of /dapilot:config switches it; a store without the key is live). auto_activate and auto_post: what the approval of a sale price sets off in live mode; false hands that step back to a person in the console.",
+  "mode": "sandbox",
   "auto_activate": true,
   "auto_post": true,
   "auto_since": null

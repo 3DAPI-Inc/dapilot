@@ -143,6 +143,51 @@ def write_results(doc: dict) -> None:
     tmp.replace(p)
 
 
+# --------------------------------------------------------------------------- settings
+
+TEMPLATE_CONFIG = HERE.parent / "templates" / "config.example.json"
+PUBLISH_MODES = ("live", "sandbox")
+
+
+def config_path() -> Path:
+    return store_dir() / "config.json"
+
+
+def read_config() -> dict:
+    for p in (config_path(), TEMPLATE_CONFIG):
+        try:
+            doc = json.loads(p.read_text())
+            if isinstance(doc, dict):
+                return doc
+        except (OSError, ValueError):
+            continue
+    return {}
+
+
+def settings_state() -> dict:
+    """The settings the page shows. Only keys a person switches on the page; nothing secret."""
+    pub = read_config().get("publish") or {}
+    mode = str(pub.get("mode") or "live").lower()
+    return {"publish_mode": mode if mode in PUBLISH_MODES else "live"}
+
+
+def write_settings(changes: dict) -> dict:
+    """Apply the page's changes to the store's config.json, keeping every other key. A store with no
+    config yet starts from the plugin's template, as quickstart would seed it."""
+    doc = read_config()
+    if "publish_mode" in changes:
+        mode = str(changes["publish_mode"]).lower()
+        if mode not in PUBLISH_MODES:
+            raise ValueError(f"publish_mode must be one of {PUBLISH_MODES}")
+        doc.setdefault("publish", {})["mode"] = mode
+    cp = config_path()
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cp.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+    tmp.replace(cp)
+    return settings_state()
+
+
 # --------------------------------------------------------------------------- http helpers
 
 def http_json(method: str, url: str, headers: dict | None = None, body: bytes | None = None, timeout: int = 20):
@@ -501,7 +546,8 @@ def state() -> dict:
         rows.append({"id": integ["id"], "name": integ["name"], "required": integ["required"], "hidden": integ.get("hidden", False), "icon": integ.get("icon"), "what": integ["what"],
                      "steps": integ["steps"], "fields": fields, "actions": integ.get("actions", []),
                      "status": status, "result": {k: res.get(k) for k in ("ok", "summary", "detail", "checked_at", "fields", "action")}})
-    return {"store": str(store_dir()), "env_file": str(store_dir() / ".env"), "integrations": rows, "etsy_login": login_state()}
+    return {"store": str(store_dir()), "env_file": str(store_dir() / ".env"), "integrations": rows, "etsy_login": login_state(),
+            "settings": settings_state()}
 
 
 # --------------------------------------------------------------------------- the page
@@ -549,9 +595,20 @@ button.b:disabled{opacity:.45;cursor:default}
 .help{display:none;margin:12px 0 0;padding:12px 14px;background:var(--g50);border:1px solid var(--g200);border-radius:var(--radius-sm);font-size:13px}
 .open .help{display:block}.help ol{margin:0;padding-left:18px}.help li{margin:3px 0}.help a{color:var(--navy)}
 footer{display:flex;justify-content:space-between;align-items:center;margin-top:20px;color:var(--mute);font-size:13px}
+.tabs{display:flex;gap:2px;margin:-8px 0 20px;border-bottom:1px solid var(--g300)}
+.tab{font:inherit;font-size:13px;font-weight:500;padding:8px 14px;background:none;border:0;border-bottom:2px solid transparent;color:var(--mute);cursor:pointer;margin-bottom:-1px}
+.tab:hover{color:var(--navy)}.tab.on{color:var(--navy);border-bottom-color:var(--navy)}
+#settings{display:none}body.settings #settings{display:block}body.settings #list,body.settings footer #summary{display:none}body.settings footer{justify-content:flex-end}
+.setting .what{font-size:13px;color:var(--mute);margin:4px 0 0}
+.seg{display:flex;gap:8px;margin-top:14px}.seg button.b{flex:1;padding:10px 14px}
+.seg button.b.on{background:var(--navy);color:var(--white);border-color:var(--navy)}
+.seg button.b.on:hover{background:var(--navy)}
+.desc{font-size:13px;color:var(--ink);margin-top:12px;padding:10px 12px;background:var(--g50);border:1px solid var(--g200);border-radius:var(--radius-sm)}
 </style></head><body><main>
-<div class="brand"><img src="/logo.png" alt="3DAPI"><h1>Integrations</h1></div>
+<div class="brand"><img src="/logo.png" alt="3DAPI"><h1 id="title">Integrations</h1></div>
+<div class="tabs"><button class="tab on" data-tab="integrations">Integrations</button><button class="tab" data-tab="settings">Settings</button></div>
 <div id="list"></div>
+<div id="settings"></div>
 <footer><span id="summary"></span><button class="b primary" id="finish">Done</button></footer>
 </main>
 <script>
@@ -560,7 +617,27 @@ const api = (path, body) => fetch(path, {method: body ? "POST" : "GET", headers:
 const phrase = {done: "Connected", failed: "Not working", untested: "Not checked", empty: "Not connected"};
 let state; const open = new Set(), edit = new Set(), notes = {};
 function esc(s){return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+const MODES = {
+  live: "Live. When you approve a price, the listing is created on Etsy with its photos and goes live, and the social posts go out as configured.",
+  sandbox: "Sandbox. Every stage runs, including the photos and the listing text, but nothing is created on Etsy and nothing is posted. Switch to Live when you are ready to sell."};
+function showTab(name){
+  document.body.classList.toggle("settings", name === "settings");
+  for (const t of document.querySelectorAll(".tab")) t.classList.toggle("on", t.dataset.tab === name);
+  document.getElementById("title").textContent = name === "settings" ? "Settings" : "Integrations";
+  if (location.hash !== (name === "settings" ? "#settings" : "")) history.replaceState(null, "", name === "settings" ? "#settings" : location.pathname);
+}
+function renderSettings(){
+  const st = state.settings || {}; const mode = st.publish_mode || "live";
+  document.getElementById("settings").innerHTML = `
+    <div class="row setting">
+      <div class="top"><span class="name">Publishing</span><span class="status">${mode === "live" ? "Live" : "Sandbox"}</span></div>
+      <p class="what">What happens on Etsy and on social platforms once you approve a price.</p>
+      <div class="seg">${["live", "sandbox"].map(m => `<button class="b ${m === mode ? "on" : ""}" data-mode="${m}">${m === "live" ? "Live" : "Sandbox"}</button>`).join("")}</div>
+      <div class="desc">${esc(MODES[mode])}</div>
+    </div>`;
+}
 function render(){
+  renderSettings();
   const list = document.getElementById("list"); list.innerHTML = "";
   let done = 0, required = 0;
   for (const it of state.integrations){
@@ -615,6 +692,13 @@ document.getElementById("list").addEventListener("click", async e => {
     }
   } finally { await refresh(); }
 });
+document.querySelector(".tabs").addEventListener("click", e => { const t = e.target.closest(".tab"); if (t) showTab(t.dataset.tab); });
+document.getElementById("settings").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-mode]"); if (!btn) return;
+  for (const b of document.querySelectorAll("#settings button")) b.disabled = true;
+  try { state.settings = await api("/api/settings", {publish_mode: btn.dataset.mode}); } finally { renderSettings(); }
+});
+showTab(location.hash === "#settings" ? "settings" : "integrations");
 document.getElementById("finish").addEventListener("click", async () => { await api("/api/finish", {}); document.body.innerHTML = '<main><div class="brand"><img src="/logo.png" alt="3DAPI"><h1>Done</h1></div><p style="color:var(--mute)">You can close this tab.</p></main>'; });
 refresh();
 setInterval(() => api("/api/ping").catch(() => {}), 3000);                       // heartbeat: the server ends when it stops
@@ -680,6 +764,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if body.get("token") == self.token:
                 Handler.bye_at = time.time()
             return self._json(200, {"ok": True})
+        if self.path == "/api/settings":
+            try:
+                return self._json(200, write_settings(body))
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
         iid = body.get("integration")
         if self.path == "/api/finish":
             self._json(200, {"ok": True})
@@ -847,6 +936,8 @@ def status(args) -> int:
             r = i["result"]
             extra = f"  {r['detail']}" if i["status"] == "done" and r.get("detail") else (f"  {r['summary']}" if i["status"] == "failed" and r.get("summary") else "")
             print(f"{mark} {i['name']:<{w}}  {phrase}{'' if i['required'] else '  (optional)'}{extra}")
+        mode = st["settings"]["publish_mode"]
+        print(f"Publishing: {mode}" + ("  (nothing is created on Etsy or posted)" if mode == "sandbox" else ""))
     missing = [i["name"] for i in st["integrations"] if i["required"] and i["status"] != "done"]
     return 1 if missing else 0
 

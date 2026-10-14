@@ -452,3 +452,23 @@ each carries its own date.
   falls back to 3.14; with no Python on PATH falls back to the system 3.9.
   The `.bat` is reviewed, not run; no Windows machine here. The command's
   allowed tools gained `bash`.
+- **Publish mode: live or sandbox (2026-10-14).** `publish.mode` in the
+  store's `config.json`. `live` is today's behaviour. `sandbox` runs every
+  stage up to and including copy, then `publish_product.py` creates nothing
+  on Etsy, posts nothing, marks the product record's storefront `sandbox`
+  and writes `published.json` with `sandbox: true` and every step under
+  `skipped`, so the stage completes and the ledger stops. Once the mode is
+  live a sandbox `published.json` no longer counts as done: running the
+  script again publishes the item (the ledger will not re-dispatch it by
+  itself; the console or a hand run does). `--dry-run` says which mode it
+  is in. The Integrations page gained a Settings tab (`#settings`), first
+  setting Publishing with a Live / Sandbox switch written through
+  `POST /api/settings` into `config.json`, other keys kept, seeded from the
+  template when the store has no config yet. `integrate.py status` ends
+  with `Publishing: live|sandbox`, and the JSON carries `settings`. The
+  config template now ships `"mode": "sandbox"`, so a fresh store cannot
+  list on Etsy until a person flips it; a store without the key stays live.
+  Tested: template default sandbox, flip to live and back through the API,
+  rejected value, config written with the template's other keys intact,
+  status line; publish script in sandbox on a fake work dir, cached rerun,
+  and a live dry run that proceeds past the sandbox file.
