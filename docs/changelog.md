@@ -544,3 +544,32 @@ each carries its own date.
   two frames at 256 px in 8 s, a second call renders nothing, a call with
   10 s left returns partial. The blocked item on the user's machine needs
   its `design.blocked.json` removed and the item retried.
+- **A live run is never a stall (2026-10-14).** On the shark run the gate
+  reported idle while the quote worker was mid-call, and the command text
+  turned that into "stalled, send the file again". Cause: `approve_price.py
+  pending` inferred liveness from the worker's `.lock`, which the worker had
+  not written, and from recent file changes, which a worker waiting on the
+  slicer does not make. Now `run_intake.py` keeps `runs/<id>/director.alive`
+  fresh every 5 s (a daemon thread; removed at exit, read as dead after
+  30 s) and writes the worker's `.lock` itself around every model worker;
+  `pending` lists live directors, puts their items under `running` with the
+  stage from `state.json`, lists `before_price` only for items no director
+  holds, is idle only with nothing pending and no director alive, and
+  `--wait` goes on while a director lives. `/dapilot:review` and quickstart
+  now say "being worked on, at <stage>" for a live run and never "stalled";
+  "start it again with quickstart" is reserved for an item before its price
+  with no director. Tested: a fresh heartbeat with a silent worker and no
+  lock reads as running, a 5 s wait holds, a 40 s old heartbeat reads as
+  gone; the heartbeat thread writes and removes its file; the dry run is
+  unchanged.
+- **The session feeds the person (2026-10-14).** Quickstart no longer sits
+  on a silent nine-minute wait after starting a run. `watch_run.py` keeps
+  `runs/.monitor.alive` fresh every poll and removes it at exit;
+  `approve_price.py pending` reports `monitor_alive`. Quickstart reads it
+  once after the start: true means end the turn and repeat every `dapilot:`
+  notification to the person as one sentence as it arrives, running the
+  gate the moment the "waiting for a sale price" line comes; false means
+  poll `pending --wait 120` in rounds and say what is running after each,
+  up to ten rounds. Review has the same rule. Rejected items are a result,
+  not a problem, and a live run is never called stalled. Tested: the gate
+  reports the watcher alive while it runs and gone after it stops.

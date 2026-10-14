@@ -39,23 +39,44 @@ version, and that is exactly what the entry point handles.
    again. Do not open the page yourself and do not try to work around it.
 4. If it says everything is connected and no file was given, the one
    sentence it printed is the whole answer.
-5. If the output says a run started, add nothing to it and hold the price
-   gate, which is the one approval a person gives: run, with a Bash timeout
-   of 600000 ms,
-   `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/approve_price.py pending --wait 540`
-   and follow the procedure of `/dapilot:review` exactly: one
-   AskUserQuestion per item in `pending`, header `Price`, the candidates
-   from the JSON as options with the proposed one first and marked
-   `(Recommended)`, a last option `Not now`, the Other field for a typed
-   price; then `approve_price.py approve --workdir <workdir> --price <price>`
-   for a chosen or typed price (`--reason "set by hand at the gate"` when
-   typed; a `refused` result means say the floor and ask once more), or
-   `approve_price.py decline --workdir <workdir> --reason "not now"`. When
-   `pending` is empty and `running` is not, say so in a sentence and wait
-   again, at most three times; then point at `/dapilot:review` and stop.
-   Never choose or alter a price yourself. After the answers, one or two
+5. If the output says a run started, the person watches it through you.
+   Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/approve_price.py pending` once,
+   without `--wait`, and read `monitor_alive`.
+   - `monitor_alive` true: the plugin's monitor is feeding this session.
+     Say in one sentence that you will report each step as it happens and
+     ask for the price when it is ready, then end your turn. From then on
+     every notification that starts with `dapilot:` is for the person:
+     repeat it as one plain sentence the moment it arrives (what finished,
+     what is next; for a failure or a block, what a person does). When a
+     notification says a model is waiting for a sale price, run the gate
+     at once: `approve_price.py pending`, then the question below.
+   - `monitor_alive` false (no monitor in this session): poll in short
+     rounds so the person still hears progress. Run
+     `approve_price.py pending --wait 120` with a Bash timeout of 200000 ms;
+     after each round say in one sentence what is being worked on and at
+     which stage (from `running`), or that the run finished; stop the
+     rounds when `pending` has items, or when `idle` is true, or after ten
+     rounds, and in the last case say `/dapilot:review` shows the price
+     when it is ready.
+6. The gate, the one approval a person gives. For each item in `pending`
+   ask exactly one AskUserQuestion, header `Price`, question: the file
+   name, "what should it sell for?", the floor and currency, and the pack
+   when `units` is above 1. Options, from the JSON only: one per entry of
+   `candidates` (at most three), label the price and currency then the
+   candidate's label, the entry with `proposed: true` first and marked
+   `(Recommended)`, description the margin as a percentage then `how`; and
+   a last option `Not now`. The Other field is a typed price. Then
+   `approve_price.py approve --workdir <workdir> --price <price>` for a
+   chosen or typed price (`--reason "set by hand at the gate"` when typed;
+   a `refused` result means say the floor and ask once more), or
+   `approve_price.py decline --workdir <workdir> --reason "not now"`. Never
+   choose or alter a price yourself. After the answers, one or two
    sentences: what was approved, and that photos, listing text and
-   publishing now run on their own.
+   publishing now run on their own, and that you will keep reporting.
+7. A run you started is never stalled, stuck or not moving while
+   `directors` is not empty. Do not say so and do not ask for the file
+   again. `rejected` items are not sellable: say so with the reason in one
+   sentence; that is a result, not a problem.
 
 Never read, print, grep, copy or edit the env file, an Etsy token file or
 anything under `social/`; the plugin's hook refuses it. Never accept a key

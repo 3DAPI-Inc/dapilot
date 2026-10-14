@@ -25,14 +25,20 @@ Windows, or wherever `python3` is not found, use `python`.
    running any more, or after nine minutes.
 
 2. Read its JSON.
-   - `pending` empty and `running` not empty: say in one sentence that the
-     models are still being worked on (name the files and their stage) and
-     that you will check again, then go back to step 1. Do this at most
-     three times in a row; after that say they can run `/dapilot:review`
-     later and stop.
-   - `pending` empty and `running` empty: report `rejected` (not sellable,
-     with the reason) and `declined` in one line each, if any; otherwise say
-     nothing is waiting for a price. Stop.
+   - `pending` empty and `running` or `directors` not empty: the run is
+     alive. Say in one sentence which models are being worked on and at
+     which stage, that a quote or a market read takes a few minutes, and
+     that you will check again. Then go back to step 1. Do this at most
+     three times in a row; after that say the question will come when the
+     price is ready and `/dapilot:review` shows it any time, and stop.
+     Never call a live run stalled, stuck or not moving, and never suggest
+     sending the file again while `directors` is not empty.
+   - `pending` empty, `running` and `directors` empty, `before_price` not
+     empty: nothing is working on those models. Name them and say that
+     running `/dapilot:quickstart` with the file starts them again. Stop.
+   - everything empty: report `rejected` (not sellable, with the reason) and
+     `declined` in one line each, if any; otherwise say nothing is waiting
+     for a price. Stop.
 
 3. For each item in `pending`, ask exactly one question with
    AskUserQuestion. Header: `Price`. Question: the file name, then "what
@@ -66,6 +72,12 @@ Windows, or wherever `python3` is not found, use `python`.
    publishing now run on their own. If the JSON of step 1 had items in
    `before_price` or `running`, go back to step 1 for the next ones, with
    the same limit of three empty waits.
+
+When the JSON says `monitor_alive` is true, the plugin's monitor feeds this
+session: after answering what is pending, end your turn instead of waiting
+again, and repeat every later `dapilot:` notification to the person as one
+plain sentence; when one says a model is waiting for a price, run this
+procedure again at once.
 
 Do not read work files yourself, do not open the config, do not change
 anything the script did not change. The name on the approval is the

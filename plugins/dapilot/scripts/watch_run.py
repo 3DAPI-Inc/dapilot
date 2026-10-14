@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import sys
 import time
 from pathlib import Path
@@ -54,6 +55,14 @@ class Watcher:
         self.names: dict[str, str] = {}
         self.gates_said: set[str] = set()
         self.started = time.time()
+        self.alive = root / "runs" / ".monitor.alive"   # rewritten every poll; approve_price.py reports it as monitor_alive
+
+    def beat(self) -> None:
+        try:
+            self.alive.parent.mkdir(parents=True, exist_ok=True)
+            self.alive.write_text(json.dumps({"pid": os.getpid(), "root": str(self.root), "at": time.time()}))
+        except OSError:
+            pass
 
     # ---- names
     def name(self, h8: str) -> str:
@@ -155,11 +164,19 @@ class Watcher:
         for log in self.logs():          # mark what exists; no replay
             self.tail(log, replay=False)
         self.gates()                     # a gate already open is said once
-        while True:
-            time.sleep(POLL_S)
-            for log in self.logs():
-                self.tail(log, replay=(log not in self.offsets))   # a new run's log is read from its start
-            self.gates()
+        self.beat()
+        try:
+            while True:
+                time.sleep(POLL_S)
+                for log in self.logs():
+                    self.tail(log, replay=(log not in self.offsets))   # a new run's log is read from its start
+                self.gates()
+                self.beat()
+        finally:
+            try:
+                self.alive.unlink()
+            except OSError:
+                pass
 
 
 def main() -> int:
@@ -171,10 +188,10 @@ def main() -> int:
     if a.once:
         w.gates()
         return 0
-    try:
-        w.run()
-    except KeyboardInterrupt:
-        return 0
+    # the session ends the monitor with a signal; turn it into a clean exit so the alive file goes with us
+    for sig in (signal.SIGTERM, signal.SIGINT) + ((signal.SIGHUP,) if hasattr(signal, "SIGHUP") else ()):
+        signal.signal(sig, lambda *_: sys.exit(0))
+    w.run()
     return 0
 
 

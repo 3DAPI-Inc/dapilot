@@ -29,6 +29,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -210,6 +211,30 @@ def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dic
             "needs_human": None, "reason": reason, "summary": summary[:300]}, meta
 
 
+def heartbeat(root: Path, run: str, items: int) -> threading.Event:
+    """runs/<run>/director.alive, rewritten every few seconds while this director lives. It is the one
+    liveness signal the gate (approve_price.py pending) and the monitor trust: a worker on the slicer or
+    on fal writes nothing for minutes, and a .lock is the worker's to write or forget. Removed at exit;
+    a crash leaves it to age out (approve_price.py reads it as dead after 30 s)."""
+    stop = threading.Event()
+    path = root / "runs" / run / "director.alive"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def beat():
+        while not stop.is_set():
+            try:
+                path.write_text(json.dumps({"pid": os.getpid(), "run": run, "items": items, "started": started,
+                                            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+            except OSError:
+                pass
+            stop.wait(5)
+        path.unlink(missing_ok=True)
+
+    threading.Thread(target=beat, daemon=True, name="heartbeat").start()
+    return stop
+
+
 def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
     """Return (result_line, meta). Always returns a result line the ledger can record."""
     if brief.get("script"):
@@ -222,6 +247,21 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
     }
     meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": 0.0, "launch_attempts": 0}
     cmd = worker_cmd(brief, a, cfg)
+    # The director writes the .lock, not the worker: the work-ledger skill asks the worker to, and a worker
+    # that skips it left the item looking idle to the gate (shark run, 2026-10-14). Removed in the finally.
+    wd = Path(brief["workdir"]) if Path(brief["workdir"]).is_absolute() else root / brief["workdir"]
+    lock = wd / ".lock"
+    try:
+        lock.write_text(json.dumps({"run": brief["run"], "stage": brief["stage"], "agent": "run_intake"}))
+    except OSError:
+        pass
+    try:
+        return run_model_worker(brief, a, cfg, root, timeout_s, tag, synthetic, meta, cmd)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def run_model_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int, tag: str, synthetic: dict, meta: dict, cmd: list[str]) -> tuple[dict, dict]:
     for attempt in range(1, LAUNCH_RETRIES + 1):
         meta["launch_attempts"] = attempt
         t0 = time.time()
@@ -324,6 +364,17 @@ def main() -> int:
     passes = 0
     stalls = 0
     dispatched_total = 0
+    alive = heartbeat(root, run, init["items"]) if not a.dry_run else None
+    try:
+        return main_loop(a, cfg, root, run, ceiling, billing, t_start, spent, passes, stalls, dispatched_total)
+    finally:
+        if alive is not None:
+            alive.set()
+            time.sleep(0.1)   # let the thread remove the file
+
+
+def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start: float, spent: float,
+              passes: int, stalls: int, dispatched_total: int) -> int:
     while True:
         passes += 1
         nxt = ledger("next", "--run", run, "--max", str(a.max_workers), *(["--peek"] if a.dry_run else []))

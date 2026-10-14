@@ -136,8 +136,23 @@ and prints one plain line per event, nothing when idle. Each line reaches
 the model as a notification: a stage done, failed or blocked, a run
 finished, and the gate, which tells the model to run the review procedure
 now. Logs that exist when the session starts are not replayed; an open
-gate is said once. Monitors run in interactive Claude Code sessions only,
-not under `claude -p` and not in Cowork.
+gate is said once. The watcher keeps `runs/.monitor.alive` fresh and
+`approve_price.py pending` reports it as `monitor_alive`: when it is true,
+quickstart ends its turn after starting a run and repeats each
+notification to the person as it arrives, asking for the price the moment
+the gate line comes; when it is false it polls in 120 s rounds and says
+what is running after each. Monitors run in interactive Claude Code
+sessions only, not under `claude -p` and not in Cowork.
+
+**A live director is never a stall.** `run_intake.py` rewrites
+`runs/<id>/director.alive` every 5 s while it runs and removes it at exit;
+`approve_price.py pending` reads a file younger than 30 s as a live run,
+lists its items under `running` with the stage from `state.json`, and
+waits while any director lives. A worker on the slicer or on fal writes
+nothing for minutes, and the worker's own `.lock` was optional in
+practice, so neither is used as the signal; the director now writes the
+`.lock` itself around every worker. Added 2026-10-14 after the gate
+called the shark run stalled during its quote.
 
 **Runs are supervised and resumable.** One director per upload;
 `runs/<id>/` keeps `state.json`, `report.md`, `director.log` and every

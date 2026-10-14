@@ -8,9 +8,12 @@
 `pending` lists every work dir under <project>/work whose price stage has written a proposal
 (price.json) that no person has answered yet: the proposal, the candidates the script computed,
 the floor, the pack size. The model turns that into one question per item; the person clicks a
-candidate or types a price. With --wait it polls until something is pending, or until nothing is
-running any more, or until the seconds run out, so a session can start a run and then sit at the
-gate without a loop of its own.
+candidate or types a price. It also says what is `running` (items a live director holds, with the
+stage), which directors are alive (runs/<id>/director.alive, touched by run_intake.py every few
+seconds), what is `before_price` with no director (stopped; quickstart restarts it), and what was
+`rejected` or `declined`. With --wait it polls until something is pending, or until no director is
+alive and nothing runs, or until the seconds run out. A live director is never a stall, however
+long its worker is silent: the slicer and fal take minutes and write nothing meanwhile.
 
 `approve` is the console's POST /jobs/{id}/price without the console. The price is one of the
 candidates or any number a person typed. A typed price is checked by price_candidates.py --check and
@@ -42,7 +45,7 @@ from store_path import project_dir, store_dir  # noqa: E402
 
 PY = sys.executable
 WAIT_POLL_S = 3
-QUIET_S = 30          # --wait ends when nothing has moved for this long and nothing is pending
+ALIVE_S = 30          # a director touches runs/<id>/director.alive every few seconds; older than this, it is gone
 
 
 def now() -> str:
@@ -116,25 +119,63 @@ def item_view(wd: Path) -> dict:
             "candidates": candidates, "rejected_candidates": rejected}
 
 
+def directors(root: Path) -> list[dict]:
+    """Runs whose director is alive now: run_intake.py touches runs/<id>/director.alive while it works,
+    whatever its workers are doing. The file is the liveness signal; a worker's .lock is not relied on."""
+    runs = root / "runs"
+    out = []
+    if not runs.is_dir():
+        return out
+    now_t = time.time()
+    for rd in runs.iterdir():
+        alive = rd / "director.alive"
+        try:
+            age = now_t - alive.stat().st_mtime
+        except OSError:
+            continue
+        if age > ALIVE_S:
+            continue
+        doc = read(alive) or {}
+        state = read(rd / "state.json") or {}
+        items = {}
+        for h, it in (state.get("items") or {}).items():
+            stage = next((st for st, rec in (it.get("stages") or {}).items() if rec.get("status") == "running"), None)
+            items[h] = {"file": it.get("file"), "stage": stage}
+        out.append({"run": rd.name, "pid": doc.get("pid"), "age_s": int(age), "items": items})
+    return out
+
+
 def scan(root: Path) -> dict:
     work = root / "work"
     pending, running, declined, rejected, before = [], [], [], [], []
+    live = directors(root)
+    held = {h: (d["run"], it) for d in live for h, it in d["items"].items()}
     if work.is_dir():
         for wd in sorted(work.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if not (wd / "meta.json").exists():
                 continue
             meta = read(wd / "meta.json") or {}
             name = meta.get("file") or wd.name
-            if lock_fresh(wd):
-                stage = None
+            if (wd / "price.approved.json").exists():
+                continue
+            if wd.name in held and not (wd / "price.json").exists():
+                run, it = held[wd.name]
+                stage = it.get("stage")
+                if not stage and lock_fresh(wd):
+                    try:
+                        import ledger
+                        stage = ledger.lock_stage(wd)
+                    except Exception:
+                        pass
+                running.append({"hash": wd.name, "file": name, "stage": stage, "run": run})
+                continue
+            if lock_fresh(wd) and not (wd / "price.json").exists():
                 try:
                     import ledger
                     stage = ledger.lock_stage(wd)
                 except Exception:
-                    pass
-                running.append({"hash": wd.name, "file": name, "stage": stage})
-                continue
-            if (wd / "price.approved.json").exists():
+                    stage = None
+                running.append({"hash": wd.name, "file": name, "stage": stage, "run": None})
                 continue
             if (wd / "design.blocked.json").exists():
                 m = read(wd / "design.blocked.json") or {}
@@ -151,21 +192,17 @@ def scan(root: Path) -> dict:
                        for s in ("analyze", "quote", "preview", "research", "price")) \
                     and not (wd / "quote.error.json").exists() and not (wd / "analysis.error.json").exists():
                 before.append({"hash": wd.name, "file": name})
-    return {"pending": pending, "running": running, "declined": declined, "rejected": rejected, "before_price": before}
-
-
-def newest_change(root: Path) -> float:
-    latest = 0.0
-    work = root / "work"
-    if work.is_dir():
-        for wd in work.iterdir():
-            try:
-                latest = max(latest, wd.stat().st_mtime)
-                for f in wd.iterdir():
-                    latest = max(latest, f.stat().st_mtime)
-            except OSError:
-                continue
-    return latest
+    # an item still before its price with no director alive is stopped, not running; it is listed so the
+    # model can say so, and the person restarts it with quickstart
+    before = [b for b in before if b["hash"] not in held]
+    try:
+        monitor_alive = time.time() - (root / "runs" / ".monitor.alive").stat().st_mtime < 10
+    except OSError:
+        monitor_alive = False
+    return {"pending": pending, "running": running, "declined": declined, "rejected": rejected, "before_price": before,
+            "directors": [{k: d[k] for k in ("run", "pid", "age_s")} for d in live],
+            # the plugin's monitor (watch_run.py) is feeding this session: no need to poll, its lines arrive as they happen
+            "monitor_alive": monitor_alive}
 
 
 def cmd_pending(a) -> int:
@@ -173,8 +210,9 @@ def cmd_pending(a) -> int:
     deadline = time.time() + max(0, a.wait or 0)
     while True:
         s = scan(root)
-        quiet = time.time() - newest_change(root) > QUIET_S
-        idle = not s["pending"] and not s["running"] and (quiet or not s["before_price"])
+        # idle: nothing to decide and no director alive. While a director lives, a wait goes on: a worker on
+        # the slicer or on fal writes nothing for minutes, and that silence is not a stall.
+        idle = not s["pending"] and not s["directors"] and not s["running"]
         if s["pending"] or not a.wait or time.time() >= deadline or idle:
             return emit({"ok": True, **s, "idle": idle, "waited_s": int(a.wait - max(0, deadline - time.time())) if a.wait else 0})
         time.sleep(WAIT_POLL_S)
