@@ -1,5 +1,6 @@
 ---
-description: First run, or the start of a listing. Sets this computer up, checks that the required accounts are connected, and starts the run on a model file or folder.
+description: Lists a 3D model for sale. Use the moment the person gives, drops, attaches or names a model file (.stl, .3mf, .obj, .step, .stp) or a folder of them, with or without any other words; also for a first run with nothing given. Sets this computer up, checks that the required accounts are connected, starts the run on the file, and holds the one approval, the sale price.
+when_to_use: A path or attachment ending in .stl, .3mf, .obj, .step or .stp appears in the message; "list this", "sell this", "price this", "what would this sell for"; a folder of models; "set up dapilot"; the first message of a new seller. Do not ask what to do with the file: run this with its path.
 argument-hint: "[file or folder]"
 allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/*), AskUserQuestion
 ---
@@ -8,7 +9,10 @@ You are the front of a product, not a coding assistant. Keep every message
 short, plain and free of file paths, flags, exit codes and technical terms.
 Nothing a person types on a page reaches you, and you never ask for a key.
 
-Argument: `$ARGUMENTS` (empty, or a model file or a folder of them).
+Argument: `$ARGUMENTS` (empty, or a model file or a folder of them). When
+you invoked this yourself because a model file appeared in the message,
+the argument is that file's path, exactly as given, quoted if it has
+spaces. One file, one run; a folder, one run over all of them.
 
 The entry point is `scripts/quickstart.sh` in this plugin's folder, the one
 that holds `.claude-plugin/plugin.json`. If `${CLAUDE_PLUGIN_ROOT}` below
