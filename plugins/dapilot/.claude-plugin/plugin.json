@@ -7,6 +7,10 @@
     "name": "3DAPI",
     "email": "dev@dapi.digital"
   },
+  "homepage": "https://github.com/3DAPI-Inc/dapilot",
+  "repository": "https://github.com/3DAPI-Inc/dapilot",
+  "license": "MIT",
+  "icon": "./assets/3dapi-logo.png",
   "keywords": [
     "dapi",
     "3d-printing",

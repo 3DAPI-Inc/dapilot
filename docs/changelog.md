@@ -425,3 +425,12 @@ each carries its own date.
   commands. `skills-phase-zero` was merged into `main` the same day (PR #1),
   so the default branch carries the plugin and an install from
   `3DAPI-Inc/dapilot` works.
+- **License and listing fields (2026-10-14).** MIT license, copyright 3DAPI
+  Inc., as `plugins/dapilot/LICENSE` (the file the plugin directory reads)
+  and a copy at the repo root for GitHub. `plugin.json` gained `homepage`,
+  `repository`, `license` and `icon` (`./assets/3dapi-logo.png`), the fields
+  Anthropic's directory shows on a listing; `claude plugin validate --strict`
+  passes with them. Pre-submission check of the plugin folder: 125 files,
+  nothing over 256 KiB, no lockfiles, system files, symlinks or binaries.
+  Still needed before a listing can publish: the repo public, and the Etsy
+  token rewritten out of history first.
