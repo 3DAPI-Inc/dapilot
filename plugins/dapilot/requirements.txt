@@ -1,0 +1,8 @@
+# Python packages the plugin's pipeline scripts need. Python 3.10 to 3.13 (3.14 has no trimesh wheels).
+# A checkout installs them with scripts/dev/shop.sh setup; an installed plugin with: python3 -m pip install -r requirements.txt
+trimesh>=4
+scipy>=1.11         # trimesh's split() needs a graph engine
+networkx>=3
+numpy>=1.26
+jsonschema>=4
+fal-client>=0.5     # design stage: lifestyle photos and clip

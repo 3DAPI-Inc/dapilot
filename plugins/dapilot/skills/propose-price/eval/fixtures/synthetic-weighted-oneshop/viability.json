@@ -1,0 +1,103 @@
+{
+  "ok": true,
+  "product": "synthetic: weighted octagon fidget market, one shop holds p75",
+  "n_comparables": 8,
+  "market": {
+    "n": 8,
+    "min": 8.99,
+    "p25": 11.2,
+    "median": 14.28,
+    "p75": 19.5,
+    "max": 22.99,
+    "currency": "USD",
+    "per_gram": null,
+    "listings_with_weight": 0,
+    "basis": "weighted",
+    "weighted": {
+      "n": 8,
+      "p25": 11.2,
+      "median": 14.28,
+      "p75": 19.5,
+      "weight_total": 61.9
+    },
+    "unweighted": {
+      "n": 8,
+      "min": 8.99,
+      "p25": 10.99,
+      "median": 13.49,
+      "p75": 19.5,
+      "max": 22.99
+    }
+  },
+  "ours": {
+    "quote_unit_price_one_off": 5.71,
+    "quote_unit_price_full_plate": 5.71,
+    "max_per_plate": 1,
+    "model_g": 40.88209533691406,
+    "parcel_g": 70.9,
+    "per_gram_at_market_median": 0.349,
+    "shipping_usd": null,
+    "shipping_source": "unknown: no --shipping-usd and no table in the fee file",
+    "shipping_absorbed_by_seller": false
+  },
+  "policy": {
+    "file": "store/reference/pricing-policy.json",
+    "platform": "etsy",
+    "seller_region": "EU",
+    "listing_fee": 0.2,
+    "payment_fixed": 0.33,
+    "pct_of_price": 0.105,
+    "vat_rate": 0.21,
+    "vat_in_sale_price": true,
+    "vat_added_to_purchase": false,
+    "markup_pct": 50.0,
+    "min_margin_pct": 0.1,
+    "rounding": "0.99"
+  },
+  "fees_file": "/Users/sofiamanu/Desktop/work/dapilot/plugins/dapilot/skills/research-comparables/reference/platform-fees.json",
+  "scenarios": [
+    {
+      "cost_basis": "one_off",
+      "quote_unit_price": 5.71,
+      "unit_cost": 5.71,
+      "units_per_plate": 1,
+      "break_even_price": 8.65,
+      "markup_price": 8.56,
+      "at": [
+        {
+          "label": "p25",
+          "price": 12.45,
+          "net_of_vat": 10.29,
+          "fees": 1.84,
+          "unit_cost": 5.71,
+          "margin": 2.74,
+          "margin_pct": 0.266,
+          "markup_on_cost_pct": 118.0
+        },
+        {
+          "label": "median",
+          "price": 14.28,
+          "net_of_vat": 11.8,
+          "fees": 2.03,
+          "unit_cost": 5.71,
+          "margin": 4.06,
+          "margin_pct": 0.344,
+          "markup_on_cost_pct": 150.1
+        },
+        {
+          "label": "p75",
+          "price": 20.34,
+          "net_of_vat": 16.81,
+          "fees": 2.67,
+          "unit_cost": 5.71,
+          "margin": 8.43,
+          "margin_pct": 0.502,
+          "markup_on_cost_pct": 256.2
+        }
+      ]
+    }
+  ],
+  "verdict": "viable",
+  "verdict_rule": "market median vs one-off break-even (not_viable below) and vs quote plus markup (thin below, viable at or above)",
+  "comparables_mode": "rules"
+}

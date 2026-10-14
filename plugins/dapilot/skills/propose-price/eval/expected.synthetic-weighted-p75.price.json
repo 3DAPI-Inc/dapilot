@@ -1,0 +1,10 @@
+{
+  "price": 19.99,
+  "currency": "USD",
+  "candidate": "p75",
+  "position": "premium",
+  "rationale": "The band is weighted and the three sellers at or above p75 are three different shops, two of them with thousands of sales, so 19.50 is a price this market pays rather than one shop's price. Ours is the same two-piece passthrough spiral cone as the median listings, with no fewer parts and the same PLA finish, so it is at least as good as what sells at 14.28. All three p75 tests held: weighted basis, ours matches the median listing, and p75 is held by several shops; the median 13.99 is the fallback if the drafts had shown a plainer object.",
+  "runner_up": {"candidate": "median", "price": 13.99, "why_not": "the p75 rule held on all three tests; the median leaves the premium the weighted band supports on the table"},
+  "floor": 8.99,
+  "verdict": "viable"
+}

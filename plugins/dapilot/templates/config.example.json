@@ -1,0 +1,139 @@
+{
+ "store": "example",
+ "max_workers_per_lead": 3,
+ "max_render_workers": 2,
+ "max_attempts": 2,
+ "max_wall_minutes": 60,
+ "budget": {
+  "usd_per_run": 15.0,
+  "usd_per_item": 0.5,
+  "usd_per_stage": {
+   "research": 1.2,
+   "price": 0.6,
+   "design": 1.5,
+   "copy": 0.8
+  }
+ },
+ "pricing_usd_per_1k_tokens": {
+  "haiku": 0.002,
+  "sonnet": 0.009,
+  "opus": 0.03,
+  "fable": 0.03,
+  "inherit": 0.009
+ },
+ "departments": {
+  "catalogue": {
+   "lead": "catalogue-lead",
+   "worker": "catalogue-worker",
+   "key_env": "DAPI_API_KEY",
+   "max_workers": 3,
+   "enabled": true
+  },
+  "commerce": {
+   "lead": "commerce-lead",
+   "worker": "commerce-worker",
+   "key_env": "DAPI_API_KEY_COMMERCE",
+   "max_workers": 2,
+   "enabled": false
+  },
+  "growth": {
+   "lead": "growth-lead",
+   "worker": "growth-worker",
+   "key_env": null,
+   "max_workers": 2,
+   "enabled": false
+  }
+ },
+ "max_worker_minutes": 15,
+ "resume_on_start": false,
+ "turns_per_stage": {
+  "research": 40,
+  "price": 30,
+  "design": 50,
+  "copy": 30
+ },
+ "minutes_per_stage": {
+  "design": 40,
+  "publish": 25
+ },
+ "design": {
+  "studio_url": "http://localhost:8081",
+  "palette": {
+   "#E8E4DC": "warm white",
+   "#1F1F1F": "matte black",
+   "#3B7DD8": "blue",
+   "#D8453B": "red",
+   "#F2C230": "yellow",
+   "#4E9A5B": "green",
+   "#F08BB4": "pink",
+   "#8A5CC7": "purple"
+  },
+  "stills": {
+   "count": 4,
+   "size": 2048,
+   "elevation": 18
+  },
+  "turntable": {
+   "frames": 240,
+   "size": 1080,
+   "fps": 24,
+   "when": "fallback"
+  },
+  "lifestyle_images": {
+   "count": 4,
+   "endpoint": "fal-ai/nano-banana-pro/edit",
+   "resolution": "2K",
+   "aspect": "1:1",
+   "usd_each": 0.15
+  },
+  "lifestyle_video": {
+   "enabled": true,
+   "required": true,
+   "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+   "frames": 120,
+   "fps": 24,
+   "size": 720,
+   "resolution": "720p",
+   "steps": 50,
+   "guidance": 5.0,
+   "usd_per_second": 0.1,
+   "billed_fps": 16,
+   "drift_arc": 40,
+   "engine": "i2v",
+   "i2v": {
+    "endpoint": "minimax/h3-max/image-to-video",
+    "resolution": "1080P",
+    "seconds": 6,
+    "usd_per_second": 0.16
+   }
+  },
+  "usd_cap_per_item": 3.0,
+  "deadline_s": 480,
+  "etsy": {
+   "max_photos": 10,
+   "photo_min_px": 2000,
+   "video_min_s": 5.0,
+   "video_max_s": 15.0,
+   "video_max_mb": 100
+  },
+  "_prices": "estimates, checked on fal 2026-09-13: nano-banana-2/edit 0.08 USD per image, 1.5x at 2K; wan-22-vace depth 0.10 USD per second at 720p, billed at 16 fps"
+ },
+ "social": {
+  "comment": "One entry per platform. adapter is a module in plugins/dapilot/scripts/social/ or in DAPILOT_SOCIAL_ADAPTER_DIR; account names the session file under $DAPILOT_STORE_DIR/social/sessions/<platform>/.",
+  "platforms": {
+   "instagram": {
+    "adapter": "instagram_web",
+    "account": "shop",
+    "api_version": null,
+    "enabled": false,
+    "comment": "2026-09-23: Meta answered 'API access blocked' two days after the first token; Instagram posts through CloakBrowser (instagram_web in DAPILOT_SOCIAL_ADAPTER_DIR) once that adapter exists. Set enabled true then. instagram_api stays in the plugin as the option for an app Meta leaves alone."
+   }
+  }
+ },
+ "publish": {
+  "comment": "What the approval of a sale price sets off. false hands that step back to a person in the console.",
+  "auto_activate": true,
+  "auto_post": true,
+  "auto_since": null
+ }
+}

@@ -1,0 +1,73 @@
+{
+  "query": "octagon fidget",
+  "noun": "fidget",
+  "kept": [
+    {
+      "listing_id": 9001,
+      "shop": {
+        "name": "PolyBrain",
+        "sold": 6513
+      }
+    },
+    {
+      "listing_id": 9002,
+      "shop": {
+        "name": "ErnicShop",
+        "sold": 2595
+      }
+    },
+    {
+      "listing_id": 9003,
+      "shop": {
+        "name": "3DMOLDFARMLLC",
+        "sold": 1280
+      }
+    },
+    {
+      "listing_id": 9004,
+      "shop": {
+        "name": "Nally3D",
+        "sold": 3386
+      }
+    },
+    {
+      "listing_id": 9005,
+      "shop": {
+        "name": "SpiralWorks",
+        "sold": 900
+      }
+    },
+    {
+      "listing_id": 9006,
+      "shop": {
+        "name": "HDR2studio",
+        "sold": 72
+      }
+    },
+    {
+      "listing_id": 9007,
+      "shop": {
+        "name": "Rosdas",
+        "sold": 15
+      }
+    },
+    {
+      "listing_id": 9008,
+      "shop": {
+        "name": "NewPrints",
+        "sold": 0
+      }
+    }
+  ],
+  "dropped": [],
+  "pages": [
+    {
+      "page": 1,
+      "offset": 0,
+      "fetched": 8,
+      "survived": 8,
+      "hit_rate": 1.0
+    }
+  ],
+  "stop_reason": "exhausted"
+}

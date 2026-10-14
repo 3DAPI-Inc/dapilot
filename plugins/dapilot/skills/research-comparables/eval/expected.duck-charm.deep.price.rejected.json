@@ -1,0 +1,113 @@
+{
+  "ok": false,
+  "product": "duck",
+  "currency": "USD",
+  "quote_unit_price": 2.59,
+  "cost_basis": "full_plate",
+  "cost_bases": {
+    "one_off": {
+      "quote_unit_price": 2.59,
+      "floor": 4.99
+    },
+    "full_plate": {
+      "quote_unit_price": 2.59,
+      "floor": 4.99,
+      "max_per_plate": 1,
+      "plate_discount_pct": 0.0
+    }
+  },
+  "unit_cost": 2.59,
+  "floor": 4.99,
+  "floor_rule": "break-even (cost + fees + VAT owed) rounded up to the policy ending; a price below it is refused by --check for any author",
+  "min_margin_pct": 0.1,
+  "min_margin_rule": "candidates under this margin are rejected for the model; a person may still choose one with an override block",
+  "market": {
+    "n": 12,
+    "min": 1.81,
+    "p25": 1.92,
+    "median": 2.57,
+    "p75": 2.58,
+    "max": 34.82,
+    "basis": "weighted"
+  },
+  "candidates": [],
+  "rejected": [
+    {
+      "label": "markup",
+      "price": 3.99,
+      "net_of_vat": 3.3,
+      "fees": 0.95,
+      "unit_cost": 2.59,
+      "margin": -0.24,
+      "margin_pct": -0.073,
+      "markup_on_cost_pct": 54.1,
+      "how": "quote 2.59 plus 50% markup, rounded up",
+      "vs_median": 1.55,
+      "position_in_band": "above_p75",
+      "rejected_because": "below_floor",
+      "below_floor_by": 1.0
+    },
+    {
+      "label": "median",
+      "price": 2.99,
+      "net_of_vat": 2.47,
+      "fees": 0.84,
+      "unit_cost": 2.59,
+      "margin": -0.96,
+      "margin_pct": -0.39,
+      "markup_on_cost_pct": 15.4,
+      "how": "market median of 12 comparables, 2.57, weighted band, rounded",
+      "vs_median": 1.16,
+      "position_in_band": "above_p75",
+      "rejected_because": "below_floor",
+      "below_floor_by": 2.0
+    }
+  ],
+  "skipped": [
+    {
+      "label": "p75",
+      "reason": "market p75 2.58 rounds to 2.99, the same price as the median candidate"
+    }
+  ],
+  "p75_sellers": {
+    "p75": 2.58,
+    "n": 5,
+    "weight_total": 60.114,
+    "share_basis": "market_weight",
+    "shops": [
+      {
+        "name": "MoldedCandy",
+        "weight_share": 0.766
+      },
+      {
+        "name": "Pingfabricbag",
+        "weight_share": 0.155
+      },
+      {
+        "name": "Reality3Dreams",
+        "weight_share": 0.08
+      }
+    ],
+    "distinct_named_shops": 3,
+    "top_share": 0.766,
+    "unnamed_share": 0.0,
+    "rule": "(c) of the p75 rule holds when distinct_named_shops >= 2, top_share < 0.6 and unnamed_share < 0.2; one dominant shop, or sellers without a name, means the median"
+  },
+  "p75_sellers_note": "p75 is not a candidate (see skipped and rejected); kept for the record",
+  "policy": {
+    "platform": "etsy",
+    "seller_region": "EU",
+    "listing_fee": 0.2,
+    "payment_fixed": 0.33,
+    "pct_of_price": 0.105,
+    "vat_rate": 0.21,
+    "vat_in_sale_price": true,
+    "vat_added_to_purchase": false,
+    "cost_basis": "full_plate",
+    "markup_pct": 50.0,
+    "min_margin_pct": 0.1,
+    "rounding": "0.99"
+  },
+  "verdict": "not_viable",
+  "reason": "no candidate clears break-even and the minimum margin"
+}

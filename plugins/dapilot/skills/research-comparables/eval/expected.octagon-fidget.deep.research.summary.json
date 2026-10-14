@@ -1,0 +1,605 @@
+{
+ "ok": true,
+ "query": "octagon fidget",
+ "taxonomy_id": 1628,
+ "currency": "USD",
+ "target_mm": [
+  104.01,
+  100.8,
+  44.83
+ ],
+ "n_fetched": 41,
+ "n_kept": 9,
+ "n_dropped": 32,
+ "pages": [
+  {
+   "page": 1,
+   "min_price": 0,
+   "max_price": 2,
+   "count": 0,
+   "fetched": 0,
+   "new": 0,
+   "survived": 0,
+   "hit_rate": null
+  },
+  {
+   "page": 2,
+   "min_price": 2,
+   "max_price": 4,
+   "count": 2,
+   "fetched": 2,
+   "new": 2,
+   "survived": 0,
+   "hit_rate": 0.0
+  },
+  {
+   "page": 3,
+   "min_price": 4,
+   "max_price": 8,
+   "count": 11,
+   "fetched": 11,
+   "new": 11,
+   "survived": 4,
+   "hit_rate": 0.364
+  },
+  {
+   "page": 4,
+   "min_price": 8,
+   "max_price": 16,
+   "count": 8,
+   "fetched": 8,
+   "new": 7,
+   "survived": 3,
+   "hit_rate": 0.429
+  },
+  {
+   "page": 5,
+   "min_price": 16,
+   "max_price": 32,
+   "count": 2,
+   "fetched": 2,
+   "new": 2,
+   "survived": 0,
+   "hit_rate": 0.0
+  },
+  {
+   "page": 6,
+   "min_price": 32,
+   "max_price": 64,
+   "count": 19,
+   "fetched": 19,
+   "new": 19,
+   "survived": 2,
+   "hit_rate": 0.105
+  },
+  {
+   "page": 7,
+   "min_price": 64,
+   "max_price": 128,
+   "count": null,
+   "fetched": 0,
+   "survived": 0,
+   "hit_rate": null,
+   "skipped": true
+  },
+  {
+   "page": 8,
+   "min_price": 128,
+   "max_price": 256,
+   "count": null,
+   "fetched": 0,
+   "survived": 0,
+   "hit_rate": null,
+   "skipped": true
+  },
+  {
+   "page": 9,
+   "min_price": 256,
+   "max_price": null,
+   "count": null,
+   "fetched": 0,
+   "survived": 0,
+   "hit_rate": null,
+   "skipped": true
+  }
+ ],
+ "stop_reason": "ladder_done",
+ "material_classes": {
+  "3d_printed": 5,
+  "metal": 2,
+  "unstated": 2,
+  "leather": 1,
+  "plastic": 1
+ },
+ "materials_top": {
+  "pla": 2,
+  "asa": 1,
+  "genuine leather": 1,
+  "petg": 1,
+  "plastic": 1,
+  "polylactid": 1,
+  "selflubricating bearing": 1,
+  "soft rubbery plastic": 1,
+  "stainless steel screws": 1,
+  "tpu": 1
+ },
+ "price": {
+  "n": 9,
+  "min": 2.25,
+  "p25": 5.99,
+  "median": 8.0,
+  "p75": 15.0,
+  "max": 50.0
+ },
+ "price_histogram": [
+  {
+   "lo": 2.25,
+   "hi": 6.23,
+   "n": 3
+  },
+  {
+   "lo": 6.23,
+   "hi": 10.21,
+   "n": 2
+  },
+  {
+   "lo": 10.21,
+   "hi": 14.19,
+   "n": 1
+  },
+  {
+   "lo": 14.19,
+   "hi": 18.17,
+   "n": 1
+  },
+  {
+   "lo": 18.17,
+   "hi": 22.15,
+   "n": 0
+  },
+  {
+   "lo": 22.15,
+   "hi": 26.12,
+   "n": 0
+  },
+  {
+   "lo": 26.12,
+   "hi": 30.1,
+   "n": 0
+  },
+  {
+   "lo": 30.1,
+   "hi": 34.08,
+   "n": 0
+  },
+  {
+   "lo": 34.08,
+   "hi": 38.06,
+   "n": 1
+  },
+  {
+   "lo": 38.06,
+   "hi": 42.04,
+   "n": 0
+  },
+  {
+   "lo": 42.04,
+   "hi": 46.02,
+   "n": 0
+  },
+  {
+   "lo": 46.02,
+   "hi": 50.0,
+   "n": 1
+  }
+ ],
+ "with_size_ratio": 8,
+ "with_weight_g": 8,
+ "top_by_market_weight": [
+  {
+   "listing_id": 1890360765,
+   "title": "Infinity Twist - das unendliche Octagon | Wobble Fidget | Octa Twist | Desktop Toy | Schreibtischspielzeug | faltbares Zappel Spielzeug",
+   "price": 10.48,
+   "sold": 6525,
+   "favorers": 66,
+   "materials": [
+    "PLA",
+    "Polylactid"
+   ],
+   "size_ratio": null,
+   "market_weight": 11.886,
+   "relevance": 0.725,
+   "excluded_by": [
+    "spinner",
+    "cube"
+   ],
+   "selected": true
+  },
+  {
+   "listing_id": 4307614125,
+   "title": "Fidget Octagon - Sports Teams, College, NFL, Holidays, etc. - Swirl and Stretch Satisfying Handheld Trinket",
+   "price": 5.49,
+   "sold": 72,
+   "favorers": 35,
+   "materials": [
+    "plastic",
+    "soft rubbery plastic",
+    "PLA",
+    "PETG"
+   ],
+   "size_ratio": 0.98,
+   "market_weight": 7.082,
+   "relevance": 0.996,
+   "selected": true
+  },
+  {
+   "listing_id": 4462744773,
+   "title": "3D Printed Passthrough Octagon Fidget Toy (3 piece set)",
+   "price": 15.0,
+   "sold": 1,
+   "favorers": 0,
+   "materials": [],
+   "size_ratio": 1.05,
+   "market_weight": 1.693,
+   "relevance": 0.789,
+   "excluded_by": [
+    "piece set"
+   ],
+   "selected": true
+  }
+ ],
+ "sample_every_kth": {
+  "k": 1,
+  "titles": [
+   {
+    "listing_id": 1836426612,
+    "title": "fidget octagon keychain",
+    "price": 2.25,
+    "sold": 98,
+    "favorers": 71,
+    "materials": [],
+    "size_ratio": 1.47,
+    "market_weight": 7.733,
+    "relevance": 0.367,
+    "excluded_by": [
+     "keychain"
+    ]
+   },
+   {
+    "listing_id": 1875598786,
+    "title": "Leather Fidget Spinner  - octagon-shaped unique EDC stress relief toy for adults and children",
+    "price": 50.0,
+    "sold": 1,
+    "favorers": 0,
+    "materials": [
+     "genuine leather",
+     "stainless steel screws",
+     "selflubricating bearing"
+    ],
+    "size_ratio": 0.59,
+    "market_weight": 1.693,
+    "relevance": 0.0,
+    "excluded_by": [
+     "spinner",
+     "material:steel",
+     "material:stainless",
+     "material:leather"
+    ]
+   },
+   {
+    "listing_id": 1890360765,
+    "title": "Infinity Twist - das unendliche Octagon | Wobble Fidget | Octa Twist | Desktop Toy | Schreibtischspielzeug | faltbares Zappel Spielzeug",
+    "price": 10.48,
+    "sold": 6525,
+    "favorers": 66,
+    "materials": [
+     "PLA",
+     "Polylactid"
+    ],
+    "size_ratio": null,
+    "market_weight": 11.886,
+    "relevance": 0.725,
+    "excluded_by": [
+     "spinner",
+     "cube"
+    ]
+   },
+   {
+    "listing_id": 4307614125,
+    "title": "Fidget Octagon - Sports Teams, College, NFL, Holidays, etc. - Swirl and Stretch Satisfying Handheld Trinket",
+    "price": 5.49,
+    "sold": 72,
+    "favorers": 35,
+    "materials": [
+     "plastic",
+     "soft rubbery plastic",
+     "PLA",
+     "PETG"
+    ],
+    "size_ratio": 0.98,
+    "market_weight": 7.082,
+    "relevance": 0.996
+   },
+   {
+    "listing_id": 4462744773,
+    "title": "3D Printed Passthrough Octagon Fidget Toy (3 piece set)",
+    "price": 15.0,
+    "sold": 1,
+    "favorers": 0,
+    "materials": [],
+    "size_ratio": 1.05,
+    "market_weight": 1.693,
+    "relevance": 0.789,
+    "excluded_by": [
+     "piece set"
+    ]
+   },
+   {
+    "listing_id": 4468637655,
+    "title": "3D Printed Octagon Infinity Cube Fidget Toy – Stress Relief Desk Gadget, Pocket-Sized",
+    "price": 8.0,
+    "sold": 184,
+    "favorers": 5,
+    "materials": [],
+    "size_ratio": 1.22,
+    "market_weight": 7.116,
+    "relevance": 0.557,
+    "excluded_by": [
+     "cube"
+    ]
+   },
+   {
+    "listing_id": 4549475857,
+    "title": "The Silent Strike | 40mm Octagon Magnetic Fidget Toy | Haptic Desk Gadget | EDC Fidget Slider & Clicker",
+    "price": 35.0,
+    "sold": 1472,
+    "favorers": 7,
+    "materials": [],
+    "size_ratio": 1.47,
+    "market_weight": 9.335,
+    "relevance": 0.0,
+    "excluded_by": [
+     "slider",
+     "clicker",
+     "magnetic",
+     "material:metal"
+    ]
+   },
+   {
+    "listing_id": 4550321137,
+    "title": "Blue Articulated Fidget Spinner Toy – Geometric Octagon Pendant",
+    "price": 7.5,
+    "sold": 9,
+    "favorers": 0,
+    "materials": [],
+    "size_ratio": 1.95,
+    "market_weight": 3.303,
+    "relevance": 0.305,
+    "excluded_by": [
+     "spinner",
+     "pendant"
+    ]
+   },
+   {
+    "listing_id": 4558853169,
+    "title": "Octagon Fidget Spinner with Handle 5&quot; – 3D Printed Sensory Desk Toy",
+    "price": 5.99,
+    "sold": 29,
+    "favorers": 0,
+    "materials": [],
+    "size_ratio": 1.22,
+    "market_weight": 4.401,
+    "relevance": 0.557,
+    "excluded_by": [
+     "spinner"
+    ]
+   }
+  ]
+ },
+ "rules": {
+  "noun": "octagon",
+  "required_any": [
+   "twist",
+   "swirl",
+   "passthrough",
+   "pass through",
+   "spiral",
+   "vortex",
+   "wobble",
+   "stretch"
+  ],
+  "excluded": [
+   "spinner",
+   "keychain",
+   "pendant",
+   "slider",
+   "clicker",
+   "magnetic",
+   "cube",
+   "set of",
+   "piece set",
+   "bundle",
+   "pcs"
+  ],
+  "materials_allowed": [
+   "pla",
+   "petg",
+   "asa",
+   "tpu",
+   "3d printed",
+   "plastic"
+  ],
+  "materials_excluded": [
+   "metal",
+   "steel",
+   "stainless",
+   "brass",
+   "copper",
+   "titanium",
+   "leather",
+   "wood",
+   "wooden",
+   "glass",
+   "ceramic"
+  ],
+  "taxonomy_id": 1628,
+  "notes": "a two-piece twisting passthrough octagon fidget in PLA, not a spinner, slider, cube, keychain or pendant"
+ },
+ "min_relevance": 0.6,
+ "n_selected": 3,
+ "top_rejected_by_market_weight": [
+  {
+   "listing_id": 4549475857,
+   "title": "The Silent Strike | 40mm Octagon Magnetic Fidget Toy | Haptic Desk Gadget | EDC Fidget Slider & Clicker",
+   "price": 35.0,
+   "sold": 1472,
+   "favorers": 7,
+   "materials": [],
+   "size_ratio": 1.47,
+   "market_weight": 9.335,
+   "relevance": 0.0,
+   "excluded_by": [
+    "slider",
+    "clicker",
+    "magnetic",
+    "material:metal"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 1836426612,
+   "title": "fidget octagon keychain",
+   "price": 2.25,
+   "sold": 98,
+   "favorers": 71,
+   "materials": [],
+   "size_ratio": 1.47,
+   "market_weight": 7.733,
+   "relevance": 0.367,
+   "excluded_by": [
+    "keychain"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 4468637655,
+   "title": "3D Printed Octagon Infinity Cube Fidget Toy – Stress Relief Desk Gadget, Pocket-Sized",
+   "price": 8.0,
+   "sold": 184,
+   "favorers": 5,
+   "materials": [],
+   "size_ratio": 1.22,
+   "market_weight": 7.116,
+   "relevance": 0.557,
+   "excluded_by": [
+    "cube"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 4558853169,
+   "title": "Octagon Fidget Spinner with Handle 5&quot; – 3D Printed Sensory Desk Toy",
+   "price": 5.99,
+   "sold": 29,
+   "favorers": 0,
+   "materials": [],
+   "size_ratio": 1.22,
+   "market_weight": 4.401,
+   "relevance": 0.557,
+   "excluded_by": [
+    "spinner"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 4550321137,
+   "title": "Blue Articulated Fidget Spinner Toy – Geometric Octagon Pendant",
+   "price": 7.5,
+   "sold": 9,
+   "favorers": 0,
+   "materials": [],
+   "size_ratio": 1.95,
+   "market_weight": 3.303,
+   "relevance": 0.305,
+   "excluded_by": [
+    "spinner",
+    "pendant"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 1875598786,
+   "title": "Leather Fidget Spinner  - octagon-shaped unique EDC stress relief toy for adults and children",
+   "price": 50.0,
+   "sold": 1,
+   "favorers": 0,
+   "materials": [
+    "genuine leather",
+    "stainless steel screws",
+    "selflubricating bearing"
+   ],
+   "size_ratio": 0.59,
+   "market_weight": 1.693,
+   "relevance": 0.0,
+   "excluded_by": [
+    "spinner",
+    "material:steel",
+    "material:stainless",
+    "material:leather"
+   ],
+   "selected": false
+  }
+ ],
+ "relevance_histogram": [
+  {
+   "lo": 0.0,
+   "hi": 0.1,
+   "n": 2
+  },
+  {
+   "lo": 0.1,
+   "hi": 0.2,
+   "n": 0
+  },
+  {
+   "lo": 0.2,
+   "hi": 0.3,
+   "n": 0
+  },
+  {
+   "lo": 0.3,
+   "hi": 0.4,
+   "n": 2
+  },
+  {
+   "lo": 0.4,
+   "hi": 0.5,
+   "n": 0
+  },
+  {
+   "lo": 0.5,
+   "hi": 0.6,
+   "n": 2
+  },
+  {
+   "lo": 0.6,
+   "hi": 0.7,
+   "n": 0
+  },
+  {
+   "lo": 0.7,
+   "hi": 0.8,
+   "n": 2
+  },
+  {
+   "lo": 0.8,
+   "hi": 0.9,
+   "n": 0
+  },
+  {
+   "lo": 0.9,
+   "hi": 1.0,
+   "n": 1
+  }
+ ]
+}

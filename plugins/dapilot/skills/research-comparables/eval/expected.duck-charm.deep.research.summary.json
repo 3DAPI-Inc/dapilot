@@ -1,0 +1,770 @@
+{
+ "ok": true,
+ "query": "duck charm",
+ "taxonomy_id": 1799,
+ "currency": "USD",
+ "target_mm": [
+  12.0,
+  9.65,
+  8.3
+ ],
+ "n_fetched": 26,
+ "n_kept": 15,
+ "n_dropped": 11,
+ "pages": [
+  {
+   "page": 1,
+   "min_price": 0,
+   "max_price": 2,
+   "count": 4,
+   "fetched": 4,
+   "new": 4,
+   "survived": 4,
+   "hit_rate": 1.0
+  },
+  {
+   "page": 2,
+   "min_price": 2,
+   "max_price": 4,
+   "count": 7,
+   "fetched": 7,
+   "new": 7,
+   "survived": 6,
+   "hit_rate": 0.857
+  },
+  {
+   "page": 3,
+   "min_price": 4,
+   "max_price": 8,
+   "count": 3,
+   "fetched": 3,
+   "new": 3,
+   "survived": 1,
+   "hit_rate": 0.333
+  },
+  {
+   "page": 4,
+   "min_price": 8,
+   "max_price": 16,
+   "count": 4,
+   "fetched": 4,
+   "new": 4,
+   "survived": 1,
+   "hit_rate": 0.25
+  },
+  {
+   "page": 5,
+   "min_price": 16,
+   "max_price": 32,
+   "count": 4,
+   "fetched": 4,
+   "new": 4,
+   "survived": 1,
+   "hit_rate": 0.25
+  },
+  {
+   "page": 6,
+   "min_price": 32,
+   "max_price": 64,
+   "count": 5,
+   "fetched": 5,
+   "new": 4,
+   "survived": 2,
+   "hit_rate": 0.5
+  },
+  {
+   "page": 7,
+   "min_price": 64,
+   "max_price": 128,
+   "count": 0,
+   "fetched": 0,
+   "new": 0,
+   "survived": 0,
+   "hit_rate": null
+  },
+  {
+   "page": 8,
+   "min_price": 128,
+   "max_price": 256,
+   "count": 0,
+   "fetched": 0,
+   "new": 0,
+   "survived": 0,
+   "hit_rate": null
+  },
+  {
+   "page": 9,
+   "min_price": 256,
+   "max_price": null,
+   "count": 0,
+   "fetched": 0,
+   "new": 0,
+   "survived": 0,
+   "hit_rate": null
+  }
+ ],
+ "stop_reason": "ladder_done",
+ "material_classes": {
+  "resin": 10,
+  "ceramic": 3,
+  "plastic": 3,
+  "unstated": 3,
+  "3d_printed": 2,
+  "paper": 1
+ },
+ "materials_top": {
+  "resin": 6,
+  "epoxy resin": 3,
+  "organza bag": 3,
+  "paint": 3,
+  "card": 2,
+  "glow powder": 2,
+  "acrylic paint for details": 1,
+  "cardstock": 1,
+  "glitter": 1,
+  "ink": 1,
+  "non toxic paint": 1,
+  "sculpey souffle polymer clay": 1,
+  "uv resin coating": 1
+ },
+ "price": {
+  "n": 15,
+  "min": 1.81,
+  "p25": 1.92,
+  "median": 2.58,
+  "p75": 7.42,
+  "max": 45.0
+ },
+ "price_histogram": [
+  {
+   "lo": 1.81,
+   "hi": 5.41,
+   "n": 11
+  },
+  {
+   "lo": 5.41,
+   "hi": 9.01,
+   "n": 0
+  },
+  {
+   "lo": 9.01,
+   "hi": 12.61,
+   "n": 1
+  },
+  {
+   "lo": 12.61,
+   "hi": 16.21,
+   "n": 0
+  },
+  {
+   "lo": 16.21,
+   "hi": 19.81,
+   "n": 0
+  },
+  {
+   "lo": 19.81,
+   "hi": 23.4,
+   "n": 0
+  },
+  {
+   "lo": 23.4,
+   "hi": 27.0,
+   "n": 0
+  },
+  {
+   "lo": 27.0,
+   "hi": 30.6,
+   "n": 0
+  },
+  {
+   "lo": 30.6,
+   "hi": 34.2,
+   "n": 0
+  },
+  {
+   "lo": 34.2,
+   "hi": 37.8,
+   "n": 2
+  },
+  {
+   "lo": 37.8,
+   "hi": 41.4,
+   "n": 0
+  },
+  {
+   "lo": 41.4,
+   "hi": 45.0,
+   "n": 1
+  }
+ ],
+ "with_size_ratio": 0,
+ "with_weight_g": 0,
+ "top_by_market_weight": [
+  {
+   "listing_id": 1096010173,
+   "title": "Halloween Duck Witch Hat Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Minature, Baby Duck, Wirches Hat",
+   "price": 3.23,
+   "sold": 85351,
+   "favorers": 766,
+   "materials": [
+    "resin",
+    "paint"
+   ],
+   "size_ratio": null,
+   "market_weight": 15.676,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 1626958314,
+   "title": "Chef Duck Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Bird, 3d Printed Resin Kitchen Decor, Cook Gift, Food Lover",
+   "price": 2.58,
+   "sold": 85351,
+   "favorers": 327,
+   "materials": [
+    "resin",
+    "paint"
+   ],
+   "size_ratio": null,
+   "market_weight": 15.251,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 1602849144,
+   "title": "Red Devil Duck Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Bird, Halloween Decor, Collectible Display",
+   "price": 2.58,
+   "sold": 85351,
+   "favorers": 248,
+   "materials": [
+    "resin",
+    "paint"
+   ],
+   "size_ratio": null,
+   "market_weight": 15.113,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 4403388714,
+   "title": "Glow in Dark Resin Duck Charm | Glitter Pocket Hug, Stocking Filler (Random Colour)",
+   "price": 2.57,
+   "sold": 6952,
+   "favorers": 192,
+   "materials": [
+    "Epoxy Resin",
+    "Glitter",
+    "Glow Powder",
+    "Organza Bag"
+   ],
+   "size_ratio": null,
+   "market_weight": 12.478,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 4410124323,
+   "title": "Mini Glow Duck Charm | Random Color Resin Figurine (1.7cm)",
+   "price": 1.92,
+   "sold": 6952,
+   "favorers": 23,
+   "materials": [
+    "Epoxy Resin",
+    "Glow Powder",
+    "Organza Bag",
+    "Card"
+   ],
+   "size_ratio": null,
+   "market_weight": 11.436,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 4415060153,
+   "title": "Mini Resin Christmas Duck | Stocking Filler, Secret Santa Gift, Desk Buddy",
+   "price": 1.92,
+   "sold": 6952,
+   "favorers": 2,
+   "materials": [
+    "Epoxy Resin",
+    "Organza Bag",
+    "Cardstock",
+    "Ink"
+   ],
+   "size_ratio": null,
+   "market_weight": 10.396,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 4444149024,
+   "title": "5Pcs Resin Duck Ornament, Kawaii Desk Accessory, Car Dashboard Decor, Computer Display Accent",
+   "price": 34.82,
+   "sold": 1510,
+   "favorers": 6,
+   "materials": [
+    "Resin"
+   ],
+   "size_ratio": null,
+   "market_weight": 9.293,
+   "relevance": 0.725,
+   "excluded_by": [
+    "pcs"
+   ],
+   "selected": true
+  },
+  {
+   "listing_id": 4428566462,
+   "title": "Travel Duck Pocket Hug Cute Duck Keepsake, Cruises, Holidays, Travellers, Sentimental Thoughtful Gifts",
+   "price": 1.81,
+   "sold": 975,
+   "favorers": 11,
+   "materials": [],
+   "size_ratio": null,
+   "market_weight": 9.126,
+   "relevance": 0.775,
+   "selected": true
+  },
+  {
+   "listing_id": 1884254105,
+   "title": "Pocket Hug Duck Keepsake, Unusual, Thoughtful, Sentimental Gift Novelty Charm",
+   "price": 1.81,
+   "sold": 975,
+   "favorers": 6,
+   "materials": [],
+   "size_ratio": null,
+   "market_weight": 8.856,
+   "relevance": 0.775,
+   "selected": true
+  },
+  {
+   "listing_id": 1867706896,
+   "title": "Good Luck Duck Gift Cute Duck Gift Desk Buddy Cute little Duck Pocket Hug Duck Best Friend Exams TravelGift Positive Gift Lucky Novelty Gift",
+   "price": 1.81,
+   "sold": 975,
+   "favorers": 4,
+   "materials": [
+    "resin"
+   ],
+   "size_ratio": null,
+   "market_weight": 8.688,
+   "relevance": 0.925,
+   "selected": true
+  },
+  {
+   "listing_id": 4443717559,
+   "title": "Lucky Duck Charm || Inspirational Duck Figurine || Friend Gift",
+   "price": 2.5,
+   "sold": 1522,
+   "favorers": 1,
+   "materials": [],
+   "size_ratio": null,
+   "market_weight": 8.675,
+   "relevance": 0.775,
+   "selected": true
+  },
+  {
+   "listing_id": 4511027038,
+   "title": "Duck Animascota – Pato Blanco Articulado 3D",
+   "price": 3.88,
+   "sold": 30,
+   "favorers": 1,
+   "materials": [],
+   "size_ratio": null,
+   "market_weight": 4.781,
+   "relevance": 0.725,
+   "excluded_by": [
+    "keychain",
+    "articulated",
+    "articulado"
+   ],
+   "selected": true
+  }
+ ],
+ "sample_every_kth": {
+  "k": 1,
+  "titles": [
+   {
+    "listing_id": 1096010173,
+    "title": "Halloween Duck Witch Hat Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Minature, Baby Duck, Wirches Hat",
+    "price": 3.23,
+    "sold": 85351,
+    "favorers": 766,
+    "materials": [
+     "resin",
+     "paint"
+    ],
+    "size_ratio": null,
+    "market_weight": 15.676,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 1602849144,
+    "title": "Red Devil Duck Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Bird, Halloween Decor, Collectible Display",
+    "price": 2.58,
+    "sold": 85351,
+    "favorers": 248,
+    "materials": [
+     "resin",
+     "paint"
+    ],
+    "size_ratio": null,
+    "market_weight": 15.113,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 1626958314,
+    "title": "Chef Duck Miniature, Tiny Animal Figurine, Dollhouse Decor, Diorama Accessory, Bird, 3d Printed Resin Kitchen Decor, Cook Gift, Food Lover",
+    "price": 2.58,
+    "sold": 85351,
+    "favorers": 327,
+    "materials": [
+     "resin",
+     "paint"
+    ],
+    "size_ratio": null,
+    "market_weight": 15.251,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 1823976342,
+    "title": "Fancy Duck Friend Keychains - Duck Figurines Handmade with Polymer Clay - Custom",
+    "price": 37.71,
+    "sold": 80,
+    "favorers": 7,
+    "materials": [
+     "Sculpey Souffle Polymer Clay",
+     "UV Resin Coating",
+     "Acrylic Paint for Details"
+    ],
+    "size_ratio": null,
+    "market_weight": 6.434,
+    "relevance": 0.0,
+    "excluded_by": [
+     "keychain",
+     "custom",
+     "material:polymer clay",
+     "material:clay"
+    ]
+   },
+   {
+    "listing_id": 1867706896,
+    "title": "Good Luck Duck Gift Cute Duck Gift Desk Buddy Cute little Duck Pocket Hug Duck Best Friend Exams TravelGift Positive Gift Lucky Novelty Gift",
+    "price": 1.81,
+    "sold": 975,
+    "favorers": 4,
+    "materials": [
+     "resin"
+    ],
+    "size_ratio": null,
+    "market_weight": 8.688,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 1884254105,
+    "title": "Pocket Hug Duck Keepsake, Unusual, Thoughtful, Sentimental Gift Novelty Charm",
+    "price": 1.81,
+    "sold": 975,
+    "favorers": 6,
+    "materials": [],
+    "size_ratio": null,
+    "market_weight": 8.856,
+    "relevance": 0.775
+   },
+   {
+    "listing_id": 4403388714,
+    "title": "Glow in Dark Resin Duck Charm | Glitter Pocket Hug, Stocking Filler (Random Colour)",
+    "price": 2.57,
+    "sold": 6952,
+    "favorers": 192,
+    "materials": [
+     "Epoxy Resin",
+     "Glitter",
+     "Glow Powder",
+     "Organza Bag"
+    ],
+    "size_ratio": null,
+    "market_weight": 12.478,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 4410124323,
+    "title": "Mini Glow Duck Charm | Random Color Resin Figurine (1.7cm)",
+    "price": 1.92,
+    "sold": 6952,
+    "favorers": 23,
+    "materials": [
+     "Epoxy Resin",
+     "Glow Powder",
+     "Organza Bag",
+     "Card"
+    ],
+    "size_ratio": null,
+    "market_weight": 11.436,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 4415060153,
+    "title": "Mini Resin Christmas Duck | Stocking Filler, Secret Santa Gift, Desk Buddy",
+    "price": 1.92,
+    "sold": 6952,
+    "favorers": 2,
+    "materials": [
+     "Epoxy Resin",
+     "Organza Bag",
+     "Cardstock",
+     "Ink"
+    ],
+    "size_ratio": null,
+    "market_weight": 10.396,
+    "relevance": 0.925
+   },
+   {
+    "listing_id": 4428566462,
+    "title": "Travel Duck Pocket Hug Cute Duck Keepsake, Cruises, Holidays, Travellers, Sentimental Thoughtful Gifts",
+    "price": 1.81,
+    "sold": 975,
+    "favorers": 11,
+    "materials": [],
+    "size_ratio": null,
+    "market_weight": 9.126,
+    "relevance": 0.775
+   },
+   {
+    "listing_id": 4443717559,
+    "title": "Lucky Duck Charm || Inspirational Duck Figurine || Friend Gift",
+    "price": 2.5,
+    "sold": 1522,
+    "favorers": 1,
+    "materials": [],
+    "size_ratio": null,
+    "market_weight": 8.675,
+    "relevance": 0.775
+   },
+   {
+    "listing_id": 4444149024,
+    "title": "5Pcs Resin Duck Ornament, Kawaii Desk Accessory, Car Dashboard Decor, Computer Display Accent",
+    "price": 34.82,
+    "sold": 1510,
+    "favorers": 6,
+    "materials": [
+     "Resin"
+    ],
+    "size_ratio": null,
+    "market_weight": 9.293,
+    "relevance": 0.725,
+    "excluded_by": [
+     "pcs"
+    ]
+   },
+   {
+    "listing_id": 4500299865,
+    "title": "Mallard duck family, handmade polymer clay miniature figurine",
+    "price": 45.0,
+    "sold": 2223,
+    "favorers": 17,
+    "materials": [],
+    "size_ratio": null,
+    "market_weight": 10.152,
+    "relevance": 0.0,
+    "excluded_by": [
+     "family",
+     "material:polymer clay",
+     "material:clay"
+    ]
+   },
+   {
+    "listing_id": 4511027038,
+    "title": "Duck Animascota – Pato Blanco Articulado 3D",
+    "price": 3.88,
+    "sold": 30,
+    "favorers": 1,
+    "materials": [],
+    "size_ratio": null,
+    "market_weight": 4.781,
+    "relevance": 0.725,
+    "excluded_by": [
+     "keychain",
+     "articulated",
+     "articulado"
+    ]
+   },
+   {
+    "listing_id": 4566235475,
+    "title": "Miniature Glowing Street Duck Figurine – Set of 2, Pick Your Style",
+    "price": 10.96,
+    "sold": 3,
+    "favorers": 0,
+    "materials": [
+     "Resin",
+     "Non toxic paint"
+    ],
+    "size_ratio": null,
+    "market_weight": 2.386,
+    "relevance": 0.0,
+    "excluded_by": [
+     "set of",
+     "material:polymer clay",
+     "material:clay"
+    ]
+   }
+  ]
+ },
+ "rules": {
+  "noun": "duck",
+  "required_any": [
+   "charm",
+   "mini",
+   "miniature",
+   "tiny",
+   "pocket hug",
+   "figurine"
+  ],
+  "excluded": [
+   "set of",
+   "pcs",
+   "pack of",
+   "bundle",
+   "family",
+   "keychain",
+   "articulated",
+   "articulado",
+   "custom"
+  ],
+  "materials_allowed": [
+   "resin",
+   "epoxy resin",
+   "pla",
+   "petg",
+   "3d printed",
+   "plastic"
+  ],
+  "materials_excluded": [
+   "polymer clay",
+   "clay",
+   "ceramic",
+   "porcelain",
+   "metal",
+   "wood",
+   "wooden",
+   "glass"
+  ],
+  "taxonomy_id": 1799,
+  "notes": "a single 12 mm printed duck charm or miniature, not a family, a pack, a keychain or an articulated toy"
+ },
+ "min_relevance": 0.6,
+ "n_selected": 12,
+ "top_rejected_by_market_weight": [
+  {
+   "listing_id": 4500299865,
+   "title": "Mallard duck family, handmade polymer clay miniature figurine",
+   "price": 45.0,
+   "sold": 2223,
+   "favorers": 17,
+   "materials": [],
+   "size_ratio": null,
+   "market_weight": 10.152,
+   "relevance": 0.0,
+   "excluded_by": [
+    "family",
+    "material:polymer clay",
+    "material:clay"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 1823976342,
+   "title": "Fancy Duck Friend Keychains - Duck Figurines Handmade with Polymer Clay - Custom",
+   "price": 37.71,
+   "sold": 80,
+   "favorers": 7,
+   "materials": [
+    "Sculpey Souffle Polymer Clay",
+    "UV Resin Coating",
+    "Acrylic Paint for Details"
+   ],
+   "size_ratio": null,
+   "market_weight": 6.434,
+   "relevance": 0.0,
+   "excluded_by": [
+    "keychain",
+    "custom",
+    "material:polymer clay",
+    "material:clay"
+   ],
+   "selected": false
+  },
+  {
+   "listing_id": 4566235475,
+   "title": "Miniature Glowing Street Duck Figurine – Set of 2, Pick Your Style",
+   "price": 10.96,
+   "sold": 3,
+   "favorers": 0,
+   "materials": [
+    "Resin",
+    "Non toxic paint"
+   ],
+   "size_ratio": null,
+   "market_weight": 2.386,
+   "relevance": 0.0,
+   "excluded_by": [
+    "set of",
+    "material:polymer clay",
+    "material:clay"
+   ],
+   "selected": false
+  }
+ ],
+ "relevance_histogram": [
+  {
+   "lo": 0.0,
+   "hi": 0.09,
+   "n": 3
+  },
+  {
+   "lo": 0.09,
+   "hi": 0.18,
+   "n": 0
+  },
+  {
+   "lo": 0.18,
+   "hi": 0.28,
+   "n": 0
+  },
+  {
+   "lo": 0.28,
+   "hi": 0.37,
+   "n": 0
+  },
+  {
+   "lo": 0.37,
+   "hi": 0.46,
+   "n": 0
+  },
+  {
+   "lo": 0.46,
+   "hi": 0.55,
+   "n": 0
+  },
+  {
+   "lo": 0.55,
+   "hi": 0.65,
+   "n": 0
+  },
+  {
+   "lo": 0.65,
+   "hi": 0.74,
+   "n": 2
+  },
+  {
+   "lo": 0.74,
+   "hi": 0.83,
+   "n": 3
+  },
+  {
+   "lo": 0.83,
+   "hi": 0.93,
+   "n": 7
+  }
+ ]
+}

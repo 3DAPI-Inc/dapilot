@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# local env with the staging key; the root .gitignore ignores this too
+.env
+.env.*
+!.env.example

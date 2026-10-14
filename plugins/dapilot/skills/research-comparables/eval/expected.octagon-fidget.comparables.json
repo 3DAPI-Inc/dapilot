@@ -1,0 +1,41 @@
+{
+  "product": "octagon passthrough spiral cone fidget, two nested twisted pieces",
+  "queries": [
+    "octagon fidget"
+  ],
+  "taxonomy_id": 1628,
+  "currency": "USD",
+  "source": "research/etsy.json",
+  "comparables": [
+    {
+      "listing_id": 1762197662,
+      "price": 10.0,
+      "reason": "same object: passthrough spiral cone, PLA, single unit, shop sells thousands"
+    },
+    {
+      "listing_id": 1868521783,
+      "price": 6.99,
+      "reason": "same object: vortex illusion cone, PLA; price is the smallest variant"
+    },
+    {
+      "listing_id": 4406204952,
+      "price": 5.99,
+      "reason": "same mechanism: impossible passthrough spiral, holiday shape, PLA, within size window"
+    },
+    {
+      "listing_id": 1890360765,
+      "price": 10.51,
+      "reason": "same aisle: octagon infinity twist, PLA; closest substitute buyers see for this query"
+    },
+    {
+      "listing_id": 4307614125,
+      "price": 5.49,
+      "reason": "same aisle: octagon swirl fidget, PLA, size ratio 0.98"
+    },
+    {
+      "listing_id": 4469079387,
+      "price": 5.55,
+      "reason": "same aisle: octagon geometric fidget, PLA"
+    }
+  ]
+}

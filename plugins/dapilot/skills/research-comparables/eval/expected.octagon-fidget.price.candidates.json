@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "product": "octagon passthrough spiral cone fidget, two nested twisted pieces",
+  "currency": "USD",
+  "quote_unit_price": 5.71,
+  "unit_cost": 5.71,
+  "floor": 8.99,
+  "floor_rule": "break-even (cost + fees + VAT owed) rounded up to the policy ending; a price below it is refused by --check for any author",
+  "market": {
+    "n": 6,
+    "min": 5.49,
+    "p25": 5.66,
+    "median": 6.49,
+    "p75": 9.25,
+    "max": 10.51
+  },
+  "candidates": [
+    {
+      "label": "markup",
+      "price": 8.99,
+      "net_of_vat": 7.43,
+      "fees": 1.47,
+      "unit_cost": 5.71,
+      "margin": 0.25,
+      "margin_pct": 0.033,
+      "markup_on_cost_pct": 57.4,
+      "how": "quote 5.71 plus 50% markup, rounded up",
+      "vs_median": 1.39,
+      "position_in_band": "within_p25_p75"
+    }
+  ],
+  "rejected": [
+    {
+      "label": "median",
+      "price": 5.99,
+      "net_of_vat": 4.95,
+      "fees": 1.16,
+      "unit_cost": 5.71,
+      "margin": -1.92,
+      "margin_pct": -0.388,
+      "markup_on_cost_pct": 4.9,
+      "how": "market median of 6 comparables, 6.49, rounded",
+      "vs_median": 0.92,
+      "position_in_band": "within_p25_p75",
+      "below_floor_by": 3.0
+    }
+  ],
+  "policy": {
+    "platform": "etsy",
+    "seller_region": "EU",
+    "listing_fee": 0.2,
+    "payment_fixed": 0.33,
+    "pct_of_price": 0.105,
+    "vat_rate": 0.21,
+    "vat_in_sale_price": true,
+    "vat_added_to_purchase": false,
+    "markup_pct": 50.0,
+    "rounding": "0.99"
+  },
+  "verdict": "not_viable"
+}

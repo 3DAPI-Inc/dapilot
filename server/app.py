@@ -1,0 +1,944 @@
+"""dapilot job API: the frontend's backend. The browser never talks to dapi.
+
+  .venv/bin/uvicorn server.app:app --port 3100 --reload
+
+POST /jobs (multipart `files`)     take the upload into the pipeline: strip foreign 3mf
+                                   project settings, write work/<sha256>/, start a run
+GET  /jobs                         every item known, newest first, stage and status from files
+GET  /jobs/{id}                    one item with everything the work dir holds
+GET  /jobs/{id}/events             one line per stage that produced its file, from mtimes
+GET  /jobs/{id}/files/{path}       renders and json out of the work dir, read only
+GET  /runs                         every run on disk, newest first, with counts, cost and whether it is live
+GET  /runs/unfinished              work dirs with a stage still to run and no run holding them
+POST /runs/resume                  start one director over all of those (also at boot when
+                                   store/config.json has resume_on_start: true)
+GET  /runs/{run}/report            the run's report.md
+GET  /jobs/{id}/price/preview      what a price earns: net, fees, margin, against the floor (pricing.py)
+POST /jobs/{id}/price              a person confirms the proposed price or overrides it; the script's
+                                   --check is the judge, the floor holds for people too. Writes
+                                   price.approved.json, files the product, queues the rest of intake
+GET  /products                     the catalogue: every item with an approved price
+
+Every route is also served under /api, which is what the console calls
+through the Vite proxy; the media and report URLs the server mints carry
+that prefix. The console's dev server starts this app itself when nothing
+answers on :3100 (frontend/vite.config.ts), so `npm run dev` is the whole
+setup; `scripts/dev/up.sh` still starts it first when it runs the checks.
+
+Stage and status are never stored. They are read off the work dir against the
+same stage table the ledger uses (run-intake/reference/stages.json), so the
+UI and the pipeline cannot disagree. A `.lock` in the work dir means a worker
+holds it; a live director process for the item means the next stage is
+coming; otherwise the item waits for someone to start a run.
+
+The pipeline itself is `run_intake.py`, one process per upload. Its workers
+are Claude agents; this server holds no model and makes no judgement.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, FastAPI, HTTPException, UploadFile
+from pydantic import BaseModel
+from fastapi.responses import FileResponse, JSONResponse
+
+ROOT = Path(os.environ.get("DAPILOT_PROJECT_DIR") or Path(__file__).resolve().parents[1])
+PLUGIN = ROOT / "plugins" / "dapilot"
+SCRIPTS = PLUGIN / "scripts"
+STAGES_FILE = PLUGIN / "skills" / "run-intake" / "reference" / "stages.json"
+WORK = ROOT / "work"
+INTAKE = ROOT / "intake"
+RUNS = ROOT / "runs"
+SUPPORTED = {".stl", ".3mf", ".obj", ".step", ".stp"}
+SERVABLE = {".png", ".jpg", ".mp4", ".json", ".md"}
+
+
+def env_value(raw: str) -> str:
+    """A .env value the way bash's `source` reads it: quoted up to its closing quote, else cut at ` #`.
+    A trailing comment on FAL_API_KEY went to fal as part of the key (2026-09-22); bash had dropped it."""
+    v = raw.strip()
+    if v[:1] in "\"'" and v[:1] and v.find(v[0], 1) > 0:
+        return v[1:v.find(v[0], 1)]
+    if v.startswith("#"):  # `KEY=   # comment` is an empty value, not a comment as the value
+        return ""
+    return re.split(r"\s#", v, maxsplit=1)[0].strip()
+
+
+def load_env() -> None:
+    sys.path.insert(0, str(ROOT / "plugins" / "dapilot" / "scripts"))
+    from store_path import store_dir as _store_dir  # one rule with the plugin: $DAPILOT_STORE_DIR, a checkout's store/, else ~/.dapilot
+    os.environ.setdefault("DAPILOT_PROJECT_DIR", str(ROOT))
+    store = _store_dir()
+    env = store / ".env"
+    if env.exists():
+        for line in env.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip().removeprefix("export ").strip(), env_value(v))
+    os.environ.setdefault("DAPILOT_STORE_DIR", str(store))
+    os.environ.setdefault("DAPILOT_PROJECT_DIR", str(ROOT))
+
+
+load_env()
+PY = os.environ.get("DAPILOT_PYTHON") or sys.executable
+app = FastAPI(title="dapilot job API")
+# Every route lives on this router, served at / and again under /api: the
+# console calls /api/... through the Vite proxy, scripts and up.sh call /...
+api = APIRouter()
+DIRECTORS: dict[str, dict] = {}   # run id -> {proc, items, started, folder}
+LOCK = threading.Lock()
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds")
+
+
+def stages() -> list[dict]:
+    return [s for s in json.loads(STAGES_FILE.read_text())["stages"] if s.get("enabled", True)]
+
+
+def read_json(p: Path) -> dict | None:
+    try:
+        return json.loads(p.read_text()) if p.exists() else None
+    except ValueError:
+        return None
+
+
+def exists(wd: Path, pattern: str) -> bool:
+    return any(wd.glob(pattern))
+
+
+# ------------------------------------------------------------------ intake
+
+def read_assembly(path: Path) -> dict | None:
+    """Bambu's assemble block and per-part filament colours. Read before the strip, which removes both."""
+    if path.suffix.lower() != ".3mf":
+        return None
+    out = path.with_name(path.stem + ".assembly.json")
+    r = subprocess.run([PY, str(SCRIPTS / "assembly_3mf.py"), "read", str(path), "--out", str(out)],
+                       capture_output=True, text=True)
+    doc = read_json(out) if r.returncode == 0 else None
+    out.unlink(missing_ok=True)
+    return doc if doc and (doc.get("source") or doc.get("multicolour")) else None
+
+
+def strip_if_project(path: Path) -> dict:
+    """Foreign 3mf project settings make 3DAPI's slicer fail; keep the geometry only."""
+    if path.suffix.lower() != ".3mf":
+        return {"stripped": False}
+    check = subprocess.run([PY, str(SCRIPTS / "strip_3mf.py"), str(path), "--check"], capture_output=True, text=True)
+    if check.returncode == 0:
+        return {"stripped": False}
+    if check.returncode != 2:
+        raise HTTPException(400, f"{path.name}: {check.stderr.strip()[-300:] or 'not a readable 3mf'}")
+    info = json.loads(check.stdout)
+    out = path.with_name(path.stem + ".stripped.3mf")
+    r = subprocess.run([PY, str(SCRIPTS / "strip_3mf.py"), str(path), str(out)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise HTTPException(500, f"{path.name}: strip failed: {r.stderr.strip()[-300:]}")
+    original_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    path.unlink()
+    out.rename(path)
+    return {"stripped": True, "original_sha256": original_sha, "application": info.get("application"),
+            "printer_model": info.get("printer_model"), "removed": info.get("removed")}
+
+
+def reject(folder: Path, message: str, status: int = 400) -> None:
+    """A refused upload leaves no intake folder behind."""
+    if folder.exists() and not any(folder.iterdir()):
+        folder.rmdir()
+    raise HTTPException(status, message)
+
+
+def start_director(run: str, items: list[str], folder: Path | None = None, resume: bool = False) -> None:
+    """One run_intake.py per run. Folder for fresh uploads, --items for work dirs already on disk."""
+    log = RUNS / run / "director.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [PY, str(SCRIPTS / "run_intake.py"), "--run", run]
+    if folder:
+        cmd.append(str(folder))
+    if resume:
+        cmd.append("--resume")
+    elif not folder and items:
+        cmd += ["--items", ",".join(items)]
+    # Its own session: a ctrl-c or a Vite restart that stops this server must not take the director with
+    # it. Workers already survive that way (run_headless), so a design stage finished while the director
+    # that would dispatch copy was dead, and the item sat "queued for copy" with nothing running.
+    proc = subprocess.Popen(cmd, cwd=ROOT, stdout=open(log, "a"), stderr=subprocess.STDOUT,
+                            start_new_session=True, env={**os.environ, "DAPILOT_PROJECT_DIR": str(ROOT)})
+    with LOCK:
+        DIRECTORS[run] = {"proc": proc, "items": items, "started": now(), "folder": str(folder) if folder else None,
+                          "log": str(log), "resume": resume}
+
+
+def unfinished_items() -> list[str]:
+    """Work dirs with an enabled stage still to run and nothing marking them stopped, as the ledger sees it."""
+    r = subprocess.run([PY, str(SCRIPTS / "ledger.py"), "init", "--run", "_probe", "--resume"],
+                       capture_output=True, text=True, cwd=ROOT)
+    try:
+        items = json.loads(r.stdout).get("added", [])
+    except ValueError:
+        items = []
+    probe = RUNS / "_probe"
+    if probe.exists():
+        for f in probe.iterdir():
+            f.unlink()
+        probe.rmdir()
+    return [i for i in items if not director_alive_for(i)]
+
+
+def resume_all() -> dict:
+    items = unfinished_items()
+    if not items:
+        return {"ok": True, "run": None, "items": []}
+    run = "resume-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    start_director(run, items, resume=True)
+    return {"ok": True, "run": run, "items": items}
+
+
+@app.on_event("startup")
+def resume_on_start() -> None:
+    cfg = read_json(Path(os.environ["DAPILOT_STORE_DIR"]) / "config.json") or {}
+    if cfg.get("resume_on_start"):
+        r = resume_all()
+        print(f"[server] resume_on_start: {len(r['items'])} unfinished item(s)" + (f" -> run {r['run']}" if r["run"] else ""))
+    else:
+        n = len(unfinished_items())
+        if n:
+            print(f"[server] {n} unfinished item(s) on disk; POST /runs/resume or set resume_on_start in store/config.json")
+
+
+def worker_budget_minutes() -> float:
+    cfg = read_json(Path(os.environ["DAPILOT_STORE_DIR"]) / "config.json") or {}
+    base = float(cfg.get("max_worker_minutes", 15))
+    return max([base, *(float(v) for v in (cfg.get("minutes_per_stage") or {}).values())])
+
+
+def runs_on_disk() -> dict[str, dict]:
+    """run id -> state.json, for every run under runs/ (the ledger's own record, whoever started it)."""
+    out = {}
+    if RUNS.exists():
+        for d in RUNS.iterdir():
+            if d.is_dir() and not d.name.startswith("_"):
+                st = read_json(d / "state.json")
+                if st:
+                    out[d.name] = st
+    return out
+
+
+def run_is_live(run: str, state: dict | None = None) -> bool:
+    """Live when this server holds its director, or its ledger shows a stage dispatched within the worker budget."""
+    with LOCK:
+        d = DIRECTORS.get(run)
+        if d and d["proc"].poll() is None:
+            return True
+    state = state or read_json(RUNS / run / "state.json")
+    if not state:
+        return False
+    budget = worker_budget_minutes() * 60 + 60
+    for item in state.get("items", {}).values():
+        # A worker writes the item's .lock within seconds of starting. Past that, a "running" stage
+        # with no lock is a director that was killed before it could record (2026-09-22: a killed
+        # run held both its items for 40 minutes and /runs/resume started nothing).
+        locked = bool(item.get("workdir")) and (ROOT / item["workdir"] / ".lock").exists()
+        for rec in item.get("stages", {}).values():
+            if rec.get("status") == "running" and rec.get("dispatched"):
+                try:
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(rec["dispatched"])).total_seconds()
+                except ValueError:
+                    continue
+                if age < budget and (locked or age < 120):
+                    return True
+    return False
+
+
+def director_alive_for(item: str) -> str | None:
+    """The live run holding this item, from this server's directors or from the ledgers on disk."""
+    with LOCK:
+        for run, d in DIRECTORS.items():
+            if item in d["items"] and d["proc"].poll() is None:
+                return run
+    for run, state in sorted(runs_on_disk().items(), reverse=True):
+        if item in state.get("items", {}) and run_is_live(run, state):
+            return run
+    return None
+
+
+def director_failed_for(item: str) -> str | None:
+    """Why the newest director this server started for the item exited with an error, from the end of its log."""
+    with LOCK:
+        mine = [(d["started"], run, d) for run, d in DIRECTORS.items() if item in d["items"]]
+    for _, run, d in sorted(mine, reverse=True)[:1]:   # only the newest: an older failure is history
+        code = d["proc"].poll()
+        if code is None or code == 0:
+            continue
+        try:
+            lines = [l.strip() for l in Path(d["log"]).read_text().splitlines() if l.strip()]
+        except OSError:
+            lines = []
+        last = lines[-1] if lines else ""
+        try:
+            last = json.loads(last).get("reason") or last
+        except (ValueError, AttributeError):
+            pass
+        return f"the director for run {run} exited with code {code}: {last or 'no output'} (runs/{run}/director.log)"
+    return None
+
+
+def runs_for(item: str) -> list[str]:
+    return sorted(run for run, st in runs_on_disk().items() if item in st.get("items", {}))
+
+
+@api.post("/jobs")
+async def create_jobs(files: list[UploadFile]) -> JSONResponse:
+    if not files:
+        raise HTTPException(400, "no files")
+    upload_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + hashlib.sha1(os.urandom(8)).hexdigest()[:6]
+    folder = INTAKE / upload_id
+    folder.mkdir(parents=True, exist_ok=True)
+    items: list[str] = []
+    created: list[dict] = []
+    for f in files:
+        name = Path(f.filename or "upload").name
+        ext = Path(name).suffix.lower()
+        if ext not in SUPPORTED:
+            reject(folder, f"unsupported: {ext or 'no extension'}")
+        data = await f.read()
+        if not data:
+            reject(folder, f"{name}: empty file")
+        safe = re.sub(r"[^A-Za-z0-9._+-]", "_", name)
+        path = folder / safe
+        path.write_bytes(data)
+        assembly = read_assembly(path)
+        strip = strip_if_project(path)
+        item = hashlib.sha256(path.read_bytes()).hexdigest()
+        wd = WORK / item
+        wd.mkdir(parents=True, exist_ok=True)
+        src = wd / f"source{ext}"
+        if not src.exists():
+            src.write_bytes(path.read_bytes())
+        meta_p = wd / "meta.json"
+        if not meta_p.exists():
+            meta = {"file": name, "bytes": path.stat().st_size, "sha256": item, "first_seen": now(), "via": "frontend", **strip}
+            meta_p.write_text(json.dumps(meta, indent=2))
+        if assembly and not (wd / "assembly.json").exists():
+            # The renderers show display.ply: parts placed per required_assembly, in their filament colours.
+            (wd / "assembly.json").write_text(json.dumps(assembly, indent=1))
+            subprocess.run([PY, str(SCRIPTS / "assembly_3mf.py"), "build", "--workdir", str(wd)], capture_output=True)
+        runs_p = wd / "runs.json"
+        runs = read_json(runs_p) or []
+        runs.append(f"frontend-{upload_id}")
+        runs_p.write_text(json.dumps(runs, indent=2))
+        items.append(item)
+    start_director(f"frontend-{upload_id}", items, folder=folder)
+    for item in items:
+        created.append(job(item))
+    return JSONResponse(created, status_code=201)
+
+
+# ------------------------------------------------------------------ status from files
+
+def status_of(item: str, wd: Path, meta: dict) -> dict:
+    """Stage and status the way the ledger sees them, plus the reason when there is one."""
+    # a worker writes its .lock as JSON, plain text or nothing at all; it is held whatever it holds
+    lock = (read_json(wd / ".lock") or {}) if (wd / ".lock").exists() else None
+    run = director_alive_for(item)
+    done_stages = []
+    for st in stages():
+        if all(exists(wd, p) for p in st["produces"]):
+            done_stages.append(st["stage"])
+            continue
+        stage = st["stage"]
+        # the stage's own failure or hold files
+        if stage == "analyze" and (wd / "analysis.error.json").exists():
+            a = read_json(wd / "analysis.error.json") or {}
+            return {"stage": stage, "status": "failed", "reason": a.get("reason") or "analysis failed", "done": done_stages}
+        if stage == "quote":
+            if (wd / "quote.error.json").exists():
+                q = read_json(wd / "quote.error.json") or {}
+                return {"stage": "slice", "status": "failed", "reason": q.get("raw", {}).get("errorMessage") or q.get("status") or "slicer error",
+                        "quoteId": q.get("publicId"), "done": done_stages}
+            if (wd / "quote.pending.json").exists():
+                q = read_json(wd / "quote.pending.json") or {}
+                return {"stage": "slice", "status": "running", "reason": "slicing on 3DAPI", "quoteId": q.get("publicId"), "done": done_stages}
+        if stage == "price" and (wd / "price.rejected.json").exists():
+            r = read_json(wd / "price.rejected.json") or {}
+            return {"stage": stage, "status": "blocked", "reason": f"no sellable price: floor {r.get('floor')} against market median {r.get('market', {}).get('median')}", "done": done_stages}
+        if stage == "design" and (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
+            return {"stage": "price", "status": "blocked", "reason": "waiting for a person to approve the price", "done": done_stages}
+        # The ledger's marker: the stage ended failed or blocked in some run, and no run touches it until it is cleared.
+        for kind in ("failed", "blocked"):
+            m = read_json(wd / f"{stage}.{kind}.json") if (wd / f"{stage}.{kind}.json").exists() else None
+            if m is not None:
+                why = m.get("question") or m.get("reason") or f"{kind} in run {m.get('run')}"
+                return {"stage": "slice" if stage == "quote" else stage, "status": kind,
+                        "reason": f"{why} (run {m.get('run')}; Try again clears it)", "held": f"{stage}.{kind}.json", "done": done_stages}
+        # The reason says what "queued" and "running" mean for this item, because the row shows it: a
+        # queued item with no director behind it is not queued anywhere, and the console said so only
+        # in a field it hid (2026-09-23).
+        if lock is not None and (lock.get("stage") == stage or not lock.get("stage")):
+            return {"stage": "slice" if stage == "quote" else stage, "status": "running",
+                    "reason": f"a {lock.get('agent') or 'worker'} holds this item" + (f" in run {run}" if run else ""), "done": done_stages}
+        if lock is not None:
+            held = lock.get("stage")
+            return {"stage": "slice" if held == "quote" else held, "status": "running",
+                    "reason": f"a {lock.get('agent') or 'worker'} holds this item at {held}" + (f" in run {run}" if run else ""), "done": done_stages}
+        if run:
+            return {"stage": "slice" if stage == "quote" else stage, "status": "queued",
+                    "reason": f"run {run} is live; {stage} is next", "done": done_stages}
+        died = director_failed_for(item)
+        if died:
+            return {"stage": "slice" if stage == "quote" else stage, "status": "failed", "reason": died, "done": done_stages}
+        return {"stage": "slice" if stage == "quote" else stage, "status": "queued", "idle": True,
+                "reason": f"nothing is running; Continue starts {stage}", "done": done_stages}
+    last = done_stages[-1] if done_stages else "intake"
+    return {"stage": "slice" if last == "quote" else last, "status": "done", "reason": None, "done": done_stages}
+
+
+def job(item: str) -> dict | None:
+    wd = WORK / item
+    meta = read_json(wd / "meta.json")
+    if not meta:
+        return None
+    s = status_of(item, wd, meta)
+    j = {"id": item, "fileName": meta.get("file", item), "createdAt": meta.get("first_seen"), "idle": bool(s.get("idle")),
+         "updatedAt": iso(max((p.stat().st_mtime for p in wd.rglob("*") if p.is_file()), default=0)) if wd.exists() else meta.get("first_seen"),
+         "stage": s["stage"], "status": s["status"], "reason": s.get("reason"), "stagesDone": s["done"],
+         "stripped": bool(meta.get("stripped")), "sourceApplication": meta.get("application"), "runs": runs_for(item)}
+    q = read_json(wd / "quote.json")
+    if q:
+        j.update(price=q.get("unit_price"), quoteId=q.get("publicId"), batch=q.get("batch"), metrics=q.get("metrics"))
+    elif s.get("quoteId"):
+        j["quoteId"] = s["quoteId"]
+    a = read_json(wd / "analysis.json")
+    if a:
+        j["analysis"] = {k: a.get(k) for k in ("bbox_mm", "volume_mm3", "bodies", "watertight_bodies", "triangles")}
+        shown = read_json(wd / "display.json") or {}
+        if shown.get("pose") == "assembled" and shown.get("bbox_mm"):
+            j["analysis"]["bbox_mm"] = shown["bbox_mm"]  # the assembled product; the analysis box is the print layout
+    # The 3MF's own previews, copied out at registration: the first picture of an upload, before any draft.
+    j["thumbnails"] = [f"/api/jobs/{item}/files/thumbnails/{p.name}" for p in sorted((wd / "thumbnails").glob("*.png"))]
+    return j
+
+
+def detail(item: str) -> dict:
+    j = job(item)
+    if not j:
+        raise HTTPException(404, "no such job")
+    wd = WORK / item
+    v = read_json(wd / "viability.json")
+    if v and v.get("ok"):
+        s0 = (v.get("scenarios") or [{}])[0]
+        j["viability"] = {"verdict": v.get("verdict"), "verdictReason": v.get("verdict_reason"),
+                          "product": v.get("product"), "n": v.get("n_comparables"),
+                          "identity": v.get("identity"),
+                          "market": v.get("market"), "breakEven": s0.get("break_even_price"), "markupPrice": s0.get("markup_price"),
+                          "unitCost": s0.get("unit_cost"), "atMedian": next((a for a in s0.get("at", []) if a.get("label") == "median"), None),
+                          # The unit of sale (2026-10-12): the pack we list, its cost and the band at it; the scenario's offer block.
+                          "offer": v.get("offer"), "offerScenario": s0.get("offer"),
+                          "policy": v.get("policy"), "stock": v.get("stock"), "costBasis": v.get("cost_basis"),
+                          "ours": {k: (v.get("ours") or {}).get(k) for k in ("quote_unit_price_one_off", "quote_unit_price_full_plate",
+                                                                             "max_per_plate", "plate_discount_pct")}}
+    elif v:
+        j["viability"] = {"verdict": "no_market", "reason": v.get("reason")}
+    c = read_json(wd / "comparables.json")
+    if c:
+        # The rules shape is already ordered by market weight; the hand-written
+        # shape has no weight, so it keeps the old order by shop sales.
+        rows = c.get("comparables", [])
+        if not any(isinstance(x.get("market_weight"), (int, float)) for x in rows):
+            rows = sorted(rows, key=lambda x: (x.get("shop") or {}).get("sold") or 0, reverse=True)
+        j["comparables"] = {"product": c.get("product"), "identity": c.get("identity"), "queries": c.get("queries"), "n": len(rows),
+                            "rejected": c.get("rejected_count", len(c.get("rejected", []))),
+                            "top": [{"title": x.get("title"), "url": x.get("url"), "price": x.get("price"),
+                                     "sold": (x.get("shop") or {}).get("sold", x.get("sold")),
+                                     "shop": (x.get("shop") or {}).get("name"),
+                                     "favorers": x.get("favorers", x.get("num_favorers")),
+                                     "unitsPerDay": (x.get("sales_est") or {}).get("units_per_day"),
+                                     "reason": x.get("reason"), "image": (x.get("images") or [None])[0]} for x in rows[:6]]}
+    cand = read_json(wd / "price.candidates.json")
+    rej = read_json(wd / "price.rejected.json")
+    chosen = read_json(wd / "price.json")
+    if cand or rej or chosen:
+        src = cand or rej or {}
+        j["pricing"] = {"floor": src.get("floor"), "minMarginPct": src.get("min_margin_pct"),
+                        "offer": src.get("offer"),
+                        "candidates": src.get("candidates", []), "rejectedCandidates": src.get("rejected", []),
+                        "skipped": src.get("skipped", []), "p75Sellers": src.get("p75_sellers"),
+                        "costBases": src.get("cost_bases"), "currency": src.get("currency") or "USD",
+                        "proposal": chosen, "rejected": rej.get("reason") if rej and not chosen else None,
+                        "approved": read_json(wd / "price.approved.json")}
+    renders = wd / "renders"
+    if renders.exists():
+        j["renders"] = {"drafts": [f"/api/jobs/{item}/files/renders/{p.name}" for p in sorted(renders.glob("draft_*.png"))],
+                        "hero": f"/api/jobs/{item}/files/renders/hero.png" if (renders / "hero.png").exists() else None,
+                        "angles": [f"/api/jobs/{item}/files/renders/{p.name}" for p in sorted(renders.glob("angle_*.png"))],
+                        "video": f"/api/jobs/{item}/files/renders/turntable.mp4" if (renders / "turntable.mp4").exists() else None}
+    d = read_json(wd / "design.json")
+    if d and d.get("ok"):
+        url = lambda rel: f"/api/jobs/{item}/files/{rel}"  # noqa: E731
+        video = d.get("video") or None
+        j["design"] = {"name": d.get("name"), "color": d.get("color"), "reason": d.get("reason"),
+                       "photos": [{"id": p["id"], "kind": p["kind"], "url": url(p["file"]), "px": p.get("px")} for p in d.get("photos", [])],
+                       "video": {"id": video["id"], "url": url(video["file"]), "seconds": video.get("seconds")} if video else None,
+                       "turntable": url(d["videos"]["turntable"]) if d.get("videos", {}).get("turntable") else None,
+                       "rejected": d.get("rejected", []), "failed": d.get("failed", []),
+                       "spendUsd": (d.get("spend") or {}).get("usd", 0), "warnings": d.get("warnings", [])}
+    log = wd / "log.md"
+    if log.exists():
+        j["log"] = log.read_text()[-6000:]
+    return j
+
+
+@api.get("/jobs")
+def list_jobs() -> list[dict]:
+    if not WORK.exists():
+        return []
+    jobs = [j for d in WORK.iterdir() if d.is_dir() and (j := job(d.name))]
+    return sorted(jobs, key=lambda j: j.get("createdAt") or "", reverse=True)
+
+
+@api.get("/jobs/{item}")
+def get_job(item: str) -> dict:
+    return detail(item)
+
+
+@api.get("/jobs/{item}/events")
+def get_events(item: str) -> list[dict]:
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    events = [{"stage": "intake", "attempt": 1, "status": "done", "durationMs": 0, "at": (read_json(wd / "meta.json") or {}).get("first_seen")}]
+    prev = (wd / "meta.json").stat().st_mtime
+    for st in stages():
+        produced = [p for pat in st["produces"] for p in wd.glob(pat)]
+        if produced:
+            t = max(p.stat().st_mtime for p in produced)
+            events.append({"stage": "slice" if st["stage"] == "quote" else st["stage"], "attempt": 1, "status": "done",
+                           "durationMs": int(max(t - prev, 0) * 1000), "at": iso(t)})
+            prev = t
+    for name, stage in (("analysis.error.json", "analyze"), ("quote.error.json", "slice"), ("price.rejected.json", "price")):
+        p = wd / name
+        if p.exists():
+            events.append({"stage": stage, "attempt": 1, "status": "failed" if "error" in name else "blocked",
+                           "durationMs": 0, "at": iso(p.stat().st_mtime)})
+    return sorted(events, key=lambda e: e["at"] or "")
+
+
+@api.get("/jobs/{item}/files/{path:path}")
+def get_file(item: str, path: str) -> FileResponse:
+    wd = (WORK / item).resolve()
+    target = (wd / path).resolve()
+    if wd not in target.parents or not target.is_file() or target.suffix.lower() not in SERVABLE:
+        raise HTTPException(404, "no such file")
+    return FileResponse(target)
+
+
+def run_summary(run: str) -> dict | None:
+    """A run as its state.json tells it, plus whether this server still has its director."""
+    state = read_json(RUNS / run / "state.json")
+    if not state:
+        return None
+    counts = {"queued": 0, "running": 0, "blocked": 0, "done": 0, "failed": 0}
+    for item in state.get("items", {}).values():
+        for rec in item.get("stages", {}).values():
+            counts[rec.get("status", "queued")] = counts.get(rec.get("status", "queued"), 0) + 1
+    alive = run_is_live(run, state)
+    return {"run": run, "started": state.get("started"), "department": state.get("department"),
+            "items": list(state.get("items", {}).keys()), "files": [i.get("file") for i in state.get("items", {}).values()],
+            "counts": counts, "cost": state.get("cost", {}), "alive": alive,
+            "report": f"/api/runs/{run}/report" if (RUNS / run / "report.md").exists() else None,
+            "notes": state.get("notes", [])[-5:]}
+
+
+@api.get("/runs")
+def list_runs(limit: int = 30) -> list[dict]:
+    if not RUNS.exists():
+        return []
+    runs = [r for d in sorted(RUNS.iterdir(), reverse=True) if d.is_dir() and not d.name.startswith("_") and (r := run_summary(d.name))]
+    return sorted(runs, key=lambda r: r["started"] or "", reverse=True)[:limit]
+
+
+@api.get("/runs/unfinished")
+def list_unfinished() -> dict:
+    items = unfinished_items()
+    return {"items": items, "count": len(items)}
+
+
+@api.post("/runs/resume")
+def post_resume() -> dict:
+    return resume_all()
+
+
+@api.get("/runs/{run}/report")
+def run_report(run: str):
+    p = RUNS / run / "report.md"
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", run) or not p.exists():
+        raise HTTPException(404, "no report for that run")
+    return FileResponse(p, media_type="text/markdown")
+
+
+# ------------------------------------------------------------------ the price gate
+
+sys.path.insert(0, str(SCRIPTS))
+from pricing import Model, PricingError, load_fees, load_policy, unit_cost_basis  # noqa: E402
+
+
+def offer_units(wd: Path) -> int:
+    """How many printed units one sale brings (viability.json offer.units, the market's modal pack); 1 before 2026-10-12."""
+    o = (read_json(wd / "viability.json") or {}).get("offer")
+    u = o.get("units") if isinstance(o, dict) else None
+    return u if isinstance(u, int) and not isinstance(u, bool) and u > 0 else 1
+
+
+def price_model(wd: Path) -> tuple[Model, float, float]:
+    """(formula, cost of one sale, floor) for one item, exactly as price_candidates.py builds them.
+
+    The cost is for the offer: units x the unit cost, since a sale of a six-coaster set
+    prints six coasters and pays the fixed fees once.
+    """
+    quote = read_json(wd / "quote.json")
+    if not quote:
+        raise HTTPException(409, "not quoted yet")
+    try:
+        policy, _ = load_policy()
+        fees, _ = load_fees(policy)
+        model = Model(policy, fees)
+        cost = model.cost(unit_cost_basis(quote, policy)["unit_price"]) * offer_units(wd)
+        return model, cost, model.round_price(model.break_even(cost), "up")
+    except PricingError as e:
+        raise HTTPException(500, str(e))
+
+
+@api.get("/jobs/{item}/price/preview")
+def price_preview(item: str, price: float) -> dict:
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    if not price > 0:
+        raise HTTPException(400, "price must be positive")
+    model, cost, floor = price_model(wd)
+    units = offer_units(wd)
+    cands = (read_json(wd / "price.candidates.json") or {}).get("candidates", [])
+    match = next((c["label"] for c in cands if abs(c["price"] - price) < 0.005), None)
+    return {**model.point(match or "custom", price, cost, units=units, per_unit=round(price / units, 2)),
+            "floor": floor, "aboveFloor": price + 1e-9 >= floor, "candidate": match}
+
+
+class PriceDecision(BaseModel):
+    price: float | None = None     # omitted: approve the proposal as it stands
+    by: str | None = None
+    reason: str | None = None
+
+
+@api.post("/jobs/{item}/price")
+def decide_price(item: str, body: PriceDecision) -> dict:
+    """A person approves the proposed price or sets another. price_candidates.py --check decides whether it stands."""
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    if (wd / ".lock").exists():
+        raise HTTPException(409, "a worker holds this item; try again when its stage ends")
+    proposal = read_json(wd / "price.json")
+    source = read_json(wd / "price.candidates.json") or read_json(wd / "price.rejected.json")
+    if not source:
+        raise HTTPException(409, "the price stage has not run yet")
+    by = (body.by or "").strip() or "console"
+    price = body.price if body.price is not None else (proposal or {}).get("price")
+    if not isinstance(price, (int, float)) or price <= 0:
+        raise HTTPException(400, "no price given and no proposal to approve")
+    price = round(float(price), 2)
+    same = proposal is not None and abs(proposal.get("price", 0) - price) < 0.005 and not proposal.get("override")
+    first = (proposal or {}).get("proposed")
+    if not same and first and abs(first.get("price", 0) - price) < 0.005:
+        # Back to what the model recommended: its proposal returns as it was, no override left behind.
+        (wd / "price.json").write_text(json.dumps(first, indent=2))
+        proposal, same = first, True
+    if not same:
+        label = next((c["label"] for c in source.get("candidates", []) if abs(c["price"] - price) < 0.005), None)
+        if not label and not (body.reason or "").strip():
+            raise HTTPException(400, "a price that is not one of the candidates needs a reason")
+        # The model's proposal is kept inside the file it is replaced in.
+        first = (proposal or {}).get("proposed") or ({k: v for k, v in proposal.items() if k != "override"} if proposal else None)
+        chosen = {"price": price, "currency": source.get("currency") or "USD", "candidate": label or "override",
+                  "position": (proposal or {}).get("position") if label and proposal and proposal.get("candidate") == label else None,
+                  "rationale": (body.reason or "").strip() or f"{by} chose the {label} candidate over the proposal.",
+                  "runner_up": None, "floor": source.get("floor"), "verdict": source.get("verdict"),
+                  # The unit of sale stays the market's: a person changes the pack by hand in price.json, not here.
+                  "offer": {"units": offer_units(wd)},
+                  "override": {"by": by, "reason": (body.reason or "").strip() or f"chose the {label} candidate", "at": now()},
+                  "proposed": first}
+        pending = wd / "price.pending.json"
+        pending.write_text(json.dumps(chosen, indent=2))
+        r = subprocess.run([PY, str(SCRIPTS / "price_candidates.py"), "--workdir", str(wd), "--check", str(pending)],
+                           capture_output=True, text=True, cwd=ROOT)
+        try:
+            verdict = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            verdict = {"errors": [r.stderr.strip()[-300:] or "the check produced no result"]}
+        if r.returncode != 0:
+            pending.unlink(missing_ok=True)
+            raise HTTPException(422, "; ".join(verdict.get("errors") or ["the check refused this price"]))
+        pending.replace(wd / "price.json")
+    model, cost, floor = price_model(wd)
+    if price + 1e-9 < floor:   # belt and braces for the approve-as-is path, which skips --check
+        raise HTTPException(422, f"price {price:.2f} is below the floor {floor:.2f}")
+    units = offer_units(wd)
+    point = model.point("approved", price, cost)
+    (wd / "price.approved.json").write_text(json.dumps(
+        {"price": price, "currency": source.get("currency") or "USD", "by": by, "at": now(),
+         "source": "proposal" if same else "override", "floor": floor, "unit_cost": point["unit_cost"],
+         "margin": point["margin"], "margin_pct": point["margin_pct"],
+         # What the price buys: units printed units per sale (one Etsy sale = one 3DAPI line of this quantity).
+         "offer": {"units": units, "per_unit": round(price / units, 2)}}, indent=2))
+    product = file_product(item)
+    queued = None
+    if item in unfinished_items():
+        queued = "approved-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
+        start_director(queued, [item])
+    return {"job": detail(item), "product": product, "run": queued}
+
+
+@api.post("/jobs/{item}/retry")
+def retry(item: str) -> dict:
+    """One item, taken up again: any failed or blocked marker is cleared and a director runs what is left.
+
+    This is the per-item form of Resume. Resume on Agent runs takes every unfinished work dir, old fixtures
+    included, which is the wrong tool for finishing one product (2026-09-23)."""
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    if (wd / ".lock").exists():
+        raise HTTPException(409, "a worker holds this item; try again when its stage ends")
+    if director_alive_for(item):
+        raise HTTPException(409, "a director already holds this item")
+    cleared = []
+    for st in stages():
+        for kind in ("failed", "blocked"):
+            m = wd / f"{st['stage']}.{kind}.json"
+            if m.exists():
+                m.unlink()
+                cleared.append(m.name)
+    if item not in unfinished_items():
+        raise HTTPException(409, "nothing left to run on this item" + (": it waits on a person" if not cleared else ""))
+    run = ("retry-" if cleared else "continue-") + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + item[:6]
+    start_director(run, [item])
+    return {"job": detail(item), "cleared": cleared, "run": run}
+
+
+# ------------------------------------------------------------------ the catalogue
+
+def products_dir() -> Path:
+    return Path(os.environ["DAPILOT_STORE_DIR"]) / "products"
+
+
+def file_product(item: str, verify_key: bool = True) -> dict | None:
+    """Write or refresh the product record. product_record.py copies; nothing is decided here."""
+    cmd = [PY, str(SCRIPTS / "product_record.py"), "--workdir", str(WORK / item)]
+    if verify_key:
+        cmd.append("--verify-key")
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    if r.returncode != 0:
+        print(f"[server] product record for {item[:8]} failed: {r.stderr.strip()[-300:]}")
+        return None
+    return product_view(item)
+
+
+def product_view(item: str) -> dict | None:
+    rec = read_json(products_dir() / f"{item}.json")
+    if not rec:
+        return None
+    url = lambda rel: f"/api/jobs/{item}/files/{rel}"  # noqa: E731
+    media = rec.get("media") or {}
+    photos = [{**p, "url": url(p["file"])} for p in media.get("photos", [])]
+    drafts = sorted((WORK / item / "renders").glob("draft_*.png"))
+    thumbs = sorted((WORK / item / "thumbnails").glob("*.png"))
+    s = status_of(item, WORK / item, read_json(WORK / item / "meta.json") or {}) if (WORK / item / "meta.json").exists() else {}
+    return {**{k: rec.get(k) for k in ("id", "status", "created_at", "updated_at", "owner", "name", "source_file", "price",
+                                       "quote", "order_item", "storefront", "size_mm")},
+            "photos": photos,
+            "video": {**media["video"], "url": url(media["video"]["file"])} if media.get("video") else None,
+            # Until the design stage has run, the draft is the only picture there is.
+            "thumbnail": photos[0]["url"] if photos else (url(f"renders/{drafts[0].name}") if drafts else
+                                                          (url(f"thumbnails/{thumbs[0].name}") if thumbs else None)),
+            "pipeline": {"stage": s.get("stage"), "status": s.get("status"), "reason": s.get("reason")},
+            "pendingUploads": len(rec.get("pending_uploads") or [])}
+
+
+@api.get("/products")
+def list_products() -> list[dict]:
+    d = products_dir()
+    if not d.exists():
+        return []
+    out = []
+    for f in d.glob("*.json"):
+        item = f.stem
+        design = WORK / item / "design.json"
+        # The record is made at approval, before any media exists; refresh it once the design stage has written.
+        if design.exists() and design.stat().st_mtime > f.stat().st_mtime:
+            file_product(item, verify_key=False)
+        v = product_view(item)
+        if v:
+            out.append(v)
+    return sorted(out, key=lambda v: v.get("created_at") or "", reverse=True)
+
+
+@api.get("/products/{item}")
+def get_product(item: str) -> dict:
+    if not re.fullmatch(r"[0-9a-f]{64}", item):
+        raise HTTPException(404, "no such product")
+    rec = read_json(products_dir() / f"{item}.json")
+    if not rec:
+        raise HTTPException(404, "no such product")
+    return rec
+
+
+@api.post("/jobs/{item}/approve")
+def approve(item: str) -> dict:
+    """Kept for the old client call: approve the proposal as it stands."""
+    return decide_price(item, PriceDecision())
+
+
+# ------------------------------------------------------------------ social posting
+
+SOCIAL = SCRIPTS / "social_post.py"
+POST_FORMATS = {"reel": ["video"], "carousel": ["photo:1", "photo:2", "photo:3"], "image": ["photo:1"]}
+
+
+def social_cli(*args: str, timeout: int = 420) -> tuple[int, dict]:
+    """social_post.py is the only thing that talks to a platform; the server passes a person's click on."""
+    r = subprocess.run([PY, str(SOCIAL), *args], capture_output=True, text=True, cwd=ROOT, timeout=timeout)
+    try:
+        return r.returncode, json.loads(r.stdout)
+    except ValueError:
+        return r.returncode or 1, {"ok": False, "reason": (r.stderr or r.stdout).strip()[-300:] or "social_post.py printed nothing"}
+
+
+def social_view(item: str) -> dict:
+    wd = WORK / item
+    if not (wd / "meta.json").exists():
+        raise HTTPException(404, "no such job")
+    pub, sd = read_json(wd / "publish.json") or {}, wd / "social"
+    by_rank = {i.get("rank"): i.get("url") for i in pub.get("images") or []}
+    ready = bool(pub.get("listing_id") and (pub.get("images") or pub.get("video")))
+    doc = read_json(sd / "posts.json") or {"posts": []}
+    errors: dict[str, list] = {}
+    if doc["posts"] and ready:
+        _, checked = social_cli("check", "--workdir", str(wd), timeout=60)
+        errors = {row["post"]: row["errors"] for row in checked.get("posts", [])}
+    latest: dict[str, dict] = {}
+    if (sd / "metrics.jsonl").exists():
+        for line in (sd / "metrics.jsonl").read_text().splitlines():
+            try:
+                row = json.loads(line)
+                latest[row["post"]] = row
+            except ValueError:
+                pass
+    posts = []
+    for row in doc["posts"]:
+        pid = f"{row.get('platform')}.{row.get('format')}"
+        done, pending = read_json(sd / f"{pid}.json"), read_json(sd / f"{pid}.pending.json")
+        media = [{"kind": "video", "url": (pub.get("video") or {}).get("url")} if ref == "video"
+                 else {"kind": "image", "url": by_rank.get(int(ref[6:])) if ref[6:].isdigit() else None}
+                 for ref in row.get("media") or []]
+        posts.append({"id": pid, "platform": row.get("platform"), "format": row.get("format"),
+                      "caption": row.get("caption") or "", "hashtags": row.get("hashtags") or [], "media": media,
+                      "errors": errors.get(pid, []),
+                      "state": "posted" if done else "pending" if pending else "draft",
+                      "url": (done or {}).get("url"), "postedAt": iso(done["posted_at"]) if done and done.get("posted_at") else None,
+                      "metrics": {k: v for k, v in (latest.get(pid) or {}).items() if k not in ("post", "at", "age_h")} or None})
+    _, sessions = social_cli("session", "status", timeout=60)
+    return {"ready": ready, "reason": None if ready else "The listing has no photos or video on Etsy yet; posts use those files.",
+            "listingUrl": pub.get("url"), "posts": posts,
+            "sessions": [{"platform": s["platform"], "account": s["account"], "state": s["state"], "note": s.get("note")}
+                         for s in sessions.get("sessions", [])]}
+
+
+@api.get("/jobs/{item}/social")
+def get_social(item: str) -> dict:
+    return social_view(item)
+
+
+class SocialPostBody(BaseModel):
+    caption: str
+    hashtags: list[str] = []
+
+
+@api.put("/jobs/{item}/social/posts/{post_id}")
+def save_social_post(item: str, post_id: str, body: SocialPostBody) -> dict:
+    """A person writes or edits the words of one post. Nothing is sent."""
+    wd = WORK / item
+    platform, _, fmt = post_id.partition(".")
+    if not (wd / "meta.json").exists() or fmt not in POST_FORMATS:
+        raise HTTPException(404, "no such job or post format")
+    if (wd / "social" / f"{post_id}.json").exists():
+        raise HTTPException(409, "this post is already on the platform; its words can only be changed there")
+    path = wd / "social" / "posts.json"
+    doc = read_json(path) or {"posts": []}
+    row = next((r for r in doc["posts"] if r.get("platform") == platform and r.get("format") == fmt), None)
+    if row is None:
+        row = {"platform": platform, "format": fmt, "media": POST_FORMATS[fmt]}
+        doc["posts"].append(row)
+    row["caption"] = body.caption.strip()
+    row["hashtags"] = [t.strip().lstrip("#") for t in body.hashtags if t.strip()]
+    doc["edited"] = {"by": "console", "at": now()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+    return social_view(item)
+
+
+class SocialPublishBody(BaseModel):
+    by: str | None = None
+
+
+@api.post("/jobs/{item}/social/posts/{post_id}/publish")
+def publish_social_post(item: str, post_id: str, body: SocialPublishBody) -> dict:
+    """The gate for a public post: a person pressed the button. Recorded, then handed to social_post.py --confirm."""
+    wd = WORK / item
+    platform, _, fmt = post_id.partition(".")
+    if not (wd / "social" / "posts.json").exists():
+        raise HTTPException(404, "no posts written for this job")
+    approved = wd / "social" / "approved.json"
+    log = read_json(approved) or {"approvals": []}
+    log["approvals"].append({"post": post_id, "by": (body.by or "").strip() or "console", "at": now()})
+    approved.write_text(json.dumps(log, indent=1) + "\n")
+    code, res = social_cli("post", "--workdir", str(wd), "--platform", platform, "--format", fmt, "--confirm")
+    if code == 4:
+        raise HTTPException(409, res.get("reason") or "the session needs a person to sign in again")
+    if code not in (0, 3):
+        raise HTTPException(502, "; ".join(res.get("errors") or []) or res.get("reason") or "the post failed")
+    return {"result": res, "social": social_view(item)}
+
+
+@api.post("/jobs/{item}/social/metrics")
+def refresh_social_metrics(item: str) -> dict:
+    code, res = social_cli("metrics", "--workdir", str(WORK / item), timeout=120)
+    if code != 0:
+        raise HTTPException(502, res.get("reason") or "the numbers could not be read")
+    return social_view(item)
+
+
+@api.get("/health")
+def health() -> dict:
+    with LOCK:
+        alive = [r for r, d in DIRECTORS.items() if d["proc"].poll() is None]
+    return {"ok": True, "dapi": bool(os.environ.get("DAPI_API_KEY") and os.environ.get("DAPI_API_URL")),
+            "etsy": bool(os.environ.get("ETSY_KEYSTRING")), "store": os.environ.get("DAPILOT_STORE_DIR"),
+            "work_items": len(list(WORK.iterdir())) if WORK.exists() else 0, "directors_alive": alive}
+
+
+app.include_router(api)
+app.include_router(api, prefix="/api")
