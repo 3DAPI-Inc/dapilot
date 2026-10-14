@@ -434,3 +434,21 @@ each carries its own date.
   nothing over 256 KiB, no lockfiles, system files, symlinks or binaries.
   Still needed before a listing can publish: the repo public, and the Etsy
   token rewritten out of history first.
+- **Quickstart finds or installs Python (2026-10-14).** `quickstart.py` is
+  Python, so a machine without a supported interpreter could never start it.
+  `/dapilot:quickstart` now runs `scripts/quickstart.sh`, which looks for a
+  CPython 3.10 to 3.13 (the range with wheels for trimesh, scipy and
+  networkx): a pinned `DAPILOT_PYTHON`, then `python3.13` down to
+  `python3.10`, `python3`, `python`, then Homebrew and python.org folders.
+  With none, it installs 3.12 with Homebrew, or `python3` with apt or dnf,
+  and looks again; with still none it runs `quickstart.py` on any Python 3
+  so the person gets the report, and only with no Python at all does it
+  stop with the python.org link. Under Git Bash on Windows it relays to
+  `scripts/quickstart.bat`, which does the same with the `py` launcher by
+  version, `python`, the winget and python.org install folders, and
+  `winget install Python.Python.3.12`. `DAPILOT_BOOTSTRAP_ONLY=1` prints the
+  chosen interpreter and stops. Tested on macOS where `python3` is 3.14:
+  picks 3.13; with only 3.14 on PATH and no brew, prints the message and
+  falls back to 3.14; with no Python on PATH falls back to the system 3.9.
+  The `.bat` is reviewed, not run; no Windows machine here. The command's
+  allowed tools gained `bash`.

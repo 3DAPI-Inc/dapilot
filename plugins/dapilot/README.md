@@ -4,7 +4,9 @@ Claude Code skills that drive the 3DAPI platform through its public API.
 
 ## Requirements
 
-- Python 3.10+ with the `jsonschema` package (`pip install jsonschema`).
+- Python 3.10 to 3.13. `/dapilot:quickstart` finds one, or installs 3.12 with
+  winget, Homebrew, apt or dnf when there is none; its own packages go in a
+  venv under the store.
   Set `DAPILOT_PYTHON` to the interpreter to use; otherwise `python3` on PATH.
 - A 3DAPI API key. Mint one with only the scopes you need: PRICING for quoting,
   ORDER for order work, print-farm scopes for fulfilment. Never use a FULL key.
@@ -153,7 +155,8 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `integrate.py` | the Integrations page: `serve` (local server and page), `status`, `test`; writes the env file and `integrations.json`, verifies each credential with a free call |
 | `setup_env.py` | the environment, the same on macOS, Linux and Windows: a venv under the store with the plugin's packages, Blender, Chrome and ffmpeg found or installed (winget, brew, apt, dnf), their paths written to the store's `.env`; `--no-install` only reports |
-| `quickstart.py` | what `/dapilot:quickstart` runs: setup, wordmark, `integrate.py serve`, `integrate.py status`; says little, logs to the setup script's log |
+| `quickstart.sh`, `quickstart.bat` | the entry point of `/dapilot:quickstart`: find a Python 3.10 to 3.13 (a pinned `DAPILOT_PYTHON`, then by version, then the installer folders), install one with the system's package manager when there is none, hand over to `quickstart.py`. The `.sh` relays to the `.bat` under Git Bash on Windows. `DAPILOT_BOOTSTRAP_ONLY=1` prints the pick and stops |
+| `quickstart.py` | what the entry point runs: setup, wordmark, `integrate.py serve`, `integrate.py status`; says little, logs to the setup script's log |
 | `guard_secrets.py` | the PreToolUse hook that refuses the model's tools on credential files |
 | `market_stats.py` | price band, fees, VAT and margin from `comparables.json`, `quote.json` and the store pricing policy; writes `viability.json` |
 | `price_candidates.py` | the two sale-price candidates (quote plus markup, market median) above the break-even floor; `--check` refuses any `price.json` below the floor, from any author |
