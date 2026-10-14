@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wordmark-inline-white-1600.png">
-    <img src="docs/assets/wordmark-inline-split-1600.png" alt="dapilot" width="440">
-  </picture>
+  <img src="docs/assets/wordmark-inline-split-1600.png" alt="dapilot" width="440">
 </p>
 
 <p align="center">
@@ -15,6 +12,13 @@
   <img alt="version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2F3DAPI-Inc%2Fdapilot%2Fmain%2Fplugins%2Fdapilot%2F.claude-plugin%2Fplugin.json&query=%24.version&label=plugin&color=1C3254">
   <img alt="platforms" src="https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-1C3254">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-8EB0E2"></a>
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/AySP26jRM"><img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://www.youtube.com/channel/UCZ_d0Sm0ck-UEmQdq5wVKyg"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-FF0000?logo=youtube&logoColor=white"></a>
+  <a href="https://www.linkedin.com/company/3dapi"><img alt="LinkedIn" src="https://img.shields.io/badge/LinkedIn-0A66C2?logo=linkedin&logoColor=white"></a>
+  <a href="https://www.instagram.com/3dapi_official/"><img alt="Instagram" src="https://img.shields.io/badge/Instagram-E4405F?logo=instagram&logoColor=white"></a>
 </p>
 
 <!-- ABOUT: this section is yours to write. The two paragraphs below are placeholders. -->
@@ -107,6 +111,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how the code is laid out and what a
 change needs. Credentials never go into the repository, the plugin or a
 conversation; [SECURITY.md](SECURITY.md) says how they are handled and how to
 report a problem.
+
+## Community
+
+Questions, show and tell, and what the shop is printing:
+[Discord](https://discord.gg/AySP26jRM) ·
+[YouTube](https://www.youtube.com/channel/UCZ_d0Sm0ck-UEmQdq5wVKyg) ·
+[LinkedIn](https://www.linkedin.com/company/3dapi) ·
+[Instagram](https://www.instagram.com/3dapi_official/)
 
 ## License
 
