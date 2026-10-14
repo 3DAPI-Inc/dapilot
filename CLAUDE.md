@@ -128,6 +128,17 @@ will not dispatch it in any run until a person clears it (Try again on the job
 page, or `rm`). No stage asks a person a question mid-run; copy picks its own
 category when research found no comparables.
 
+**The session hears the run.** The plugin's monitor
+(`monitors/monitors.json`, `scripts/watch_run.py`) runs for the whole
+interactive session in its working directory, tails every
+`runs/<id>/director.log` and watches for a proposal without an approval,
+and prints one plain line per event, nothing when idle. Each line reaches
+the model as a notification: a stage done, failed or blocked, a run
+finished, and the gate, which tells the model to run the review procedure
+now. Logs that exist when the session starts are not replayed; an open
+gate is said once. Monitors run in interactive Claude Code sessions only,
+not under `claude -p` and not in Cowork.
+
 **Runs are supervised and resumable.** One director per upload;
 `runs/<id>/` keeps `state.json`, `report.md`, `director.log` and every
 worker's raw output. Workers run in their own process group and are killed at
@@ -179,6 +190,14 @@ Resume button picks up every work dir with a stage left and no live worker.
   0.96 USD) animated from the lifestyle photo the brief names. A standard
   item is about 1.56 USD against `usd_cap_per_item`. A rejected or failed
   paid asset is remade once with the rejection in its prompt.
+- **No studio page, no problem.** The browser studio lives in the frontend,
+  so an installed plugin has none. `design_product.py` checks
+  `studio_url` once per produce call; when nothing answers it renders the
+  stills with Blender (`render_model.py --out`, one frame per call so a
+  deadline never loses a finished frame, size and samples in
+  `design.stills.blender`) and skips the turntable. Chrome is then not
+  needed for design at all. Decided 2026-10-14 after the first installed
+  run blocked at the stills.
 - The 240-frame studio turntable is a fallback only (`turntable.when`):
   rendered when fal failed to make the clip. A clip the reviewer rejected
   gets no video at all. Nothing downstream may depend on the turntable.

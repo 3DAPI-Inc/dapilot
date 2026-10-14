@@ -513,3 +513,34 @@ each carries its own date.
   no question asked. Tested: one file registers with `source.stl` and
   `meta.json`, the folder afterwards adds nothing, a missing path and a
   `.txt` are refused, and the director's dry run briefs the first stage.
+- **The session hears the run (2026-10-14).** `monitors/monitors.json`
+  starts `scripts/watch_run.py` for the whole interactive session, in the
+  session's working directory, which is where quickstart's director keeps
+  `work/` and `runs/`. It tails every `runs/<id>/director.log`, including
+  runs that start later, and watches for a `price.json` with no
+  `price.approved.json`, and prints one `dapilot: ...` line per event:
+  run started, working on X, stage done with its summary and time, stage
+  failed or blocked with what a person does next, run finished with
+  workers, spend and minutes, and the gate ("is waiting for a sale price:
+  proposed, floor, candidate; ask now with the review procedure"). Each
+  line reaches the model as a notification. Nothing is printed when idle;
+  logs that exist at start are not replayed; an open gate is said once.
+  Tested by replaying a real director log line by line. Monitors run in
+  interactive Claude Code sessions only, not under `claude -p`, not in
+  Cowork.
+- **Design without the studio page (2026-10-14).** The first installed run
+  (the cat box, approved at 3.99 USD through the new gate) blocked at the
+  stills with "no studio page at http://localhost:8081": the browser studio
+  is the frontend's, and an installed plugin has no frontend.
+  `design_product.py produce` now checks `studio_url` once; without an
+  answer it renders the stills with Blender through `render_model.py`,
+  which gained `--out`, one frame per call so a produce deadline never
+  loses a finished frame (exit 3 with the frame count, as the turntable
+  does), size and samples from `design.stills.blender` (1536 px, 64
+  samples in the template), and writes `video.json` with
+  `renderer: blender`. The turntable needs the studio, so without one it is
+  skipped and noted; a listing whose fal clip failed then has no video.
+  Chrome is no longer needed for design on an installed plugin. Tested:
+  two frames at 256 px in 8 s, a second call renders nothing, a call with
+  10 s left returns partial. The blocked item on the user's machine needs
+  its `design.blocked.json` removed and the item retried.

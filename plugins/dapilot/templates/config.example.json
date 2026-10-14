@@ -71,7 +71,12 @@
   "stills": {
    "count": 4,
    "size": 2048,
-   "elevation": 18
+   "elevation": 18,
+   "blender": {
+    "res": 1536,
+    "samples": 64,
+    "comment": "used when no studio page answers at studio_url (an installed plugin has none): the stills are rendered by Blender, one frame per call, at this size and sample count"
+   }
   },
   "turntable": {
    "frames": 240,

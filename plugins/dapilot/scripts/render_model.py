@@ -41,10 +41,13 @@ def main() -> int:
     ap.add_argument("--res", type=int)
     ap.add_argument("--samples", type=int)
     ap.add_argument("--layer-lines", action="store_true")
+    ap.add_argument("--out", help="where the frames go; default DIR/renders (the 3mf conversion stays in DIR/renders)")
     a = ap.parse_args()
     wd = Path(a.workdir)
     out = wd / "renders"
     out.mkdir(parents=True, exist_ok=True)
+    frames_out = Path(a.out) if a.out else out
+    frames_out.mkdir(parents=True, exist_ok=True)
     bl = blender()
     if not bl:
         print(json.dumps({"ok": False, "reason": "Blender not found: set BLENDER in store/.env"})); return 2
@@ -66,7 +69,7 @@ def main() -> int:
         print(json.dumps({"ok": False, "reason": f"cannot render {src.suffix}"})); return 1
 
     cmd = [bl, "--background", "--python", str(HERE / "render_scene.py"), "--",
-           "--input", str(src), "--out", str(out), "--mode", a.mode, "--frames", str(a.frames),
+           "--input", str(src), "--out", str(frames_out), "--mode", a.mode, "--frames", str(a.frames),
            "--angles", a.angles, "--elevation", str(a.elevation), "--rotate", a.rotate, "--color", a.color]
     if a.res:
         cmd += ["--res", str(a.res)]
@@ -82,7 +85,7 @@ def main() -> int:
         print(json.dumps({"ok": False, "reason": f"Blender exit {p.returncode}", "tail": err})); return 1
     result = json.loads(line[len("RENDER_RESULT "):])
     result["wall_s"] = round(time.time() - t0, 1)
-    rec_p = out / "render.json"
+    rec_p = frames_out / "render.json"
     rec = json.loads(rec_p.read_text()) if rec_p.exists() else {}
     rec[a.mode] = result
     rec_p.write_text(json.dumps(rec, indent=2))

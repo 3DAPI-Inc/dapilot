@@ -1,0 +1,7 @@
+[
+  {
+    "name": "pipeline",
+    "command": "if command -v python3 >/dev/null 2>&1; then python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/watch_run.py\"; else python \"${CLAUDE_PLUGIN_ROOT}/scripts/watch_run.py\"; fi",
+    "description": "dapilot pipeline: stage results, models waiting for a sale price, finished runs"
+  }
+]
