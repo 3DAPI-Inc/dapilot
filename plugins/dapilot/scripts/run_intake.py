@@ -247,21 +247,9 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
     }
     meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": 0.0, "launch_attempts": 0}
     cmd = worker_cmd(brief, a, cfg)
-    # The director writes the .lock, not the worker: the work-ledger skill asks the worker to, and a worker
-    # that skips it left the item looking idle to the gate (shark run, 2026-10-14). Removed in the finally.
-    wd = Path(brief["workdir"]) if Path(brief["workdir"]).is_absolute() else root / brief["workdir"]
-    lock = wd / ".lock"
-    try:
-        lock.write_text(json.dumps({"run": brief["run"], "stage": brief["stage"], "agent": "run_intake"}))
-    except OSError:
-        pass
-    try:
-        return run_model_worker(brief, a, cfg, root, timeout_s, tag, synthetic, meta, cmd)
-    finally:
-        lock.unlink(missing_ok=True)
-
-
-def run_model_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int, tag: str, synthetic: dict, meta: dict, cmd: list[str]) -> tuple[dict, dict]:
+    # The .lock is the worker's: the work-ledger skill has it refuse a work dir that already holds one, so a
+    # lock written here made every worker return "not started" (kumiko run, 2026-10-14, reverted the same
+    # day). Liveness for the gate comes from the heartbeat and state.json, never from the lock.
     for attempt in range(1, LAUNCH_RETRIES + 1):
         meta["launch_attempts"] = attempt
         t0 = time.time()

@@ -573,3 +573,11 @@ each carries its own date.
   up to ten rounds. Review has the same rule. Rejected items are a result,
   not a problem, and a live run is never called stalled. Tested: the gate
   reports the watcher alive while it runs and gone after it stops.
+- **Reverted the director-written lock (2026-10-14, same day).** The
+  kumiko run under the release with it never got past analyze: the
+  work-ledger skill tells a worker to refuse a work dir that already holds
+  a `.lock`, so the lock the director wrote for it made the worker answer
+  "Not started: work dir already holds a .lock from run_intake"; the retry
+  returned a malformed result and the director stopped after two empty
+  passes. The lock is the worker's again. Liveness for the gate was already
+  the heartbeat plus `state.json`, so nothing else changes.

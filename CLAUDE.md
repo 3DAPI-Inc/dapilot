@@ -150,9 +150,11 @@ sessions only, not under `claude -p` and not in Cowork.
 lists its items under `running` with the stage from `state.json`, and
 waits while any director lives. A worker on the slicer or on fal writes
 nothing for minutes, and the worker's own `.lock` was optional in
-practice, so neither is used as the signal; the director now writes the
-`.lock` itself around every worker. Added 2026-10-14 after the gate
-called the shark run stalled during its quote.
+practice, so neither is used as the signal. The `.lock` stays the worker's: the
+work-ledger skill has a worker refuse a dir that already holds one, and a
+director-written lock made every worker return "not started" for one
+release (kumiko run, 2026-10-14). Added 2026-10-14 after the gate called
+the shark run stalled during its quote.
 
 **Runs are supervised and resumable.** One director per upload;
 `runs/<id>/` keeps `state.json`, `report.md`, `director.log` and every
