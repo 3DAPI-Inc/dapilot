@@ -410,3 +410,18 @@ each carries its own date.
   `run_intake.py` on it in the background under `runs/quickstart-<time>/`
   and says so; the run stops at the price gate as before. The
   `/dapilot:integrate` name is gone.
+- **Releases through GitHub (2026-10-14).** The repository is the
+  marketplace (`.claude-plugin/marketplace.json` at the root, plugin at
+  `./plugins/dapilot`), so `claude plugin marketplace add 3DAPI-Inc/dapilot`
+  and `claude plugin install dapilot@dapilot` install it and `claude plugin
+  update dapilot@dapilot` pulls a new version. Because `plugin.json` carries
+  a `version`, Claude Code delivers an update only when that string changes.
+  `scripts/dev/release.sh [patch|minor|major|X.Y.Z] [--no-push]` bumps it,
+  validates both manifests with `--strict`, commits the bump alone (the tree
+  must be clean), tags `v<version>` and pushes branch and tag.
+  `.github/workflows/plugin.yml` validates both manifests on every push that
+  touches the plugin and fails a pull request that changes the plugin without
+  moving the version. The README gained the install, update and release
+  commands. `skills-phase-zero` was merged into `main` the same day (PR #1),
+  so the default branch carries the plugin and an install from
+  `3DAPI-Inc/dapilot` works.
