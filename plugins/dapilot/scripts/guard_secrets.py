@@ -28,20 +28,20 @@ FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glo
 PATH_KEYS = ("file_path", "path", "notebook_path")
 # Text patterns for Bash. Relative spellings are caught as text because the model types them that way.
 TEXT = [
-    r"(?<![\w.-])store/\.env(?!\.example)",
-    r"\$\{?DAPILOT_STORE_DIR\}?/\.env(?!\.example)",
+    r"(?<![\w.-])store[/\\]+\.env(?!\.example)",            # store/.env, store\.env
+    r"\$\{?DAPILOT_STORE_DIR\}?[/\\]+\.env(?!\.example)",
+    r"\.dapilot[/\\]+\.env(?!\.example)",
     r"etsy_token[\w.-]*\.json",
-    r"social/(sessions|profiles)(/|\b)",
+    r"social[/\\]+(sessions|profiles)([/\\]|\b)",
     r"integrations\.etsy-login\.log",
 ]
 
 
 def store_dir(cwd: str) -> Path:
-    s = os.environ.get("DAPILOT_STORE_DIR")
-    if s:
-        return Path(s).expanduser().resolve()
-    root = os.environ.get("DAPILOT_PROJECT_DIR") or os.environ.get("CLAUDE_PROJECT_DIR") or cwd
-    return (Path(root) / "store").resolve()
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import store_path
+    os.environ.setdefault("CLAUDE_PROJECT_DIR", cwd)
+    return store_path.store_dir(create=False)
 
 
 def protected(p: Path, store: Path) -> bool:
@@ -72,12 +72,13 @@ def main() -> int:
     cwd = payload.get("cwd") or os.getcwd()
     store = store_dir(cwd)
 
+    home_store = (Path.home() / ".dapilot").resolve()   # always fenced too: the default store of an installed plugin
     if tool in FILE_TOOLS:
         for k in PATH_KEYS:
             v = inp.get(k)
             if isinstance(v, str) and v:
                 p = Path(v) if os.path.isabs(v) else Path(cwd) / v
-                if protected(p, store):
+                if protected(p, store) or protected(p, home_store):
                     print(f"{tool} on {v} refused: it holds credentials. Scripts use the file through --env; "
                           f"people edit it on the Integrations page (/dapilot:integrate).", file=sys.stderr)
                     return 2
@@ -91,7 +92,8 @@ def main() -> int:
         # the one allowed spelling: `--env <file>` or `--env=<file>` as a script argument
         stripped = re.sub(r"--env(?:=|\s+)(\"[^\"]*\"|'[^']*'|\S+)", "--env <file>", cmd)
         abs_env = str(store / ".env")
-        if abs_env in stripped or any(re.search(t, stripped) for t in TEXT):
+        if abs_env in stripped or str(home_store / ".env") in stripped or re.search(r"~/\.dapilot/\.env", stripped) \
+                or any(re.search(t, stripped) for t in TEXT):
             print("Bash refused: the command names a credential file (store/.env, an Etsy token, a social session). "
                   "Pass it only as `--env <file>` to a plugin script; never read, print, copy or edit it. "
                   "People change values on the Integrations page (/dapilot:integrate).", file=sys.stderr)

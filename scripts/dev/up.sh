@@ -31,14 +31,14 @@ if [ -f "$STORE/.env" ]; then
   set -a; source "$STORE/.env"; set +a
   need store/.env "$STORE/.env"
 else
-  need store/.env "" "copy store/.env.example to store/.env and fill it in"
+  need store/.env "" "copy plugins/dapilot/templates/.env.example to store/.env and fill it in"
 fi
 for v in DAPI_API_URL DAPI_API_KEY ETSY_KEYSTRING ETSY_SHARED_SECRET; do
   need "$v" "$( [ -n "${!v:-}" ] && echo set || true)" "add it to store/.env"
 done
 need policy "$( [ -f "$STORE/reference/pricing-policy.json" ] && echo "$STORE/reference/pricing-policy.json" || true)" "write store/reference/pricing-policy.json"
 need etsy-token "$( [ -f "$STORE/etsy_token.json" ] && echo "$STORE/etsy_token.json" || true)" "run $PY plugins/dapilot/scripts/etsy_auth.py --env store/.env login"
-need config "$( [ -f "$STORE/config.json" ] && echo "$STORE/config.json" || true)" "copy store/config.example.json to store/config.json"
+need config "$( [ -f "$STORE/config.json" ] && echo "$STORE/config.json" || true)" "copy plugins/dapilot/templates/config.example.json to store/config.json"
 [ -d "$ROOT/frontend/node_modules" ] && need frontend "node_modules present" || need frontend "" "cd frontend && npm install"
 export DAPILOT_STORE_DIR="$STORE" DAPILOT_PROJECT_DIR="$ROOT" DAPILOT_PYTHON="$PY"
 if [ "$ok" = 1 ]; then

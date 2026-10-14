@@ -34,6 +34,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from store_path import store_dir as _store_dir  # noqa: E402  one rule for every script
+
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["name"]
 LEDGER = PLUGIN_ROOT / "scripts" / "ledger.py"
@@ -61,8 +64,10 @@ def env_value(raw: str) -> str:
 
 
 def load_env(root: Path) -> None:
-    """store/.env: KEY=VALUE lines. Never overrides what the shell already set."""
-    store = Path(os.environ.get("DAPILOT_STORE_DIR") or root / "store")
+    """The store's .env: KEY=VALUE lines. Never overrides what the shell already set.
+    The store is resolved once here and exported, so every worker and script sees the same one."""
+    store = _store_dir()
+    os.environ["DAPILOT_STORE_DIR"] = str(store)
     env_file = store / ".env"
     if not env_file.exists():
         return
@@ -77,11 +82,11 @@ def load_env(root: Path) -> None:
 
 
 def load_config(root: Path) -> dict:
-    store = Path(os.environ.get("DAPILOT_STORE_DIR") or root / "store")
-    for name in ("config.json", "config.example.json"):
-        if (store / name).exists():
-            return json.loads((store / name).read_text())
-    raise SystemExit(f"no config in {store}")
+    store = _store_dir()
+    for p in (store / "config.json", Path(__file__).resolve().parent.parent / "templates" / "config.example.json"):
+        if p.exists():
+            return json.loads(p.read_text())
+    raise SystemExit(f"no config.json in {store} and no template in the plugin")
 
 
 def ledger(*args: str, stdin: str | None = None) -> dict:

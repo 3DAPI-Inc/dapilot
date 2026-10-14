@@ -28,3 +28,10 @@ rm -f "$OUT"
 (cd "$ROOT/plugins" && zip -qr "$OUT" dapilot -x '*/__pycache__/*' '*.pyc' '*/.DS_Store')
 echo "$OUT ($(du -h "$OUT" | cut -f1))"
 echo "Customize > Plugins: remove the installed dapilot, then Add > Upload plugin with this file, then start a new task."
+
+# The CLI install made from this checkout keeps a cached copy per version; refresh it so a new
+# session (terminal or the desktop app's Code tab) loads these files and not the old cache.
+if claude plugin list --json 2>/dev/null | grep -q '"id": *"dapilot@dapilot"'; then
+  claude plugin update dapilot@dapilot 2>&1 | tail -1
+  echo "Claude Code: start a new session, or run /reload-plugins in an open one."
+fi

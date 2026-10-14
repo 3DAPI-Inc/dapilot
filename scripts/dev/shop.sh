@@ -31,10 +31,13 @@ load_env() {
     [ -z "$v" ] || [ -n "${!k+x}" ] || export "$k=$v"
   done < "$1"
 }
-STORE="${DAPILOT_STORE_DIR:-$ROOT/store}"
+# the store: $DAPILOT_STORE_DIR, else this checkout's store/ when it is set up, else ~/.dapilot (plugins/dapilot/scripts/store_path.py)
+STORE="${DAPILOT_STORE_DIR:-$(DAPILOT_PROJECT_DIR="$ROOT" python3 "$ROOT/plugins/dapilot/scripts/store_path.py")}"
 [ -f "$STORE/.env" ] && load_env "$STORE/.env"
 case "$STORE" in /*) ;; *) STORE="$ROOT/${STORE#./}";; esac
-PY="${DAPILOT_PYTHON:-$ROOT/.venv/bin/python}"
+# the interpreter: $DAPILOT_PYTHON, else this checkout's .venv, else one venv per machine under ~/.dapilot
+if [ -n "${DAPILOT_PYTHON:-}" ]; then PY="$DAPILOT_PYTHON"; elif [ -x "$ROOT/.venv/bin/python" ] || [ "$STORE" = "$ROOT/store" ]; then PY="$ROOT/.venv/bin/python"; else PY="$HOME/.dapilot/venv/bin/python"; fi
+VENV="${PY%/bin/python}"
 [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && export FORCE_COLOR=1   # shop_inspect.py colours through the log pipe
 case "$PY" in /*) ;; *) PY="$ROOT/${PY#./}";; esac
 export DAPILOT_STORE_DIR="$STORE" DAPILOT_PROJECT_DIR="$ROOT" DAPILOT_PYTHON="$PY"
@@ -244,12 +247,12 @@ base_python() {
 setup_python() {
   local base want stamp
   if [ ! -x "$PY" ]; then
-    [ "$PY" = "$ROOT/.venv/bin/python" ] || die "DAPILOT_PYTHON=$PY is not an executable; fix store/.env or remove the line"
+    case "$PY" in */bin/python) ;; *) die "DAPILOT_PYTHON=$PY is not an executable; fix the store's .env or remove the line";; esac
     base=$(base_python) || { install_tool "python 3.10 to 3.13" "$(install_cmd python)"; hash -r; base=$(base_python) || die "no python 3.10 to 3.13 found"; }
-    if ! run_logged "create .venv with $base ($("$base" --version 2>&1))" "$base" -m venv "$ROOT/.venv"; then
-      rm -rf "$ROOT/.venv"   # a failed venv leaves a python without pip behind; this run created it
+    if ! run_logged "create $VENV with $base ($("$base" --version 2>&1))" "$base" -m venv "$VENV"; then
+      rm -rf "$VENV"   # a failed venv leaves a python without pip behind; this run created it
       # Debian and Ubuntu ship the venv module as its own package
-      [ "$OS" = Linux ] && command -v apt-get > /dev/null && install_tool "$(basename "$base")-venv" "$(install_cmd venv "$(basename "$base")")"         && run_logged "create .venv again" "$base" -m venv "$ROOT/.venv" || { rm -rf "$ROOT/.venv"; die "could not create .venv"; }
+      [ "$OS" = Linux ] && command -v apt-get > /dev/null && install_tool "$(basename "$base")-venv" "$(install_cmd venv "$(basename "$base")")"         && run_logged "create the venv again" "$base" -m venv "$VENV" || { rm -rf "$VENV"; die "could not create $VENV"; }
     fi
   fi
   log "python: $("$PY" --version 2>&1) at $PY"
@@ -283,12 +286,12 @@ setup_store() {
   local v empty=()
   mkdir -p "$STORE/reference"
   if [ ! -f "$STORE/.env" ]; then
-    cp "$ROOT/store/.env.example" "$STORE/.env" && log "${Y}created $STORE/.env from store/.env.example${N}"
+    cp "$ROOT/plugins/dapilot/templates/.env.example" "$STORE/.env" && log "${Y}created $STORE/.env from the plugin's .env.example${N}"
   else
     log "store/.env present ($(grep -cE '^[A-Z_]+=.' "$STORE/.env") values set)"
   fi
   if [ ! -f "$STORE/config.json" ]; then
-    cp "$ROOT/store/config.example.json" "$STORE/config.json" && log "created $STORE/config.json from store/config.example.json"
+    cp "$ROOT/plugins/dapilot/templates/config.example.json" "$STORE/config.json" && log "created $STORE/config.json from the plugin's config.example.json"
   else
     log "store/config.json present"
   fi
@@ -302,8 +305,8 @@ setup_store() {
   if [ -f "$STORE/reference/pricing-policy.json" ]; then
     log "pricing policy present: $("$PY" -c 'import json,sys; p=json.load(open(sys.argv[1])); print(", ".join(f"{k} {p.get(k)}" for k in ("cost_basis", "markup_pct", "seller_region", "currency")) + ", vat " + str((p.get("vat") or {}).get("rate")))' "$STORE/reference/pricing-policy.json" 2>&1)"
   else
-    cp "$ROOT/store/pricing-policy.example.json" "$STORE/reference/pricing-policy.json" || return 1
-    log "${Y}created reference/pricing-policy.json from store/pricing-policy.example.json: 3DAPI's own policy (EU seller, 21% VAT, 50% markup, full-plate cost).${N}"
+    cp "$ROOT/plugins/dapilot/templates/pricing-policy.example.json" "$STORE/reference/pricing-policy.json" || return 1
+    log "${Y}created reference/pricing-policy.json from the plugin's pricing-policy.example.json: 3DAPI's own policy (EU seller, 21% VAT, 50% markup, full-plate cost).${N}"
     log "${Y}review it before approving any price; every price proposal and the break-even floor come from it${N}"
   fi
 }
@@ -337,7 +340,7 @@ PYEOF
   "$PY" "$SCRIPTS/etsy_listing.py" profiles > "$ref/.profiles.json" 2>&1; local code=$?
   pipeq < "$ref/.profiles.json"
   [ $code = 0 ] || { tail -n 5 "$ref/.profiles.json" | pipe; log "${R}etsy_listing.py profiles failed (exit $code); listing defaults not written${N}"; rm -f "$ref/.profiles.json"; return 0; }
-  "$PY" - "$ROOT/store/etsy-listing.example.json" "$ref/.profiles.json" "$ref/etsy-listing.json" <<'PYEOF' 2>&1 | pipe
+  "$PY" - "$ROOT/plugins/dapilot/templates/etsy-listing.example.json" "$ref/.profiles.json" "$ref/etsy-listing.json" <<'PYEOF' 2>&1 | pipe
 import json, sys
 doc, prof = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
 doc["comment"] = f"Shop-wide listing choices for shop {prof.get('shop_id')}, written by shop.sh setup from the template and etsy_listing.py profiles."

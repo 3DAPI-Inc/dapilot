@@ -1,6 +1,9 @@
 {
   "name": "dapilot",
-  "owner": { "name": "dapi", "email": "dev@dapi.digital" },
+  "owner": {
+    "name": "3DAPI",
+    "email": "dev@dapi.digital"
+  },
   "metadata": {
     "description": "Skills, scripts and agents that run a 3D print shop on the 3DAPI platform."
   },

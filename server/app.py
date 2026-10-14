@@ -73,7 +73,10 @@ def env_value(raw: str) -> str:
 
 
 def load_env() -> None:
-    store = Path(os.environ.get("DAPILOT_STORE_DIR") or ROOT / "store")
+    sys.path.insert(0, str(ROOT / "plugins" / "dapilot" / "scripts"))
+    from store_path import store_dir as _store_dir  # one rule with the plugin: $DAPILOT_STORE_DIR, a checkout's store/, else ~/.dapilot
+    os.environ.setdefault("DAPILOT_PROJECT_DIR", str(ROOT))
+    store = _store_dir()
     env = store / ".env"
     if env.exists():
         for line in env.read_text().splitlines():

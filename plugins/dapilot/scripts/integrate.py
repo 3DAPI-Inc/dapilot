@@ -60,12 +60,8 @@ IDLE_SECONDS = 1800
 
 # --------------------------------------------------------------------------- store
 
-def store_dir() -> Path:
-    s = os.environ.get("DAPILOT_STORE_DIR")
-    if s:
-        return Path(s).expanduser().resolve()
-    root = Path(os.environ.get("DAPILOT_PROJECT_DIR") or os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-    return (root / "store").resolve()
+sys.path.insert(0, str(HERE))
+from store_path import store_dir  # noqa: E402  one rule for every script: $DAPILOT_STORE_DIR, a checkout's store/, else ~/.dapilot
 
 
 def env_value(raw: str) -> str:
@@ -241,7 +237,7 @@ def test_etsy(env: dict) -> dict:
     shop = etsy_shop(api_key, env)
     if shop is None:
         return {"ok": False, "summary": summary + "; shop not authorized yet", "fields": fields, "action": "authorize"}
-    return {"ok": True, "summary": summary + f"; shop {shop}", "fields": fields}
+    return {"ok": True, "summary": summary + f"; shop {shop}", "detail": shop, "fields": fields}
 
 
 def etsy_shop(api_key: str, env: dict) -> str | None:
@@ -266,18 +262,83 @@ def etsy_shop(api_key: str, env: dict) -> str | None:
     return f"id {shop_id}"
 
 
+LOGIN_CHILD: subprocess.Popen | None = None   # the sign-in listener on :3003 started by this server, if any
+LOGIN_PORT = 3003
+
+
+def port_free(port: int) -> bool:
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) != 0
+
+
+def login_pid_path() -> Path:
+    return store_dir() / "integrations.etsy-login.pid"
+
+
+def end_login() -> None:
+    """End the sign-in listener, ours or one a previous run of this server left behind (its pid is on disk)."""
+    global LOGIN_CHILD
+    pids = set()
+    if LOGIN_CHILD is not None and LOGIN_CHILD.poll() is None:
+        pids.add(LOGIN_CHILD.pid)
+    try:
+        pids.add(int(login_pid_path().read_text().strip()))
+    except (OSError, ValueError):
+        pass
+    for pid in pids:
+        try:
+            os.kill(pid, 15)
+        except (ProcessLookupError, PermissionError):
+            pass
+    LOGIN_CHILD = None
+    login_pid_path().unlink(missing_ok=True)
+    for _ in range(15):
+        if port_free(LOGIN_PORT):
+            return
+        time.sleep(0.2)
+
+
+def login_state() -> dict:
+    """Whether the Etsy sign-in is waiting for Allow right now, for the page."""
+    return {"waiting": LOGIN_CHILD is not None and LOGIN_CHILD.poll() is None}
+
+
 def etsy_authorize(env: dict) -> dict:
     """Start the PKCE login in the background. The browser opens on Etsy's consent page; the loopback
     on :3003 catches the redirect and etsy_auth.py writes the token file. Nothing comes back here."""
     if not env.get("ETSY_KEYSTRING") or not env.get("ETSY_SHARED_SECRET"):
         return {"ok": False, "summary": "save the keystring and shared secret first"}
+    global LOGIN_CHILD
+    end_login()   # an earlier click, or an earlier run, still waiting: it ends and this one takes over
+    if not port_free(LOGIN_PORT):
+        return {"ok": False, "summary": f"port {LOGIN_PORT} is held by another program, probably an earlier sign-in "
+                                        "from a previous run; it gives up on its own within 5 minutes"}
     log = store_dir() / "integrations.etsy-login.log"
-    log.touch(mode=0o600, exist_ok=True)
+    log.write_bytes(b"")
+    log.chmod(0o600)
     child_env = {**os.environ, **env, "DAPILOT_STORE_DIR": str(store_dir())}
     with log.open("ab") as fh:
-        subprocess.Popen([sys.executable, str(HERE / "etsy_auth.py"), "login", "--scopes", ETSY_SCOPES],
-                         env=child_env, stdin=subprocess.DEVNULL, stdout=fh, stderr=fh, start_new_session=True)
-    return {"ok": True, "summary": "Etsy opened in the browser. Sign in to the shop, click Allow, then Test here."}
+        # --no-browser: the page opens the consent URL itself, from the click, which every browser allows.
+        # The listener on :3003 runs in this child until Etsy redirects back or 5 minutes pass.
+        child = subprocess.Popen([sys.executable, str(HERE / "etsy_auth.py"), "login", "--scopes", ETSY_SCOPES,
+                                  "--no-browser", "--port", str(LOGIN_PORT), "--timeout", "300"],
+                                 env=child_env, stdin=subprocess.DEVNULL, stdout=fh, stderr=fh, start_new_session=True)
+    LOGIN_CHILD = child
+    login_pid_path().write_text(str(child.pid))
+    url = None
+    for _ in range(25):   # the URL is printed within a second; a dead child (port 3003 busy, bad keys) exits before that
+        time.sleep(0.2)
+        for line in log.read_text(errors="replace").splitlines():
+            if line.startswith("https://www.etsy.com/"):
+                url = line.strip()
+        if url or child.poll() is not None:
+            break
+    if not url:
+        tail = [l for l in log.read_text(errors="replace").splitlines() if l.strip()][-2:]
+        return {"ok": False, "summary": "could not start the Etsy sign-in: " + (" / ".join(tail) or "no output")[:200]}
+    return {"ok": True, "url": url, "summary": "Sign in to the shop on the Etsy page and click Allow. Then click Test here."}
 
 
 def test_fal(env: dict) -> dict:
@@ -296,7 +357,7 @@ def test_instagram(env: dict) -> dict:
     tok, app_id, app_sec = env.get("INSTAGRAM_ACCESS_TOKEN"), env.get("INSTAGRAM_APP_ID"), env.get("INSTAGRAM_APP_SECRET")
     if not tok and not (app_id and app_sec):
         return {"ok": False, "summary": "no value (optional: Instagram is disabled in config until the browser adapter exists)"}
-    fields, parts, ok = {}, [], True
+    fields, parts, ok, detail = {}, [], True, None
     if tok:
         status, body, _ = http_json("GET", "https://graph.instagram.com/me?fields=username,account_type",
                                     {"Authorization": f"Bearer {tok}"})
@@ -304,7 +365,10 @@ def test_instagram(env: dict) -> dict:
         if status == 400:
             t_ok, note = False, "rejected: the token is invalid or expired"
         fields["INSTAGRAM_ACCESS_TOKEN"] = t_ok
-        parts.append(f"token {note}" + (f" for @{body.get('username')}" if t_ok and isinstance(body, dict) and body.get("username") else ""))
+        user = body.get("username") if t_ok and isinstance(body, dict) else None
+        parts.append(f"token {note}" + (f" for @{user}" if user else ""))
+        if user:
+            detail = f"@{user}"
         ok = ok and t_ok
     if app_id and app_sec:
         q = urllib.parse.urlencode({"client_id": app_id, "client_secret": app_sec, "grant_type": "client_credentials"})
@@ -315,12 +379,12 @@ def test_instagram(env: dict) -> dict:
         fields["INSTAGRAM_APP_ID"] = fields["INSTAGRAM_APP_SECRET"] = a_ok
         parts.append(f"app {note}")
         ok = ok and a_ok
-    return {"ok": ok, "summary": "; ".join(parts), "fields": fields}
+    return {"ok": ok, "summary": "; ".join(parts), "detail": detail, "fields": fields}
 
 
 INTEGRATIONS = [
     {
-        "id": "dapi", "name": "3DAPI", "required": True,
+        "id": "dapi", "name": "3DAPI", "required": True, "icon": "/logo.png",
         "what": "The slicer, the cost basis and the producer. Every quote and order goes through its public API.",
         "steps": [
             "Sign in to your 3DAPI account and open the API keys page.",
@@ -335,7 +399,7 @@ INTEGRATIONS = [
         "test": test_dapi,
     },
     {
-        "id": "etsy", "name": "Etsy", "required": True,
+        "id": "etsy", "name": "Etsy", "required": True, "icon": "https://cdn.simpleicons.org/etsy/F1641E",
         "what": "The storefront. Research reads the market through it; publish creates the listings in your shop.",
         "steps": [
             "Open https://www.etsy.com/developers/your-apps and sign in with the account that owns the shop.",
@@ -352,7 +416,7 @@ INTEGRATIONS = [
         "test": test_etsy,
     },
     {
-        "id": "fal", "name": "fal.ai", "required": True,
+        "id": "fal", "name": "fal.ai", "required": True, "icon": None,
         "what": "Lifestyle photos and the listing clip in the design stage. Each call costs money; the stage has a cap per item.",
         "steps": [
             "Sign in at https://fal.ai and open https://fal.ai/dashboard/keys.",
@@ -363,7 +427,7 @@ INTEGRATIONS = [
         "test": test_fal,
     },
     {
-        "id": "claude", "name": "Claude (headless workers)", "required": False,
+        "id": "claude", "name": "Claude (headless workers)", "required": False, "hidden": True,
         "what": "How the pipeline's workers sign in when they run without a terminal. Leave empty to use this machine's `claude` login.",
         "steps": [
             "Either: create an API key at https://console.anthropic.com/settings/keys. Runs then bill to the API in dollars.",
@@ -377,7 +441,7 @@ INTEGRATIONS = [
         "test": test_claude,
     },
     {
-        "id": "instagram", "name": "Instagram (API)", "required": False,
+        "id": "instagram", "name": "Instagram (API)", "required": False, "icon": "https://cdn.simpleicons.org/instagram/E4405F",
         "what": "Optional. The Meta API adapter. Disabled in config: Meta blocked our app on 2026-09-23 and the browser adapter is not built yet.",
         "steps": [
             "Open https://developers.facebook.com/apps and create an app with the Instagram product.",
@@ -434,152 +498,127 @@ def state() -> dict:
             status = "untested"
         else:
             status = "empty"
-        rows.append({"id": integ["id"], "name": integ["name"], "required": integ["required"], "what": integ["what"],
+        rows.append({"id": integ["id"], "name": integ["name"], "required": integ["required"], "hidden": integ.get("hidden", False), "icon": integ.get("icon"), "what": integ["what"],
                      "steps": integ["steps"], "fields": fields, "actions": integ.get("actions", []),
-                     "status": status, "result": {k: res.get(k) for k in ("ok", "summary", "checked_at", "fields", "action")}})
-    return {"store": str(store_dir()), "env_file": str(store_dir() / ".env"), "integrations": rows}
+                     "status": status, "result": {k: res.get(k) for k in ("ok", "summary", "detail", "checked_at", "fields", "action")}})
+    return {"store": str(store_dir()), "env_file": str(store_dir() / ".env"), "integrations": rows, "etsy_login": login_state()}
 
 
 # --------------------------------------------------------------------------- the page
 
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="dapilot-integrate" content="%%VERSION%%">
 <title>3DAPI Integrations</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Montserrat:wght@600&display=swap" rel="stylesheet">
 <style>
-/* 3dapi palette only: glacier white + navy. Rust is the one accent and marks a failed check. */
+/* 3DAPI palette only: glacier white + navy. Rust marks a failed check. */
 :root{--navy:#1c3254;--navy-deep:#142540;--blue:#8eb0e2;--ink:#080b10;--rust:#813a39;
       --g50:#fbfdff;--g100:#f4f8fc;--g200:#eaf1f9;--g300:#dde8f4;--g400:#cbdcee;--white:#fff;
-      --mute:rgba(8,11,16,.58);--radius:6px;--radius-sm:4px}
+      --mute:rgba(8,11,16,.55);--radius:8px;--radius-sm:5px}
 *{box-sizing:border-box}
 body{margin:0;background:var(--g100);color:var(--ink);font:14px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-main{max-width:1080px;margin:0 auto;padding:40px 24px 64px}
-h1{font:600 22px/1.2 Montserrat,Inter,sans-serif;color:var(--navy);margin:0 0 6px}
-.brand{display:flex;align-items:center;gap:14px;margin:0 0 6px}.brand img{height:24px;width:auto;display:block}.brand h1{margin:0}
-.sub{color:var(--mute);margin:0 0 24px}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--navy)}
-a{color:var(--navy)}
-
-table{width:100%;border-collapse:separate;border-spacing:0;background:var(--white);border:1px solid var(--g300);border-radius:var(--radius);box-shadow:0 8px 32px -8px rgba(28,50,84,.12)}
-th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);padding:10px 16px;background:var(--g50);border-bottom:1px solid var(--g300)}
-th:first-child{border-top-left-radius:var(--radius)}th:last-child{border-top-right-radius:var(--radius)}
-td{padding:16px;vertical-align:top;border-bottom:1px solid var(--g200)}
-tbody:last-child tr:last-child td{border-bottom:0}
-tbody.open tr.main td{border-bottom:0}
-col.c-name{width:21%}col.c-status{width:19%}col.c-actions{width:18%}
-
-.name{font-weight:500;color:var(--navy);font-size:15px}
-.req{display:block;color:var(--mute);font-size:12px;margin-top:2px}
-.what{color:var(--mute);font-size:13px;margin:8px 0 0}
-.how{display:inline-block;margin-top:10px;font-size:12px;color:var(--navy);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-family:inherit}
-
-.status{display:flex;align-items:center;gap:8px;color:var(--ink);white-space:nowrap}
+main{max-width:960px;margin:0 auto;padding:48px 20px 64px}
+.brand{display:flex;align-items:center;gap:14px;margin:0 0 28px}.brand img{height:22px;width:auto;display:block}
+h1{font:600 20px/1.2 Montserrat,Inter,sans-serif;color:var(--navy);margin:0}
+#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:720px){#list{grid-template-columns:1fr}}
+.row{background:var(--white);border:1px solid var(--g300);border-radius:var(--radius);box-shadow:0 8px 32px -12px rgba(28,50,84,.14);padding:18px 20px}
+.top{display:flex;align-items:center;gap:12px}
+.name{font-weight:500;color:var(--navy);font-size:15px;flex:1;display:flex;align-items:center;gap:10px}
+.icon{width:28px;height:28px;border-radius:7px;background:var(--g100);border:1px solid var(--g200);display:flex;align-items:center;justify-content:center;flex:none;font:600 12px Montserrat,Inter,sans-serif;color:var(--navy);overflow:hidden}
+.icon img{width:18px;height:18px;object-fit:contain;display:block}.icon img.wide{width:22px;height:auto}
+.opt{color:var(--mute);font-size:12px;font-weight:400;margin-left:8px}
+.status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute);white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--g400);flex:none}
-.done .dot{background:var(--navy)}.failed .dot{background:var(--rust)}.untested .dot{background:var(--blue)}
-.result{font-size:12px;margin-top:6px;color:var(--mute)}.failed .result{color:var(--rust)}
-.when{display:block;font-size:11px;color:var(--mute);margin-top:2px}
-
-.field{margin-bottom:10px}.field:last-child{margin-bottom:0}
-.field label{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--mute);margin-bottom:4px}
-.field .state{margin-left:auto;font-size:11px;color:var(--navy);white-space:nowrap}
-.field .clear{font-size:11px;color:var(--mute);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-family:inherit}
-input{width:100%;font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--g300);border-radius:var(--radius-sm);background:var(--g50);color:var(--ink)}
-input::placeholder{color:rgba(8,11,16,.35)}
+.done .dot{background:var(--navy)}.failed .dot{background:var(--rust)}.failed .status{color:var(--rust)}
+.done .status{color:var(--ink)}
+.fields{display:grid;gap:8px;margin-top:12px}
+input{width:100%;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--g300);border-radius:var(--radius-sm);background:var(--g50);color:var(--ink)}
+input::placeholder{color:rgba(8,11,16,.38)}
 input:focus{outline:0;border-color:var(--navy);box-shadow:0 0 0 3px rgba(142,176,226,.45);background:var(--white)}
-
-.actions{display:flex;flex-direction:column;gap:6px}
-button.b{font:inherit;font-size:13px;font-weight:500;padding:7px 12px;border-radius:var(--radius-sm);border:1px solid var(--g400);background:var(--white);color:var(--navy);cursor:pointer;text-align:center;transition:background .15s,border-color .15s}
+.done .fields{display:none}.done.edit .fields{display:grid}
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:12px}
+button.b{font:inherit;font-size:13px;font-weight:500;padding:8px 14px;white-space:nowrap;line-height:1.3;align-self:center;border-radius:var(--radius-sm);border:1px solid var(--g400);background:var(--white);color:var(--navy);cursor:pointer}
 button.b:hover{background:var(--g100);border-color:var(--blue)}
-button.b.primary{background:var(--navy);color:var(--white);border-color:var(--navy)}
-button.b.primary:hover{background:var(--navy-deep);border-color:var(--navy-deep)}
+button.b.primary{background:var(--navy);color:var(--white);border-color:var(--navy)}button.b.primary:hover{background:var(--navy-deep)}
 button.b:disabled{opacity:.45;cursor:default}
-
-tr.steps{display:none}tbody.open tr.steps{display:table-row}
-tr.steps td{background:var(--g50);padding:4px 16px 16px;border-top:0}
-tr.steps ol{margin:0;padding-left:20px;font-size:13px;color:var(--ink)}
-tr.steps li{margin:4px 0}tr.steps li::marker{color:var(--mute)}
-
-footer{display:flex;justify-content:space-between;align-items:center;margin-top:20px;color:var(--mute);font-size:13px;gap:12px;flex-wrap:wrap}
-
-@media (max-width:820px){
-  main{padding:28px 16px 56px}
-  thead,col{display:none}
-  table,tbody,tr,td{display:block;width:100%}
-  table{border-radius:var(--radius)}
-  td{padding:8px 16px;border-bottom:0}
-  tr.main td:first-child{padding-top:16px}tr.main td:last-child{padding-bottom:16px}
-  tbody{border-bottom:1px solid var(--g200)}tbody:last-of-type{border-bottom:0}
-  tbody.open tr.steps{display:block}tr.steps td{padding:8px 16px 16px}
-  .actions{flex-direction:row;flex-wrap:wrap}button.b{flex:1 1 auto}
-}
+.link{font:inherit;font-size:12px;color:var(--mute);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:auto}
+.err{font-size:12px;color:var(--rust);margin-top:8px}.note{font-size:12px;color:var(--mute);margin-top:8px}
+.help{display:none;margin:12px 0 0;padding:12px 14px;background:var(--g50);border:1px solid var(--g200);border-radius:var(--radius-sm);font-size:13px}
+.open .help{display:block}.help ol{margin:0;padding-left:18px}.help li{margin:3px 0}.help a{color:var(--navy)}
+footer{display:flex;justify-content:space-between;align-items:center;margin-top:20px;color:var(--mute);font-size:13px}
 </style></head><body><main>
 <div class="brand"><img src="/logo.png" alt="3DAPI"><h1>Integrations</h1></div>
-<p class="sub">Connect the accounts your shop runs on. Each value stays on this computer (<code id="envfile"></code>) and is checked with its platform. Nothing you type here reaches the assistant.</p>
-<table>
-  <colgroup><col class="c-name"><col class="c-status"><col class="c-values"><col class="c-actions"></colgroup>
-  <thead><tr><th>Integration</th><th>Status</th><th>Values</th><th>Actions</th></tr></thead>
-  <tbody id="list"></tbody>
-</table>
-<footer><span id="summary"></span><button class="b primary" id="finish">Finish</button></footer>
+<div id="list"></div>
+<footer><span id="summary"></span><button class="b primary" id="finish">Done</button></footer>
 </main>
 <script>
 const TOKEN = "%%TOKEN%%";
 const api = (path, body) => fetch(path, {method: body ? "POST" : "GET", headers: {"content-type": "application/json", "x-token": TOKEN}, body: body ? JSON.stringify(body) : undefined}).then(r => r.json());
-const phrase = {done: "connected", failed: "check failed", untested: "saved, not tested", empty: "not connected"};
-let state; const opened = new Set();
+const phrase = {done: "Connected", failed: "Not working", untested: "Not checked", empty: "Not connected"};
+let state; const open = new Set(), edit = new Set(), notes = {};
 function esc(s){return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function render(){
-  document.getElementById("envfile").textContent = state.env_file;
-  const table = document.querySelector("table");
-  for (const tb of table.querySelectorAll("tbody")) tb.remove();
+  const list = document.getElementById("list"); list.innerHTML = "";
   let done = 0, required = 0;
   for (const it of state.integrations){
+    if (it.hidden) continue;
     if (it.required){required++; if (it.status === "done") done++;}
-    if (it.status === "empty" && !opened.has(it.id + ":closed")) opened.add(it.id);
     const r = it.result || {};
-    const tb = document.createElement("tbody"); tb.dataset.id = it.id; tb.className = it.status + (opened.has(it.id) ? " open" : "");
-    tb.innerHTML = `
-      <tr class="main">
-        <td><span class="name">${esc(it.name)}</span><span class="req">${it.required ? "required" : "optional"}</span>
-          <p class="what">${esc(it.what)}</p>
-          <button class="how" data-act="how">${opened.has(it.id) ? "Hide the steps" : "How to get the values"}</button></td>
-        <td><span class="status"><span class="dot"></span>${phrase[it.status]}</span>
-          ${r.summary ? `<div class="result">${esc(r.summary)}</div>` : ""}
-          ${r.checked_at ? `<span class="when">checked ${esc(r.checked_at.slice(0, 16).replace("T", " "))}</span>` : ""}</td>
-        <td>${it.fields.map(f => `
-          <div class="field"><label for="${it.id}-${f.key}">${esc(f.label)}${f.optional ? " (optional)" : ""} <code>${f.key}</code>
-            ${f.set ? `<span class="state">${r.fields && r.fields[f.key] === true ? "verified" : "saved"}</span><button class="clear" data-key="${f.key}">remove</button>` : ""}</label>
-          <input id="${it.id}-${f.key}" name="${f.key}" type="${f.secret ? "password" : "text"}" autocomplete="off" spellcheck="false"
-             placeholder="${f.set ? (f.secret ? "saved; type to replace" : "") : esc(f.placeholder)}" value="${f.value ? esc(f.value) : ""}"></div>`).join("")}</td>
-        <td><div class="actions"><button class="b primary" data-act="save">Save and test</button><button class="b" data-act="test">Test</button>
-          ${(it.actions || []).map(a => `<button class="b" data-act="${a.id}">${esc(a.label)}</button>`).join("")}</div></td>
-      </tr>
-      <tr class="steps"><td colspan="4"><ol>${it.steps.map(s => `<li>${esc(s).replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</li>`).join("")}</ol></td></tr>`;
-    table.appendChild(tb);
+    const row = document.createElement("div"); row.dataset.id = it.id;
+    row.className = "row " + it.status + (open.has(it.id) ? " open" : "") + (edit.has(it.id) ? " edit" : "");
+    const detail = it.status === "done" && r.detail ? ` · ${esc(r.detail)}` : "";
+    const needAuth = it.status !== "done" && r.action === "authorize";
+    row.innerHTML = `
+      <div class="top"><span class="name"><span class="icon">${it.icon ? `<img src="${esc(it.icon)}" alt="" class="${it.icon === "/logo.png" ? "wide" : ""}" onerror="this.replaceWith(document.createTextNode('${esc(it.name[0])}'))">` : esc(it.name.slice(0, 3))}</span>${esc(it.name)}${it.required ? "" : '<span class="opt">optional</span>'}</span>
+        <span class="status"><span class="dot"></span>${phrase[it.status]}${detail}</span></div>
+      <div class="fields">${it.fields.map(f => `
+        <input name="${f.key}" type="${f.secret ? "password" : "text"}" autocomplete="off" spellcheck="false" aria-label="${esc(f.label)}"
+          placeholder="${f.set ? (f.secret ? "••••••••••••" : "") : esc(f.label) + (f.optional ? " (optional)" : "")}" value="${f.value ? esc(f.value) : ""}">`).join("")}</div>
+      ${it.status === "failed" && r.summary ? `<div class="err">${esc(r.summary)}</div>` : ""}
+      ${it.id === "etsy" && state.etsy_login && state.etsy_login.waiting ? `<div class="note">Waiting for you to click Allow on Etsy…</div>` : (notes[it.id] ? `<div class="${notes[it.id].ok ? "note" : "err"}">${esc(notes[it.id].text)}</div>` : "")}
+      <div class="bar">
+        ${it.status === "done" && !edit.has(it.id) ? `<button class="b" data-act="edit">Change</button>` : `<button class="b primary" data-act="save">Save and test</button>`}
+        <button class="b" data-act="test" title="Checks the saved values">Test</button>
+        ${needAuth ? `<button class="b primary" data-act="authorize">Sign in to Etsy</button>` : ""}
+        ${it.status === "done" && !edit.has(it.id) ? "" : `<button class="link" data-act="how">${open.has(it.id) ? "Hide help" : "Where do I get this?"}</button>`}</div>
+      <div class="help"><ol>${it.steps.map(s => `<li>${esc(s).replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</li>`).join("")}</ol></div>`;
+    list.appendChild(row);
   }
-  document.getElementById("summary").textContent = `${done} of ${required} required integrations connected`;
+  document.getElementById("summary").textContent = `${done} of ${required} connected`;
 }
-async function refresh(){ state = await api("/api/state"); render(); }
-document.querySelector("table").addEventListener("click", async e => {
+async function refresh(){ state = await api("/api/state"); render();
+  if (state.etsy_login && state.etsy_login.waiting) setTimeout(async () => { const before = state.etsy_login.waiting; await refresh(); if (before && !state.etsy_login.waiting) { await api("/api/test", {integration: "etsy"}); delete notes.etsy; await refresh(); } }, 3000); }
+document.getElementById("list").addEventListener("input", e => {
+  const row = e.target.closest(".row"); if (!row) return;
+  const typed = [...row.querySelectorAll("input")].some(i => i.value.trim());
+  const test = row.querySelector('[data-act="test"]'); if (test) test.disabled = typed;   // Test checks saved values only
+});
+document.getElementById("list").addEventListener("click", async e => {
   const btn = e.target.closest("button"); if (!btn) return;
-  const tb = btn.closest("tbody"); const id = tb.dataset.id;
-  if (btn.dataset.act === "how"){
-    if (opened.has(id)){ opened.delete(id); opened.add(id + ":closed"); } else { opened.add(id); opened.delete(id + ":closed"); }
-    render(); return;
-  }
-  for (const b of tb.querySelectorAll("button")) b.disabled = true;
+  const row = btn.closest(".row"); const id = row.dataset.id; const act = btn.dataset.act;
+  if (act === "how"){ open.has(id) ? open.delete(id) : open.add(id); render(); return; }
+  if (act === "edit"){ edit.add(id); render(); return; }
+  for (const b of row.querySelectorAll("button")) b.disabled = true;
   try {
-    if (btn.dataset.key){ await api("/api/clear", {integration: id, key: btn.dataset.key}); }
-    else if (btn.dataset.act === "save"){
-      const values = {}; for (const inp of tb.querySelectorAll("input")) if (inp.value.trim()) values[inp.name] = inp.value.trim();
-      await api("/api/values", {integration: id, values});
-    } else if (btn.dataset.act === "test"){ await api("/api/test", {integration: id}); }
-    else { const r = await api("/api/action", {integration: id, action: btn.dataset.act}); if (r.summary) alert(r.summary); }
+    if (act === "save"){
+      const values = {}; for (const inp of row.querySelectorAll("input")) if (inp.value.trim()) values[inp.name] = inp.value.trim();
+      await api("/api/values", {integration: id, values}); edit.delete(id);
+    } else if (act === "test"){ await api("/api/test", {integration: id}); }
+    else if (act === "authorize"){
+      const w = window.open("about:blank", "_blank");   // opened on the click, so no popup blocker
+      const r = await api("/api/action", {integration: id, action: "authorize"});
+      if (r.url && w){ w.location = r.url; } else if (w) { w.close(); }
+      notes[id] = {ok: !!r.ok, text: r.summary || ""};
+    }
   } finally { await refresh(); }
 });
-document.getElementById("finish").addEventListener("click", async () => { await api("/api/finish", {}); document.body.innerHTML = '<main><h1>Done</h1><p class="sub">You can close this tab. Run <code>/dapilot:integrate</code> again any time.</p></main>'; });
+document.getElementById("finish").addEventListener("click", async () => { await api("/api/finish", {}); document.body.innerHTML = '<main><div class="brand"><img src="/logo.png" alt="3DAPI"><h1>Done</h1></div><p style="color:var(--mute)">You can close this tab.</p></main>'; });
 refresh();
+setInterval(() => api("/api/ping").catch(() => {}), 3000);                       // heartbeat: the server ends when it stops
+addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", new Blob([JSON.stringify({token: TOKEN})], {type: "application/json"})));
 </script></body></html>
 """
 
@@ -587,7 +626,10 @@ refresh();
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = UA
     token = ""
-    last_seen = time.time()
+    last_seen = time.time()   # any request: the idle timeout
+    opened = False            # the page was loaded at least once
+    last_ping = 0.0           # the page's heartbeat, every 3 s while a tab is open
+    bye_at = 0.0              # the page said it was closing; a reload sends a ping within the grace period
 
     def log_message(self, fmt, *args):  # quiet; nothing here may log a body
         pass
@@ -613,7 +655,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._local():
             return self._json(403, {"error": "local only"})
         if self.path == "/":
-            return self._send(200, PAGE.replace("%%TOKEN%%", self.token).encode(), "text/html; charset=utf-8")
+            Handler.opened, Handler.last_ping, Handler.bye_at = True, time.time(), 0.0
+            return self._send(200, PAGE.replace("%%TOKEN%%", self.token).replace("%%VERSION%%", plugin_version()).encode(),
+                              "text/html; charset=utf-8")
+        if self.path == "/api/ping" and self.headers.get("x-token") == self.token:
+            Handler.last_ping, Handler.bye_at = time.time(), 0.0
+            return self._json(200, {"ok": True})
         if self.path == "/logo.png" and LOGO.exists():
             return self._send(200, LOGO.read_bytes(), "image/png")
         if self.path == "/api/state" and self.headers.get("x-token") == self.token:
@@ -622,13 +669,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         Handler.last_seen = time.time()
-        if not self._local() or self.headers.get("x-token") != self.token:
+        if not self._local() or (self.headers.get("x-token") != self.token and self.path != "/api/bye"):
             return self._json(403, {"error": "forbidden"})
         n = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
             return self._json(400, {"error": "bad json"})
+        if self.path == "/api/bye":   # sent by the closing tab as a beacon, which cannot set headers: the token rides in the body
+            if body.get("token") == self.token:
+                Handler.bye_at = time.time()
+            return self._json(200, {"ok": True})
         iid = body.get("integration")
         if self.path == "/api/finish":
             self._json(200, {"ok": True})
@@ -661,29 +712,63 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
-def our_page(port: int) -> bool:
-    """True when an Integrations page is already served on this port (an earlier run, still within its idle time)."""
-    status, _, _ = http_json("GET", f"http://127.0.0.1:{port}/", timeout=2)
-    if status != 200:
-        return False
+def _read_version() -> str:
+    try:
+        return json.loads((HERE.parent / ".claude-plugin" / "plugin.json").read_text()).get("version") or "0"
+    except (OSError, ValueError):
+        return "0"
+
+
+VERSION = _read_version()   # fixed when the process starts: a running server reports the code it loaded, not the file on disk
+
+
+def plugin_version() -> str:
+    return VERSION
+
+
+def our_page(port: int) -> tuple[str, str] | None:
+    """(version, token) when an Integrations page from some run of this script is on the port, else None.
+    An older run reports its version as "old": it predates the version tag."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2) as r:
-            return "<title>3DAPI Integrations</title>" in r.read(4096).decode(errors="replace")
-    except OSError:
-        return False
+            html = r.read(65536).decode(errors="replace")
+    except (OSError, ValueError):
+        return None
+    if "Integrations</title>" not in html or 'TOKEN = "' not in html:
+        return None
+    m = re.search(r'<meta name="dapilot-integrate" content="([^"]*)">', html)
+    tok = re.search(r'TOKEN = "([^"]*)"', html)
+    return (m.group(1) if m else "old"), (tok.group(1) if tok else "")
+
+
+def stop_page(port: int, token: str) -> None:
+    """Ask an earlier run on this port to finish, then wait for the port to free."""
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/finish", data=b"{}", method="POST",
+                                 headers={"content-type": "application/json", "x-token": token})
+    try:
+        urllib.request.urlopen(req, timeout=3).read()
+    except (OSError, ValueError):
+        pass
+    for _ in range(20):
+        if our_page(port) is None:
+            return
+        time.sleep(0.2)
 
 
 def serve(args) -> int:
     store = store_dir()
     store.mkdir(parents=True, exist_ok=True)
     if not args.foreground:
-        for port in range(args.port, args.port + 6):   # a busy port is skipped; an earlier page is reused
+        for port in range(args.port, args.port + 6):   # a busy port is skipped; this version's page is reused, an older one replaced
             url = f"http://127.0.0.1:{port}/"
-            if our_page(port):
+            found = our_page(port)
+            if found and found[0] == plugin_version():
                 if not args.no_browser:
                     webbrowser.open(url)
                 print(json.dumps({"ok": True, "url": url, "store": str(store), "note": "the page was already open; reused"}))
                 return 0
+            if found:
+                stop_page(port, found[1])   # an earlier version's page: replaced by this one on the same port
             child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve", "--foreground", "--port", str(port)]
                                      + (["--no-browser"] if args.no_browser else []),
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -691,7 +776,7 @@ def serve(args) -> int:
             time.sleep(0.6)
             if child.poll() is None:
                 print(json.dumps({"ok": True, "url": url, "store": str(store),
-                                  "note": f"page served for up to {IDLE_SECONDS // 60} idle minutes or until Finish; then run `integrate.py status`"}))
+                                  "note": "the page runs until its tab is closed; then run `integrate.py status`"}))
                 return 0
         print(json.dumps({"ok": False, "reason": f"ports {args.port} to {args.port + 5} are all in use"}))
         return 2
@@ -704,19 +789,29 @@ def serve(args) -> int:
     url = f"http://127.0.0.1:{args.port}/"
 
     def idle_watch():
+        """The server lives as long as the page: it ends 4 s after the tab says goodbye (a reload pings again
+        within that), or 12 s after the heartbeat stops (a crashed tab), or after the idle time if the page
+        was never opened. Finish on the page ends it at once."""
         while True:
-            time.sleep(15)
-            if time.time() - Handler.last_seen > IDLE_SECONDS:
-                srv.shutdown()
-                return
+            time.sleep(1)
+            now = time.time()
+            if Handler.opened:
+                if Handler.bye_at and now - Handler.bye_at > 4 and Handler.last_ping < Handler.bye_at:
+                    srv.shutdown(); return
+                if now - Handler.last_ping > 12:
+                    srv.shutdown(); return
+            if now - Handler.last_seen > IDLE_SECONDS:
+                srv.shutdown(); return
     threading.Thread(target=idle_watch, daemon=True).start()
     if not args.no_browser:
         threading.Timer(0.3, webbrowser.open, [url]).start()
     srv.serve_forever()
+    end_login()   # Finish or the idle timeout: no sign-in listener outlives the page
     return 0
 
 
 def banner(args) -> int:
+    """The wordmark, navy when stdout is a terminal. The command shows it inside a code block."""
     colour = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     print((NAVY + BANNER + "\033[0m") if colour else BANNER, end="")
     return 0
@@ -727,11 +822,13 @@ def status(args) -> int:
     if args.json:
         print(json.dumps(st, indent=1))
     else:
-        w = max(len(i["name"]) for i in st["integrations"])
-        for i in st["integrations"]:
+        rows = [i for i in st["integrations"] if args.all or (not i["hidden"] and (i["required"] or i["status"] != "empty"))]
+        w = max(len(i["name"]) for i in rows)
+        for i in rows:
             mark = {"done": "●", "failed": "✕", "untested": "○", "empty": " "}[i["status"]]
             phrase = {"done": "connected", "failed": "check failed", "untested": "saved, not tested", "empty": "not connected"}[i["status"]]
-            extra = f"  {i['result']['summary']}" if i["result"].get("summary") and i["status"] != "empty" else ""
+            r = i["result"]
+            extra = f"  {r['detail']}" if i["status"] == "done" and r.get("detail") else (f"  {r['summary']}" if i["status"] == "failed" and r.get("summary") else "")
             print(f"{mark} {i['name']:<{w}}  {phrase}{'' if i['required'] else '  (optional)'}{extra}")
     missing = [i["name"] for i in st["integrations"] if i["required"] and i["status"] != "done"]
     return 1 if missing else 0
@@ -760,6 +857,7 @@ def main() -> int:
     s.add_argument("--foreground", action="store_true", help="run in this process instead of detaching")
     st = sub.add_parser("status")
     st.add_argument("--json", action="store_true")
+    st.add_argument("--all", action="store_true", help="every integration, hidden and unset optional ones included")
     t = sub.add_parser("test")
     t.add_argument("--integration", choices=[i["id"] for i in INTEGRATIONS])
     sub.add_parser("banner", help="print the 3DAPI wordmark (navy when stdout is a terminal)")

@@ -1,7 +1,7 @@
 ---
 description: Open the Integrations page to connect 3DAPI, Etsy, fal, Claude and Instagram; or `status` to report what is connected
 argument-hint: "[status]"
-allowed-tools: Bash
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/*)
 ---
 
 Connect the shop's accounts. Every value is entered on a local page and
@@ -28,8 +28,8 @@ path instead. The script needs only Python 3's standard library.
    with step 2 once they say they are done.
 2. When the person says they are done, or when the argument is `status`, run
    `${DAPILOT_PYTHON:-python3} ${CLAUDE_PLUGIN_ROOT}/scripts/integrate.py status`
-   and show the table exactly as printed: one line per integration, connected
-   or not, with the platform's non-secret summary. Exit 1 means a required
+   and show it as a two-column table, Integration and Status, one row per
+   integration with the phrase the script printed. Not a code block.
    integration is not connected; say which and point at the page.
 
 Do not read, print, grep, copy or edit the env file, an Etsy token file or

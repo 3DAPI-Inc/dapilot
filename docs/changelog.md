@@ -347,7 +347,7 @@ each carries its own date.
   with headless Chrome at 1280 px and in a 390 px frame. Server, API and
   state are unchanged.
 - **Quickstart and the brand name (2026-10-13).** `/dapilot:quickstart`
-  (`commands/quickstart.md`, `scripts/quickstart.sh`): from a checkout it
+  (`commands/quickstart.md`, `scripts/quickstart.py`): from a checkout it
   runs `shop.sh setup` without a terminal (installs what it can, creates the
   store files, skips every sign-in), prints the 3DAPI wordmark
   (`integrate.py banner`, navy on a terminal), opens the Integrations page on
@@ -359,4 +359,30 @@ each carries its own date.
   the dev scripts (150 places, 40 files); identifiers, file names, env
   variables, URLs and the generated OpenAPI snapshot are untouched. Commands
   are a `commands/` file because Cowork offers typed slash commands only from
-  there; the `integrate` skill stays for Claude Code.
+  there. The `integrate` skill was removed the same day: chat lists a skill
+  and a command of one name as two entries.
+- **One store per machine (2026-10-14).** A Code-tab session runs in a
+  worktree, where `store/` and `.venv` do not exist, so each one copied a
+  fresh env template and the keys looked reset. `scripts/store_path.py` is now
+  the single rule: `$DAPILOT_STORE_DIR`, else the checkout's `store/` when it
+  holds a `.env` or `config.json`, else `~/.dapilot` (mode 0700). integrate,
+  quickstart, the hook, `run_intake.py`, `ledger.py`, `design_product.py`,
+  `server/app.py` and `shop.sh` all use it, and the entry points export the
+  result to everything they start. `shop.sh` creates its venv under
+  `~/.dapilot/venv` when the checkout has none. The hook fences `~/.dapilot`
+  as well. On the dev Mac the user settings pin `DAPILOT_STORE_DIR` and
+  `DAPILOT_PYTHON` to the checkout. Same day: a server started before an
+  update reported the new version by reading `plugin.json` live, so a new
+  run reused its old page; the version is now fixed at process start.
+- **The plugin carries its templates (2026-10-14).** An install, whether
+  uploaded or from a marketplace, copies only `plugins/dapilot`, so the
+  store templates moved from `store/` to `plugins/dapilot/templates/`
+  (`.env.example`, `config.example.json`, `pricing-policy.example.json`,
+  `etsy-listing.example.json`) and `quickstart.py` seeds a new store from
+  them; `run_intake.py`, `ledger.py` and `design_product.py` fall back to
+  the template config there. `plugins/dapilot/requirements.txt` holds the
+  pipeline's packages and the repo's `requirements.txt` includes it plus the
+  server's. `quickstart.py` replaced `quickstart.sh` the same day (standard
+  library, runs on Windows too; waits while the page is open and prints the
+  table only after it closes), the hook picks `python3` or `python`, and the
+  commands pre-approve only `python3 <plugin>/scripts/*`.

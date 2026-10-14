@@ -34,7 +34,7 @@ stage are scripts. Research, price, design and copy are Claude workers, one
 stage on one item each. The console (`frontend/`, `server/app.py`) uploads,
 shows every stage's output, holds the price gate and files approved products
 into the catalogue. `scripts/dev/shop.sh` sets a fresh machine up and runs the
-whole thing from one terminal. `/dapilot:integrate` (2026-10-13) opens a local
+whole thing from one terminal. `/dapilot:integrate` (2026-10-13, a command in `commands/`, not a skill) opens a local
 Integrations page, one table in 3dapi's glacier-and-navy palette with a row
 per integration and columns for status, values and actions, where a person
 pastes each credential (3DAPI, Etsy, fal, Claude, Instagram) with the steps
@@ -44,7 +44,7 @@ and records the result in `store/integrations.json`. No value passes through
 the agent, and the plugin's PreToolUse hook (`scripts/guard_secrets.py`)
 refuses the agent's tools on the env file, the Etsy token and `social/`.
 Scripts take the file only as `--env <file>`. `/dapilot:quickstart` is the
-first-run command: `scripts/quickstart.sh` runs `shop.sh setup` from a checkout,
+first-run command: `scripts/quickstart.py` runs `shop.sh setup` from a checkout,
 prints the 3DAPI wordmark, opens the page on port 3106 and shows the table;
 its output is written for a person. The brand is written 3DAPI in every
 comment and document; `dapi` stays only in identifiers (`dapi.py`,
@@ -152,7 +152,7 @@ Resume button picks up every work dir with a stage left and no live worker.
   unit price plus the fixed fees once; one Etsy sale of a set is one 3DAPI
   order line of that quantity.
 - **Pricing policy** is `store/reference/pricing-policy.json` (private;
-  template `store/pricing-policy.example.json`). Cost basis is 3DAPI's quote
+  template `plugins/dapilot/templates/pricing-policy.example.json`). Cost basis is 3DAPI's quote
   as charged, commission included, at the full-plate unit price from the
   batch curve (the shop buys in batches of about 100 and sells from stock).
   Two candidates reach the model: quote plus 50% markup, and the market
@@ -350,9 +350,10 @@ docs/
   agents.md skills.md store-plan.md market-research.md social-plan.md quickstart.md changelog.md
 server/app.py                     FastAPI job API for the console (:3100)
 frontend/                         React 19 + Vite 8 + Tailwind 4 + shadcn console (:8081), /studio capture page
-store/
-  config.example.json pricing-policy.example.json etsy-listing.example.json   committed templates
-  config.json .env reference/ products/ social/ etsy_token*.json              private, gitignored
+store/                            the dev machine's store, private and gitignored (config.json .env reference/
+                                  products/ social/ etsy_token*.json); sellers get ~/.dapilot instead
+plugins/dapilot/templates/        .env.example config.example.json pricing-policy.example.json
+                                  etsy-listing.example.json: what a new store is seeded from (quickstart, shop.sh)
 scripts/
   dev/shop.sh                     setup, check, run, status, approve, resume from one terminal
   dev/up.sh                       checks, job API and console, ctrl-c stops both
@@ -416,7 +417,13 @@ Environment every skill expects, in `store/.env` (gitignored), which
 ```
 DAPI_API_KEY      scoped API key, never committed, never sent to the browser
 DAPI_API_URL      origin of the public API (public-api/v1); the contract's paths carry /v1
-DAPILOT_STORE_DIR store-private files (Etsy token, fee schedule, taxonomy cache, products)
+DAPILOT_STORE_DIR store-private files (keys, Etsy token, config, fee schedule, products, sessions).
+                  Optional since 2026-10-14: plugins/dapilot/scripts/store_path.py resolves it as
+                  $DAPILOT_STORE_DIR, else a checkout's own store/ when set up, else ~/.dapilot,
+                  one store per machine. Every entry point (run_intake, server, shop.sh,
+                  quickstart, the hook) uses that rule and exports the result to what it starts.
+                  On the dev Mac, ~/.claude/settings.json `env` pins it and DAPILOT_PYTHON to the
+                  checkout, so a Code-tab worktree never starts a fresh store or venv.
 ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app; the OAuth token is $DAPILOT_STORE_DIR/etsy_token.json
 FAL_KEY (or FAL_API_KEY)             fal.ai, design stage paid assets only
 ANTHROPIC_API_KEY                    makes headless runs bill to the API instead of a subscription

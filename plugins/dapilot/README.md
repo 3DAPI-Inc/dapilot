@@ -16,8 +16,10 @@ DAPI_API_URL        origin of the public API, no trailing /v1 (e.g. https://api.
 DAPI_API_KEY        the API key, sent as x-api-key
 DAPILOT_CACHE_DIR   optional, where the OpenAPI spec is cached (default ~/.cache/dapilot)
 DAPILOT_PYTHON      optional, interpreter for bundled scripts (default python3)
-DAPILOT_STORE_DIR   store-private files: the Etsy OAuth token, reference/platform-fees.json,
-                    the cached Etsy taxonomy. Required by research-comparables.
+DAPILOT_STORE_DIR   store-private files: the env file with the keys, the Etsy token, config,
+                    reference/, products, social sessions. Optional: without it a checkout
+                    uses its own store/ and anything else uses ~/.dapilot, one store per
+                    machine (scripts/store_path.py), so updates and new sessions keep the setup.
 ETSY_KEYSTRING      Etsy Open API v3 app credentials, for research-comparables only
 ETSY_SHARED_SECRET
 FAL_KEY             fal.ai key (FAL_API_KEY also accepted), for design-product's paid assets only
@@ -43,24 +45,29 @@ the env file, the Etsy token files and `social/`; scripts take the env file
 only as `--env <file>`. The hook fences the model's tools, not code the model
 writes: the real protection is that every value is revocable on its platform.
 
-## Loading
+## Getting it
 
-```bash
-claude --plugin-dir /path/to/plugins/dapilot      # from a checkout, for one session
-/plugin install dapilot --marketplace 3DAPI-Inc/dapilot   # installed, from the repo's marketplace
-/dapilot:quickstart          # first run: setup, wordmark, Integrations page
-/dapilot:dapi-request        # skills are namespaced by plugin name
-```
+Two ways in, same plugin:
 
-The repo root carries `.claude-plugin/marketplace.json`, so the checkout is
-itself a marketplace: `claude plugin marketplace add /path/to/dapilot` then
-`claude plugin install dapilot@dapilot`. Cowork and claude.ai load plugins
-only from Customize > Plugins (a GitHub marketplace, or Add > Upload plugin
-with a zip of this folder), never from a folder added as a working directory,
-and they load a plugin's components the next time a task starts. In Cowork a
-typed slash command comes from `commands/`, so `commands/integrate.md` is the
-`/dapilot:integrate` entry there; in Claude Code the skill of the same name
-answers. Hooks load in Cowork and Claude Code; chat ignores them.
+- **Install it from Claude Desktop.** Customize, Plugins, and add `dapilot`
+  from the `3DAPI-Inc/dapilot` marketplace (or the zip a release ships).
+  Then, in Claude Code or the desktop app's Code tab, type
+  `/dapilot:quickstart`. It opens the Integrations page, where the accounts
+  are connected; the store lives in `~/.dapilot` on that computer and
+  survives updates and reinstalls.
+- **Clone the repository from GitHub.** `git clone` it and run
+  `/dapilot:quickstart` from a session started in the checkout (or
+  `scripts/dev/shop.sh setup` in a terminal). This route also sets up the
+  tools the pipeline itself needs (Python venv, Blender, Chrome, ffmpeg,
+  the console). The store is `~/.dapilot` here too unless `DAPILOT_STORE_DIR`
+  says otherwise; the templates it starts from are in `templates/`.
+
+For development from a checkout: `claude --plugin-dir plugins/dapilot` loads
+the folder for one session, and `claude plugin marketplace add
+/path/to/dapilot` then `claude plugin install dapilot@dapilot` installs it in
+place. Skills and commands are namespaced: `/dapilot:<name>`. A typed slash
+command comes from `commands/`; the desktop app and Cowork load a plugin's
+components the next time a task starts.
 
 ## Running a pipeline
 
@@ -77,7 +84,7 @@ killed with their whole process group after `max_worker_minutes` from the
 store config (default 15), or `minutes_per_stage` for their stage (design: 40);
 a `.lock` older than its stage's limit is stale and cleared.
 
-`store/.env` (see `store/.env.example` in the host project) supplies
+The store's `.env` (seeded from `templates/.env.example`) supplies
 `ANTHROPIC_API_KEY`, `DAPI_*` and `DAPILOT_PYTHON`.
 
 ## Skills
@@ -95,7 +102,7 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `research-comparables` | Finds the Etsy listings a model competes with, picks the true comparables, and writes the market band and our margin (`viability.json`). Needs Etsy credentials, no 3DAPI key. |
 | `propose-price` | Picks the sale price from the candidates `price_candidates.py` allows, with a rationale; the script's `--check` refuses anything below break-even or outside the candidates. Needs the store pricing policy. |
 | `run-intake` | Director skill for an interactive session; the headless equivalent is `scripts/run_intake.py`. |
-| `integrate` | Opens the Integrations page where a person connects 3DAPI, Etsy, fal, Claude and Instagram; every value is verified against its platform and never passes through the model. `/dapilot:integrate status` only reports. |
+| `integrate` (command) | Opens the Integrations page where a person connects 3DAPI, Etsy, fal, Claude and Instagram; every value is verified against its platform and never passes through the model. `/dapilot:integrate status` only reports. |
 | `quickstart` (command) | First run: sets the computer up through `scripts/dev/shop.sh setup` when run from a checkout, prints the 3DAPI wordmark, opens the Integrations page on port 3106 and shows what is connected. Output is written for a person, not a developer. |
 
 ## Scripts
@@ -116,7 +123,7 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `source_thumbnails.py` | copies the plate and top previews a 3MF carries into `thumbnails/`; run by `ledger init`, so the research worker has the designer's own pictures before any draft exists |
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `integrate.py` | the Integrations page: `serve` (local server and page), `status`, `test`; writes the env file and `integrations.json`, verifies each credential with a free call |
-| `quickstart.sh` | what `/dapilot:quickstart` runs: setup, wordmark, `integrate.py serve`, `integrate.py status`; says little, logs to the setup script's log |
+| `quickstart.py` | what `/dapilot:quickstart` runs: setup, wordmark, `integrate.py serve`, `integrate.py status`; says little, logs to the setup script's log |
 | `guard_secrets.py` | the PreToolUse hook that refuses the model's tools on credential files |
 | `market_stats.py` | price band, fees, VAT and margin from `comparables.json`, `quote.json` and the store pricing policy; writes `viability.json` |
 | `price_candidates.py` | the two sale-price candidates (quote plus markup, market median) above the break-even floor; `--check` refuses any `price.json` below the floor, from any author |

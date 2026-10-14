@@ -1,13 +1,7 @@
-# Python dependencies for dapilot: the plugin's scripts and server/app.py.
+# Python dependencies for the dapilot checkout: the plugin's scripts plus server/app.py.
 # scripts/dev/shop.sh setup installs these into .venv and reinstalls when this file changes.
-# Python 3.10 to 3.13; the macOS system 3.14 has no trimesh wheels.
-trimesh>=4
-scipy>=1.11         # trimesh's split() needs a graph engine
-networkx>=3
-numpy>=1.26
-jsonschema>=4
+-r plugins/dapilot/requirements.txt
 fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9
 pydantic>=2
-fal-client>=0.5     # design stage: lifestyle photos and clip

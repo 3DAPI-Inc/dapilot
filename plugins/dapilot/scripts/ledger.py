@@ -43,6 +43,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from store_path import store_dir as _store_dir  # noqa: E402  one rule for every script
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_result import validate  # noqa: E402
 from source_thumbnails import extract as extract_thumbnails  # noqa: E402
 
@@ -60,14 +63,13 @@ def root() -> Path:
 
 
 def load_config() -> dict:
-    store = Path(os.environ.get("DAPILOT_STORE_DIR") or root() / "store")
-    for name in ("config.json", "config.example.json"):
-        p = store / name
+    store = _store_dir()
+    for p in (store / "config.json", Path(__file__).resolve().parent.parent / "templates" / "config.example.json"):
         if p.exists():
             cfg = json.loads(p.read_text())
             cfg["_source"] = str(p)
             return cfg
-    raise SystemExit(out({"ok": False, "reason": f"no config.json or config.example.json in {store}"}, 2))
+    raise SystemExit(out({"ok": False, "reason": f"no config.json in {store} and no template in the plugin"}, 2))
 
 
 def out(obj, code: int = 0) -> int:

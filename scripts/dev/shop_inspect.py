@@ -167,16 +167,16 @@ def check(offline: bool) -> int:
     # files
     ck.add("files", "store dir", "ok" if store.is_dir() else "missing", str(store), ["all"])
     ck.add("files", "store/.env", "ok" if (store / ".env").exists() else "missing",
-           str(store / ".env") if (store / ".env").exists() else "cp store/.env.example store/.env", ["all"])
+           str(store / ".env") if (store / ".env").exists() else "cp plugins/dapilot/templates/.env.example store/.env", ["all"])
     ck.add("files", "config.json", "ok" if cfg else "missing",
-           str(store / "config.json") if cfg else "cp store/config.example.json store/config.json", ["all"])
+           str(store / "config.json") if cfg else "cp plugins/dapilot/templates/config.example.json store/config.json", ["all"])
     pol = store / "reference" / "pricing-policy.json"
-    ck.add("files", "pricing-policy", "ok" if read(pol) else "missing", str(pol) if pol.exists() else "scripts/dev/shop.sh setup copies store/pricing-policy.example.json", ["research", "price"])
+    ck.add("files", "pricing-policy", "ok" if read(pol) else "missing", str(pol) if pol.exists() else "scripts/dev/shop.sh setup copies the plugin's pricing-policy.example.json", ["research", "price"])
     fees = store / "reference" / "platform-fees.json"
     fees = fees if fees.exists() else PLUGIN / "skills" / "research-comparables" / "reference" / "platform-fees.json"
     ck.add("files", "platform-fees", "ok" if fees.exists() else "missing", str(fees.relative_to(ROOT) if fees.is_relative_to(ROOT) else fees), ["research", "price"])
-    if cfg and read(ROOT / "store" / "config.example.json"):
-        drift = missing_keys(read(ROOT / "store" / "config.example.json"), cfg)
+    if cfg and read(PLUGIN / "templates" / "config.example.json"):
+        drift = missing_keys(read(PLUGIN / "templates" / "config.example.json"), cfg)
         ck.add("files", "config keys", "warn" if drift else "ok",
                ("in config.example.json, not in config.json (the scripts use their defaults): " + ", ".join(drift[:12])
                 + (f" and {len(drift) - 12} more" if len(drift) > 12 else "")) if drift else "every key of config.example.json is set")
