@@ -581,3 +581,28 @@ each carries its own date.
   returned a malformed result and the director stopped after two empty
   passes. The lock is the worker's again. Liveness for the gate was already
   the heartbeat plus `state.json`, so nothing else changes.
+- **Quickstart installs Python without a package manager (2026-10-14).** A
+  colleague's fresh Mac: no Homebrew, only Apple's python3 3.9, so the
+  entry point printed "install Python from python.org" and ran setup on 3.9,
+  which setup_env refuses. Now `quickstart.sh` and `quickstart.bat` fall
+  back to the official standalone CPython 3.12 build
+  (astral-sh/python-build-standalone, latest release, the `install_only`
+  archive for the machine's triple), verified against the release's
+  SHA256SUMS and unpacked under the store as `python/`, no root, no brew,
+  no winget. The finder looks there right after `DAPILOT_PYTHON`, so the
+  second run needs no download. macOS without brew and Linux without
+  password-less sudo go straight to it; Windows tries winget first. The
+  `.bat` path is written, not run (no Windows here).
+- **Windows installs winget before Python (2026-10-14).** The fresh install
+  that reported "Python isn't installed" was Windows. `quickstart.bat` now
+  sets winget up when `where winget` finds nothing: the WinGet client module's
+  `Repair-WinGetPackageManager` per user, else Microsoft's App Installer
+  bundle with its VCLibs and UI.Xaml dependencies through `Add-AppxPackage`,
+  both without admin rights; then `winget install Python.Python.3.12` as
+  before; then the standalone CPython build as the last resort. Homebrew is
+  not installed on macOS: its installer needs an admin password and a
+  terminal, and the standalone build makes it unnecessary. Verified on this
+  Mac with Homebrew hidden: the standalone 3.12.15 downloads in 4 s,
+  checksum verified, is reused on the next run in 0.07 s, makes a venv with
+  OpenSSL, and installs the pipeline's packages (15 s). The Windows path is
+  written, not run.

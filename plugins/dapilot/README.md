@@ -4,9 +4,15 @@ Claude Code skills that drive the 3DAPI platform through its public API.
 
 ## Requirements
 
-- Python 3.10 to 3.13. `/dapilot:quickstart` finds one, or installs 3.12 with
-  winget, Homebrew, apt or dnf when there is none; its own packages go in a
-  venv under the store.
+- Python 3.10 to 3.13. `/dapilot:quickstart` finds one, or installs 3.12
+  when there is none: with winget, Homebrew, apt or dnf when one of those
+  can, else the official standalone CPython build unpacked under the store
+  (`~/.dapilot/python`), which needs no admin rights and no package
+  manager. On Windows a missing winget is installed first, per user,
+  from Microsoft's App Installer package. Homebrew is not installed for
+  you: it needs an admin password in a terminal, so a Mac without it gets
+  the standalone build. A fresh Mac has only Apple's 3.9, which is why.
+  Its own packages go in a venv under the store.
   Set `DAPILOT_PYTHON` to the interpreter to use; otherwise `python3` on PATH.
 - A 3DAPI API key. Mint one with only the scopes you need: PRICING for quoting,
   ORDER for order work, print-farm scopes for fulfilment. Never use a FULL key.
