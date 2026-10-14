@@ -1,0 +1,44 @@
+# The plugin is installed straight from this repository through
+# `claude plugin marketplace add 3DAPI-Inc/dapilot`, so a push is a release.
+# This checks what a user's install would read: both manifests validate under
+# --strict, and a pull request that changes the plugin also moves its version,
+# because Claude Code only delivers an update when plugin.json's version changes.
+name: plugin
+
+on:
+  push:
+    paths: [plugins/dapilot/**, .claude-plugin/**, .github/workflows/plugin.yml]
+  pull_request:
+    paths: [plugins/dapilot/**, .claude-plugin/**, .github/workflows/plugin.yml]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate the plugin manifest
+        run: claude plugin validate --strict plugins/dapilot
+      - name: Validate the marketplace manifest
+        run: claude plugin validate --strict .
+      - name: Version moved with the plugin
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          manifest=plugins/dapilot/.claude-plugin/plugin.json
+          changed=$(git diff --name-only "$BASE" HEAD -- plugins/dapilot | grep -v -c "^$manifest$" || true)
+          if [ "$changed" = 0 ]; then echo "plugin unchanged"; exit 0; fi
+          old=$(git show "$BASE:$manifest" | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])')
+          new=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$manifest")
+          if [ "$old" = "$new" ]; then
+            echo "::error file=$manifest::$changed plugin file(s) changed but version is still $old; run scripts/dev/release.sh"
+            exit 1
+          fi
+          echo "version $old -> $new"

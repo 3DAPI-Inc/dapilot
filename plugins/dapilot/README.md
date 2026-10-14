@@ -62,12 +62,41 @@ Two ways in, same plugin:
   the console). The store is `~/.dapilot` here too unless `DAPILOT_STORE_DIR`
   says otherwise; the templates it starts from are in `templates/`.
 
+From a terminal, the same install and its updates:
+
+```bash
+claude plugin marketplace add 3DAPI-Inc/dapilot    # the repository is the marketplace
+claude plugin install dapilot@dapilot              # the id is the marketplace's name, not the repo's
+claude plugin update dapilot@dapilot               # pull a new version; then /reload-plugins or a new session
+```
+
+The marketplace tracks the repository's default branch; `3DAPI-Inc/dapilot#<branch>`
+pins another. Updates are off by default for third-party marketplaces: turn
+them on under `/plugin`, Marketplaces, dapilot, Enable auto-update, and a new
+version is fetched in the background and applied at the next launch. While
+the repository is private, Claude Code uses your own git credentials: an SSH
+key loaded in ssh-agent, or an HTTPS credential helper (`gh auth setup-git`).
+Without a GitHub SSH key set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`.
+
 For development from a checkout: `claude --plugin-dir plugins/dapilot` loads
 the folder for one session, and `claude plugin marketplace add
 /path/to/dapilot` then `claude plugin install dapilot@dapilot` installs it in
 place. Skills and commands are namespaced: `/dapilot:<name>`. A typed slash
 command comes from `commands/`; the desktop app and Cowork load a plugin's
 components the next time a task starts.
+
+## Releasing
+
+A push to GitHub is a release, with one rule: installed copies only update
+when `version` in `.claude-plugin/plugin.json` changes. Commit the work, then
+
+```bash
+scripts/dev/release.sh            # patch bump, validate --strict, commit, tag v<version>, push
+scripts/dev/release.sh minor      # or major, or an exact 0.3.0; --no-push to stop before pushing
+```
+
+The `plugin` GitHub Actions workflow validates both manifests on every push
+and fails a pull request that changes the plugin without moving the version.
 
 ## Running a pipeline
 

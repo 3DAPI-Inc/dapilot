@@ -390,6 +390,7 @@ scripts/dev/shop.sh setup                      # a fresh machine: tools, .venv, 
 scripts/dev/shop.sh run <file|folder>          # intake to the price gate, approve, design to publish
 scripts/dev/shop.sh status | approve <hash> [price] | resume
 scripts/dev/up.sh                              # job API on :3100 and console on :8081; --check, --resume
+scripts/dev/release.sh [patch|minor|major|X.Y.Z]   # bump plugin.json, validate, commit, tag, push: installs update only on a version change
 
 # headless intake over a folder: director and ledger are code, only workers spend tokens
 .venv/bin/python plugins/dapilot/scripts/run_intake.py <folder> [--run my-run] [--dry-run]
