@@ -123,6 +123,7 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `source_thumbnails.py` | copies the plate and top previews a 3MF carries into `thumbnails/`; run by `ledger init`, so the research worker has the designer's own pictures before any draft exists |
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `integrate.py` | the Integrations page: `serve` (local server and page), `status`, `test`; writes the env file and `integrations.json`, verifies each credential with a free call |
+| `setup_env.py` | the environment, the same on macOS, Linux and Windows: a venv under the store with the plugin's packages, Blender, Chrome and ffmpeg found or installed (winget, brew, apt, dnf), their paths written to the store's `.env`; `--no-install` only reports |
 | `quickstart.py` | what `/dapilot:quickstart` runs: setup, wordmark, `integrate.py serve`, `integrate.py status`; says little, logs to the setup script's log |
 | `guard_secrets.py` | the PreToolUse hook that refuses the model's tools on credential files |
 | `market_stats.py` | price band, fees, VAT and margin from `comparables.json`, `quote.json` and the store pricing policy; writes `viability.json` |

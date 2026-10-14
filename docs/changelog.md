@@ -386,3 +386,16 @@ each carries its own date.
   library, runs on Windows too; waits while the page is open and prints the
   table only after it closes), the hook picks `python3` or `python`, and the
   commands pre-approve only `python3 <plugin>/scripts/*`.
+- **Environment setup on every system (2026-10-14).** `setup_env.py`,
+  standard library: `$DAPILOT_PYTHON` when it works, else a venv under the
+  store with `plugins/dapilot/requirements.txt`; Blender, Chrome and ffmpeg
+  found at the usual places on macOS, Linux and Windows or installed with
+  winget, brew, apt or dnf, each in one line; `DAPILOT_PYTHON`, `BLENDER`
+  and `CHROME` written to the store's `.env` so the render and capture
+  scripts work off macOS. Elevation is the package manager's own prompt on
+  the person's screen; when the script cannot ask it prints the command.
+  `quickstart.py` runs it everywhere, then `shop.sh setup` only from a
+  checkout on macOS or Linux for the console's packages and the Etsy
+  taxonomy. The winget branch is written against the package ids
+  (BlenderFoundation.Blender, Google.Chrome, Gyan.FFmpeg) and awaits a run
+  on a Windows machine.

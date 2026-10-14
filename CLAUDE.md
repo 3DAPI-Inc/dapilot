@@ -44,7 +44,10 @@ and records the result in `store/integrations.json`. No value passes through
 the agent, and the plugin's PreToolUse hook (`scripts/guard_secrets.py`)
 refuses the agent's tools on the env file, the Etsy token and `social/`.
 Scripts take the file only as `--env <file>`. `/dapilot:quickstart` is the
-first-run command: `scripts/quickstart.py` runs `shop.sh setup` from a checkout,
+first-run command: `scripts/quickstart.py` seeds the store from the plugin's
+templates, runs `setup_env.py` (venv under the store, Blender, Chrome, ffmpeg
+found or installed with winget, brew, apt or dnf, paths written to the store's
+.env) on every system, then `shop.sh setup` from a checkout on macOS or Linux,
 prints the 3DAPI wordmark, opens the page on port 3106 and shows the table;
 its output is written for a person. The brand is written 3DAPI in every
 comment and document; `dapi` stays only in identifiers (`dapi.py`,

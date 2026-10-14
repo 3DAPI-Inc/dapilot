@@ -57,14 +57,15 @@ def seed(store: Path) -> None:
 
 def setup(root: Path, store: Path) -> None:
     seed(store)
+    print("Setting up this computer: Python packages, Blender, Chrome, ffmpeg. The first run can take a few minutes.")
+    # the environment, the same way everywhere: a venv under the store, the three tools found or installed,
+    # their paths written to the store's .env. Its lines are the person's report.
+    subprocess.run([sys.executable, str(HERE / "setup_env.py")], stdin=subprocess.DEVNULL,
+                   env={**os.environ, "DAPILOT_STORE_DIR": str(store), "DAPILOT_PROJECT_DIR": str(root)})
     shop = root / "scripts" / "dev" / "shop.sh"
     if os.name == "nt" or not shop.exists():
-        if shop.exists():
-            print("Setup on Windows is still by hand: Python 3.10 or newer and the packages in requirements.txt. The Integrations page works without them.")
-        else:
-            print("Not a dapilot checkout, so no environment setup here. The Integrations page still works.")
-        return
-    print("Setting up this computer: tools, Python packages, store files. The first run can take a few minutes.")
+        return   # an installed plugin, or Windows: nothing more to set up for the pipeline
+    # a checkout on macOS or Linux also gets the console's packages, the Etsy taxonomy and the dev checks
     t = time.time()
     with tempfile.TemporaryFile("w+") as out:
         code = run(["bash", str(shop), "setup"], stdout=out, stderr=subprocess.STDOUT,
@@ -75,11 +76,11 @@ def setup(root: Path, store: Path) -> None:
     m = re.search(r"runs/shop-[0-9T]+\.log", text)
     log = f"{root / m.group(0)}" if m else ""
     if code == 0:
-        print(f"Environment ready ({secs} s).")
+        print(f"Checkout ready ({secs} s).")
     elif code == 2:   # setup stops at the empty credentials: the page fills them in
-        print(f"Environment ready ({secs} s). Credentials are next: fill them in on the page.")
+        print(f"Checkout ready ({secs} s). Credentials are next: fill them in on the page.")
     else:
-        print(f"Environment set up with notes ({secs} s)." + (f" Details: {log}" if log else ""))
+        print(f"Checkout set up with notes ({secs} s)." + (f" Details: {log}" if log else ""))
 
 
 def serve(port: int) -> str | None:
