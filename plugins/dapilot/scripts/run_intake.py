@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic director and lead for an intake run. No model turns on routing.
 
-  run_intake.py <folder> [--run ID] [--department catalogue] [--max-workers N]
+  run_intake.py <file|folder> [--run ID] [--department catalogue] [--max-workers N]
                 [--max-turns 20] [--budget-per-worker USD] [--stages FILE] [--dry-run]
 
 The loop the catalogue-lead agent describes, as a process:
@@ -262,7 +262,7 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("folder", nargs="?", help="model files to take in; optional with --items or --resume")
+    ap.add_argument("folder", nargs="?", help="a folder of model files, or one model file; optional with --items or --resume")
     ap.add_argument("--items", help="comma-separated work-dir hashes to run, no folder needed")
     ap.add_argument("--resume", action="store_true", help="run every work dir with an enabled stage still to do")
     ap.add_argument("--run")

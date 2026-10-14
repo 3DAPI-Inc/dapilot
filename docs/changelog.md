@@ -501,3 +501,15 @@ each carries its own date.
   proposal kept inside price.json, cached second approve, decline and its
   listing. The product record step reports a note when it fails, which it
   did on the fixture for lack of a source file.
+- **One file is an intake (2026-10-14).** `ledger.py init --folder` and the
+  director's positional argument took a directory only; a single model file
+  was refused with "not a directory", so a file dropped into a session and
+  handed to quickstart never started. Both now take a folder or one model
+  file with a supported suffix; a missing path or a non-model file is
+  refused by name. Registering the same file again through its folder adds
+  nothing, since the work dir is keyed by the content hash. Also the
+  quickstart command's description and `when_to_use` now name the trigger:
+  a model file path or attachment in the message starts it with that path,
+  no question asked. Tested: one file registers with `source.stl` and
+  `meta.json`, the folder afterwards adds nothing, a missing path and a
+  `.txt` are refused, and the director's dry run briefs the first stage.

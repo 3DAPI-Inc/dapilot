@@ -245,8 +245,8 @@ def cmd_init(a) -> int:
     cfg = load_config()
     stages = load_stages(a.stages)
     folder = Path(a.folder) if a.folder else None
-    if folder and not folder.is_dir():
-        return out({"ok": False, "reason": f"not a directory: {folder}"}, 1)
+    if folder and not (folder.is_dir() or (folder.is_file() and folder.suffix.lower() in SUPPORTED)):
+        return out({"ok": False, "reason": f"not a folder or a model file ({', '.join(sorted(SUPPORTED))}): {folder}"}, 1)
     if not folder and not a.items and not a.resume:
         return out({"ok": False, "reason": "give --folder, --items or --resume"}, 1)
     rd = run_dir(a.run)
@@ -267,7 +267,8 @@ def cmd_init(a) -> int:
             state["items"][h] = {"file": meta.get("file", h), "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
         thumbnails(wd, state)
-    for f in (sorted(folder.iterdir()) if folder else []):
+    # A folder of models, or one model file: a person drops one file far more often than a folder.
+    for f in ([] if not folder else [folder] if folder.is_file() else sorted(folder.iterdir())):
         if f.suffix.lower() not in SUPPORTED or not f.is_file():
             continue
         h = sha256(f)
@@ -515,7 +516,7 @@ def cmd_report(a) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("init"); s.add_argument("--run", required=True); s.add_argument("--folder")
+    s = sub.add_parser("init"); s.add_argument("--run", required=True); s.add_argument("--folder", help="a folder of model files, or one model file")
     s.add_argument("--items", help="comma-separated work-dir hashes to register, no folder needed")
     s.add_argument("--resume", action="store_true", help="register every work dir with an enabled stage still to run")
     s.add_argument("--department", default="catalogue"); s.add_argument("--stages"); s.set_defaults(fn=cmd_init)
