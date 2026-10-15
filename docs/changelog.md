@@ -606,3 +606,24 @@ each carries its own date.
   checksum verified, is reused on the next run in 0.07 s, makes a venv with
   OpenSSL, and installs the pipeline's packages (15 s). The Windows path is
   written, not run.
+- **UTF-8 output on Windows (2026-10-14).** A colleague's Windows install
+  showed the wordmark as question marks: Python writing to a pipe on
+  Windows uses the console code page (cp1252), which has none of the block
+  characters or the status marks. `quickstart.py`, `integrate.py`,
+  `approve_price.py` and `watch_run.py` now reconfigure stdout to utf-8
+  with replacement, and both launchers set `PYTHONUTF8=1` for every child
+  (`quickstart.bat` also switches the console to code page 65001). Checked
+  by forcing cp1252 on this Mac: the banner and the marks come out intact.
+- **A model file in a message starts the run, by rule (2026-10-14).** After
+  `/reload-plugins` a colleague dropped a .3mf and the agent talked about it
+  instead of running quickstart: model invocation of a command is a
+  judgement from its description, and it went the other way. New
+  `UserPromptSubmit` hook (`hooks/hooks.json`, `scripts/on_prompt.py`):
+  reads the prompt, finds any path or attachment ending in .stl, .3mf,
+  .obj, .step or .stp (quoted, with spaces, any case, up to five), and
+  injects `additionalContext` telling the model to invoke dapilot:quickstart
+  with exactly that path now and not to describe or open the file. Silent
+  on messages without a model file and on `/dapilot:` commands; never
+  blocks; exit 0 on any input. Tested on a Windows path, a quoted Mac path
+  with spaces, an @-mention, two files, uppercase .STP, plain chat, a
+  command and garbage stdin.

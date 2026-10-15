@@ -12,6 +12,8 @@ rem
 rem Set DAPILOT_BOOTSTRAP_ONLY=1 to print the interpreter it would use and stop: a check, not a run.
 setlocal EnableExtensions
 set "HERE=%~dp0"
+chcp 65001 >nul
+set "PYTHONUTF8=1"
 set "PY="
 set "CHECK=import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)"
 

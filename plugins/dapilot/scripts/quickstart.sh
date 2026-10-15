@@ -13,6 +13,7 @@
 # DAPILOT_BOOTSTRAP_ONLY=1 prints the interpreter it would use and exits: a check, not a run.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONUTF8=1   # utf-8 in and out for every script below, whatever the locale or code page
 
 case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*)

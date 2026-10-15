@@ -112,7 +112,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("target", nargs="?", help="a model file, or a folder of them")
     a = ap.parse_args()
-    sys.stdout.reconfigure(line_buffering=True)   # our lines and the children's come out in order through a pipe
+    # utf-8 out, whatever the console's code page: Windows pipes default to cp1252 and the wordmark and the
+    # status marks came out as question marks (2026-10-14). Children inherit PYTHONUTF8 for the same reason.
+    sys.stdout.reconfigure(line_buffering=True, encoding="utf-8", errors="replace")
+    os.environ.setdefault("PYTHONUTF8", "1")
     root = project_dir()
     store = store_dir()
     os.environ["DAPILOT_STORE_DIR"], os.environ["DAPILOT_PROJECT_DIR"] = str(store), str(root)

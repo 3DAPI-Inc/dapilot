@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v python3 >/dev/null 2>&1; then python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/on_prompt.py\"; else python \"${CLAUDE_PLUGIN_ROOT}/scripts/on_prompt.py\"; fi",
+            "timeout": 10
+          }
+        ]
+      }
     ]
-  }
+  },
+  "description": "dapilot: a model file in a message starts the listing; the agent's tools stay off the env file and the token files"
 }

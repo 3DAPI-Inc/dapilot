@@ -338,6 +338,8 @@ def cmd_decline(a) -> int:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # Windows pipes default to cp1252
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("pending"); p.add_argument("--wait", type=int, default=0, help="poll up to this many seconds for something to decide")
