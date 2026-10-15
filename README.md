@@ -22,6 +22,10 @@
   <a href="https://www.instagram.com/3dapi_official/"><img alt="Instagram" src="https://img.shields.io/badge/Instagram-E4405F?logo=instagram&logoColor=white"></a>
 </p>
 
+<p align="center">
+  <img src="docs/assets/readme-loop.gif" alt="dapilot in twenty seconds: drop a model file, approve one price, and the listing goes live on Etsy" width="720">
+</p>
+
 <!-- ABOUT: this section is yours to write. The two paragraphs below are placeholders. -->
 
 Give it a model file. It lists the model on Etsy: analysed, quoted, photographed,
