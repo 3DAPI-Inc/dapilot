@@ -4,7 +4,7 @@
 #   quickstart.sh [file or folder]
 #
 # quickstart.py is Python, so something has to find a Python before it can run. This does that and
-# nothing else: it looks for an interpreter the pipeline's packages support (3.10 to 3.13), installs
+# nothing else: it looks for an interpreter the pipeline's packages support (3.10 to 3.15), installs
 # one when there is none (the system's package manager when it can, else the official standalone
 # CPython build unpacked under the store, no root needed), and hands over to quickstart.py with the
 # same arguments. Everything after that (the venv, Blender, Chrome, ffmpeg, the accounts) is
@@ -24,19 +24,21 @@ case "$(uname -s 2>/dev/null)" in
     ;;
 esac
 
-MIN=10; MAX=13   # 3.10 to 3.13: the versions with wheels for trimesh, scipy and networkx
+MIN=10; MAX=15   # 3.10 to 3.15: the versions with numpy and scipy wheels on macOS, Linux and Windows (checked 2026-10-15)
 PY_HOME="${DAPILOT_STORE_DIR:-$HOME/.dapilot}/python"   # where a Python we installed ourselves lives
 PBS_API="https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
 
-usable() {  # $1: an executable. True when it is a CPython 3.10 to 3.13 that actually runs.
+usable() {  # $1: an executable. True when it is a CPython 3.10 to 3.15 that actually runs.
   [ -n "${1:-}" ] && command -v "$1" >/dev/null 2>&1 &&
   "$1" -c "import sys; sys.exit(0 if (3, $MIN) <= sys.version_info[:2] <= (3, $MAX) else 1)" >/dev/null 2>&1
 }
 
 find_python() {
   local c
-  for c in "${DAPILOT_PYTHON:-}" "$PY_HOME/bin/python3" python3.13 python3.12 python3.11 python3.10 python3 python \
-           /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+  for c in "${DAPILOT_PYTHON:-}" "$PY_HOME/bin/python3" python3.15 python3.14 python3.13 python3.12 python3.11 python3.10 python3 python \
+           /opt/homebrew/bin/python3.15 /opt/homebrew/bin/python3.14 /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 \
+           /usr/local/bin/python3.15 /usr/local/bin/python3.14 /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+           /Library/Frameworks/Python.framework/Versions/3.15/bin/python3 /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 \
            /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 /Library/Frameworks/Python.framework/Versions/3.12/bin/python3; do
     if usable "$c"; then command -v "$c"; return 0; fi
   done
@@ -93,7 +95,7 @@ install_python() {
         standalone_python   # no package manager, or no sudo without a password: install under the store instead
       fi ;;
     *)
-      echo "Python 3.10 to 3.13 is needed. Install it from https://www.python.org/downloads/, then run quickstart again."
+      echo "Python 3.10 to 3.15 is needed. Install it from https://www.python.org/downloads/, then run quickstart again."
       return 1 ;;
   esac
 }

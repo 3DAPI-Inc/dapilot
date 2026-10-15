@@ -448,7 +448,7 @@ scripts/dev/release.sh [patch|minor|major|X.Y.Z]   # bump plugin.json, validate,
 cd frontend && npm run dev                               # :8081; starts the job API if :3100 is silent
 .venv/bin/uvicorn server.app:app --port 3100 --reload    # routes served at / and /api
 
-# stage scripts by hand. Python lives in .venv: the system 3.14 has no trimesh wheels
+# stage scripts by hand. Python lives in .venv, any 3.10 to 3.15 (the window widened 2026-10-15)
 .venv/bin/python plugins/dapilot/scripts/analyze_mesh.py fixtures/multi.stl
 .venv/bin/python plugins/dapilot/scripts/render_model.py --workdir work/<hash> --mode draft --frames 8
 .venv/bin/python plugins/dapilot/scripts/design_product.py context|check|produce|finalize --workdir work/<hash>

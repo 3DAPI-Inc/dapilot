@@ -75,8 +75,8 @@ def setup_python(store: Path, install: bool) -> str | None:
         say("Python packages missing: run setup again without --no-install")
         return None
     major, minor = sys.version_info[:2]
-    if not (3, 10) <= (major, minor) <= (3, 13):
-        say(f"Python {major}.{minor} found; the packages need 3.10 to 3.13. Install one from https://www.python.org/downloads/ and run setup again.")
+    if not (3, 10) <= (major, minor) <= (3, 15):
+        say(f"Python {major}.{minor} found; the packages need 3.10 to 3.15. Install one from https://www.python.org/downloads/ and run setup again.")
         return None
     if not exe.exists():
         say("Creating a Python environment for the pipeline…")
@@ -85,7 +85,9 @@ def setup_python(store: Path, install: bool) -> str | None:
             say("Could not create the Python environment: " + (r.stderr.strip().splitlines() or ["unknown"])[-1][:160])
             return None
     say("Installing Python packages (a few minutes the first time)…")
-    r = run([str(exe), "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", str(REQUIREMENTS)])
+    # wheels only: a Python without prebuilt numpy or scipy fails here in seconds with the package named,
+    # instead of pip compiling scipy from source for half an hour and failing for want of a Fortran compiler
+    r = run([str(exe), "-m", "pip", "install", "--disable-pip-version-check", "--only-binary=:all:", "-q", "-r", str(REQUIREMENTS)])
     if r.returncode != 0 or not python_ok(str(exe)):
         say("Python packages did not install: " + (r.stderr.strip().splitlines() or ["unknown"])[-1][:160])
         return None

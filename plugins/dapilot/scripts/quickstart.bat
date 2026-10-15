@@ -4,7 +4,7 @@ rem
 rem   quickstart.bat [file or folder]
 rem
 rem quickstart.py is Python, so something has to find a Python before it can run. This does that
-rem and nothing else: it looks for an interpreter the pipeline's packages support (3.10 to 3.13),
+rem and nothing else: it looks for an interpreter the pipeline's packages support (3.10 to 3.15),
 rem installs one when there is none (winget, else the official standalone CPython build unpacked
 rem under the store, no admin rights needed), and hands over to quickstart.py with the same
 rem arguments. The venv, Blender, Chrome, ffmpeg and the accounts are quickstart.py's job.
@@ -15,7 +15,7 @@ set "HERE=%~dp0"
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 set "PY="
-set "CHECK=import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)"
+set "CHECK=import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 15) else 1)"
 
 call :find
 if defined PY goto :run
@@ -108,14 +108,14 @@ if exist "%STORE_PY%" (
   "%STORE_PY%" -c "%CHECK%" >nul 2>nul && set PY="%STORE_PY%"
   if defined PY exit /b 0
 )
-for %%V in (3.13 3.12 3.11 3.10) do (
+for %%V in (3.15 3.14 3.13 3.12 3.11 3.10) do (
   if not defined PY (
     py -%%V -c "%CHECK%" >nul 2>nul && set "PY=py -%%V"
   )
 )
 if defined PY exit /b 0
 python -c "%CHECK%" >nul 2>nul && set "PY=python" && exit /b 0
-for %%V in (313 312 311 310) do (
+for %%V in (315 314 313 312 311 310) do (
   if not defined PY (
     if exist "%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe" (
       "%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe" -c "%CHECK%" >nul 2>nul && set PY="%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe"

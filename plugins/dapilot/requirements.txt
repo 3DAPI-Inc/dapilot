@@ -1,4 +1,5 @@
-# Python packages the plugin's pipeline scripts need. Python 3.10 to 3.13 (3.14 has no trimesh wheels).
+# Python packages the plugin's pipeline scripts need. Python 3.10 to 3.15: numpy and scipy, the compiled ones,
+# ship wheels for all six on macOS, Linux and Windows (checked on PyPI and installed on 3.14 and 3.15, 2026-10-15).
 # A checkout installs them with scripts/dev/shop.sh setup; an installed plugin with: python3 -m pip install -r requirements.txt
 trimesh>=4
 scipy>=1.11         # trimesh's split() needs a graph engine

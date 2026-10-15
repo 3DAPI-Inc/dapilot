@@ -627,3 +627,14 @@ each carries its own date.
   blocks; exit 0 on any input. Tested on a Windows path, a quoted Mac path
   with spaces, an @-mention, two files, uppercase .STP, plain chat, a
   command and garbage stdin.
+- **Python 3.14 and 3.15 accepted (2026-10-15).** The 3.10 to 3.13 window
+  dated from September, when 3.14 had no scipy wheels. PyPI now carries
+  numpy 2.5.4 and scipy 1.18.1 wheels for cp314 and cp315 on macOS, Linux
+  and Windows, and the plugin's `requirements.txt` installed from wheels
+  alone on the Mac's system 3.14.3 and on the standalone 3.15.0, with
+  `analyze_mesh.py` splitting a two-body 3MF correctly on both. The ceiling
+  is 3.15 in `quickstart.sh`, `quickstart.bat`, `setup_env.py` and
+  `shop.sh`, the launchers look for `python3.15` and `python3.14` first,
+  and `setup_env.py` installs with `--only-binary=:all:` so a Python
+  without prebuilt wheels fails in seconds naming the package instead of
+  compiling scipy. Quickstart still installs 3.12 when nothing fits.

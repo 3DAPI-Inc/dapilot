@@ -20,8 +20,8 @@ Setup works through these steps:
    dnf on Linux, Claude's own installer for the CLI. `sudo` asks for your
    password once; as root no sudo is used. `SHOP_NO_INSTALL=1` only reports
    what is missing.
-2. **Python.** Installs python 3.12 when there is no 3.10 to 3.13 (the macOS
-   system 3.14 has no trimesh wheels), creates `.venv` (installing Debian's
+2. **Python.** Installs python 3.12 when there is no 3.10 to 3.15, creates
+   `.venv` (installing Debian's
    separate `python3.X-venv` package when needed) and installs
    `requirements.txt`. It installs
    again only when that file changes.

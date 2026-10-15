@@ -234,12 +234,12 @@ setup_tools() {
   return 0
 }
 
-# the system python on macOS is 3.14 and has no trimesh wheels; any 3.10 to 3.13 will do
+# any 3.10 to 3.15 will do (numpy and scipy ship wheels for all of them since 2026-10); 3.12 first as the best-trodden
 base_python() {
   local p
-  for p in python3.12 python3.13 python3.11 python3.10 /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12 python3; do
+  for p in python3.12 python3.13 python3.14 python3.15 python3.11 python3.10 /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12 python3; do
     command -v "$p" > /dev/null 2>&1 || continue
-    "$p" -c 'import sys; sys.exit(not ((3, 10) <= sys.version_info[:2] <= (3, 13)))' 2>/dev/null && { command -v "$p"; return 0; }
+    "$p" -c 'import sys; sys.exit(not ((3, 10) <= sys.version_info[:2] <= (3, 15)))' 2>/dev/null && { command -v "$p"; return 0; }
   done
   return 1
 }
@@ -248,7 +248,7 @@ setup_python() {
   local base want stamp
   if [ ! -x "$PY" ]; then
     case "$PY" in */bin/python) ;; *) die "DAPILOT_PYTHON=$PY is not an executable; fix the store's .env or remove the line";; esac
-    base=$(base_python) || { install_tool "python 3.10 to 3.13" "$(install_cmd python)"; hash -r; base=$(base_python) || die "no python 3.10 to 3.13 found"; }
+    base=$(base_python) || { install_tool "python 3.10 to 3.15" "$(install_cmd python)"; hash -r; base=$(base_python) || die "no python 3.10 to 3.15 found"; }
     if ! run_logged "create $VENV with $base ($("$base" --version 2>&1))" "$base" -m venv "$VENV"; then
       rm -rf "$VENV"   # a failed venv leaves a python without pip behind; this run created it
       # Debian and Ubuntu ship the venv module as its own package
@@ -256,8 +256,8 @@ setup_python() {
     fi
   fi
   log "python: $("$PY" --version 2>&1) at $PY"
-  "$PY" -c 'import sys; sys.exit(not ((3, 10) <= sys.version_info[:2] <= (3, 13)))' \
-    || log "${Y}$PY is not python 3.10 to 3.13; trimesh may have no wheels for it${N}"
+  "$PY" -c 'import sys; sys.exit(not ((3, 10) <= sys.version_info[:2] <= (3, 15)))' \
+    || log "${Y}$PY is not python 3.10 to 3.15; numpy and scipy may have no wheels for it${N}"
   want=$(sha256 "$ROOT/requirements.txt")
   stamp="$(dirname "$(dirname "$PY")")/.dapilot-requirements"
   if [ "$(cat "$stamp" 2>/dev/null)" = "$want" ] && "$PY" -c 'import trimesh, scipy, networkx, jsonschema, fastapi, uvicorn, fal_client' 2>/dev/null; then

@@ -17,7 +17,7 @@ spaces. One file, one run; a folder, one run over all of them.
 The entry point is `scripts/quickstart.sh` in this plugin's folder, the one
 that holds `.claude-plugin/plugin.json`. If `${CLAUDE_PLUGIN_ROOT}` below
 appears literally, it was not substituted: use that path instead. The shell
-script only finds a Python the pipeline supports (3.10 to 3.13), installs one
+script only finds a Python the pipeline supports (3.10 to 3.15), installs one
 when there is none, and runs `scripts/quickstart.py`; on Windows it relays to
 `scripts/quickstart.bat`, which does the same with winget. Never call
 `quickstart.py` directly: the Python on PATH may be missing or the wrong

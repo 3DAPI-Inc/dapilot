@@ -4,7 +4,7 @@ Claude Code skills that drive the 3DAPI platform through its public API.
 
 ## Requirements
 
-- Python 3.10 to 3.13. `/dapilot:quickstart` finds one, or installs 3.12
+- Python 3.10 to 3.15. `/dapilot:quickstart` finds one, or installs 3.12
   when there is none: with winget, Homebrew, apt or dnf when one of those
   can, else the official standalone CPython build unpacked under the store
   (`~/.dapilot/python`), which needs no admin rights and no package
@@ -164,7 +164,7 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `integrate.py` | the Integrations page: `serve` (local server and page), `status`, `test`; writes the env file and `integrations.json`, verifies each credential with a free call |
 | `setup_env.py` | the environment, the same on macOS, Linux and Windows: a venv under the store with the plugin's packages, Blender, Chrome and ffmpeg found or installed (winget, brew, apt, dnf), their paths written to the store's `.env`; `--no-install` only reports |
-| `quickstart.sh`, `quickstart.bat` | the entry point of `/dapilot:quickstart`: find a Python 3.10 to 3.13 (a pinned `DAPILOT_PYTHON`, then by version, then the installer folders), install one with the system's package manager when there is none, hand over to `quickstart.py`. The `.sh` relays to the `.bat` under Git Bash on Windows. `DAPILOT_BOOTSTRAP_ONLY=1` prints the pick and stops |
+| `quickstart.sh`, `quickstart.bat` | the entry point of `/dapilot:quickstart`: find a Python 3.10 to 3.15 (a pinned `DAPILOT_PYTHON`, then by version, then the installer folders), install one with the system's package manager when there is none, hand over to `quickstart.py`. The `.sh` relays to the `.bat` under Git Bash on Windows. `DAPILOT_BOOTSTRAP_ONLY=1` prints the pick and stops |
 | `watch_run.py` | what the monitor runs: tails every `runs/<id>/director.log` under the working directory and watches `work/*/price.json` without an approval; prints `dapilot: ...` lines. `--once` says what is open now and exits |
 | `approve_price.py` | the price gate without the console: `pending [--wait S]` (items at the gate as JSON, with proposal, candidates, floor, pack; `--wait` polls until something is pending or nothing is running), `approve --workdir W [--price P] [--by] [--reason] [--no-start]` (a candidate or a typed price, checked against the floor by `price_candidates.py --check`, then `price.approved.json`, the product record and a director on the item), `decline --workdir W` (writes `design.blocked.json`) |
 | `quickstart.py` | what the entry point runs: setup, wordmark, `integrate.py serve`, `integrate.py status`; says little, logs to the setup script's log |
