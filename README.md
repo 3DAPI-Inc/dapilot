@@ -12,6 +12,7 @@
   <img alt="version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2F3DAPI-Inc%2Fdapilot%2Fmain%2Fplugins%2Fdapilot%2F.claude-plugin%2Fplugin.json&query=%24.version&label=plugin&color=1C3254">
   <img alt="platforms" src="https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-1C3254">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-8EB0E2"></a>
+  <a href="https://github.com/3DAPI-Inc/dapilot/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/3DAPI-Inc/dapilot?style=flat&logo=github&color=1C3254"></a>
 </p>
 
 <p align="center">
