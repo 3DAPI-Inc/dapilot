@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/3DAPI-Inc/dapilot",
   "repository": "https://github.com/3DAPI-Inc/dapilot",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "icon": "./assets/3dapi-logo.png",
   "keywords": [
     "dapi",

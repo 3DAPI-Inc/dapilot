@@ -638,3 +638,7 @@ each carries its own date.
   and `setup_env.py` installs with `--only-binary=:all:` so a Python
   without prebuilt wheels fails in seconds naming the package instead of
   compiling scipy. Quickstart still installs 3.12 when nothing fits.
+- **License changed to AGPL-3.0 (2026-10-16).** The MIT text in `LICENSE`
+  and `plugins/dapilot/LICENSE` was replaced with the GNU Affero General
+  Public License v3 as published at gnu.org; `plugin.json` says
+  `AGPL-3.0` and the README badge and License section follow.
