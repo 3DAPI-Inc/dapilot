@@ -35,6 +35,30 @@ A person approves the price. The agent does the rest.
 It is a Claude Code plugin: skills that decide, scripts that do, and one
 local page where a seller connects the accounts the shop runs on.
 
+## Results
+
+Here are some images which dapilot worked to create. The model file is the
+only input: the design stage captures a studio still of the print, in the
+shop's own filament colours, and generates the lifestyle photos from it.
+
+A small product manager inside the design stage decides the best frame for
+each object. It reads what the product is and writes the scene for it, so a
+tool goes on a workbench, a toy on a child's desk and an ornament on a
+table, and the shot never looks out of place. Every photo is reviewed by
+the agent before it reaches the listing, and one that misrepresents the
+product is remade.
+
+<table align="center">
+  <tr>
+    <td><img src="docs/assets/lifestyle-dragon.png" alt="Articulated dragon print in blue with white spines, on a wooden table" width="100%"></td>
+    <td><img src="docs/assets/lifestyle-enclosure.png" alt="Black vented electronics enclosure next to a Raspberry Pi on a workbench" width="100%"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/lifestyle-benchy.png" alt="Coral Benchy boat print on a desk by a window" width="100%"></td>
+    <td><img src="docs/assets/lifestyle-duck.jpg" alt="Yellow rubber duck print on a brushed metal plate, on a walnut table" width="100%"></td>
+  </tr>
+</table>
+
 ## How it works
 
 Every model goes through the same stages, in order, cheap before expensive.
