@@ -1,0 +1,8 @@
+# Build context for runner/Dockerfile is the repository root; only plugins/dapilot and runner/ are copied.
+# Everything else is kept out so the context is small and no local state or secret can reach an image.
+*
+!plugins/dapilot
+!runner
+plugins/dapilot/**/__pycache__
+plugins/dapilot/**/*.pyc
+plugins/dapilot/**/.DS_Store

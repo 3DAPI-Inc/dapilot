@@ -84,11 +84,15 @@ anything the pipeline produced.
 
 - **Internal first.** The shop is ours. No multi-tenancy, no seller signup,
   no billing. Do not build for users who do not exist yet.
-- **The agent runs locally.** A Claude Code session or `run_intake.py` with
-  this repo as cwd. There is no hosted orchestrator, no VPS, no Managed Agents
-  deployment. When something needs to run, a person runs it. Design so that
-  moving to a scheduled or hosted runner later changes nothing about the
-  skills, only about who invokes them.
+- **The agent runs locally; a hosted runner is designed, not deployed.** A
+  Claude Code session or `run_intake.py` with this repo as cwd. When
+  something needs to run, a person runs it. The hosted tier
+  (`docs/hosting.md`, 2026-10-16 to 2026-10-20) is a container in `runner/`
+  that runs the released plugin unchanged on ECS Fargate, driven by an SQS
+  queue and S3, with the stack and the web app in the 3dapi repository. It
+  touches the plugin only through the surface every local user has: a store
+  directory, env, the director's command line and the files it writes.
+  Nothing in `runner/` is a dependency of the plugin.
 - **The skills will be published.** They drive 3DAPI through its documented
   public API and are meant to be usable by anyone holding a 3DAPI API key.
   Write them so a stranger with no access to 3DAPI's internals can run them.
@@ -406,6 +410,9 @@ plugins/
       social_post.py social/      Integration and Session contracts, instagram_api
 docs/
   agents.md skills.md store-plan.md market-research.md social-plan.md quickstart.md changelog.md
+  hosting.md                      the hosted tier: runner, queue, storage, accounts, what is not built
+runner/                           the Fargate image for the hosted tier (Dockerfile, doctor.sh); not part of the plugin
+.dockerignore                     limits the image's build context to plugins/dapilot and runner/
 server/app.py                     FastAPI job API for the console (:3100)
 frontend/                         React 19 + Vite 8 + Tailwind 4 + shadcn console (:8081), /studio capture page
 store/                            the dev machine's store, private and gitignored (config.json .env reference/

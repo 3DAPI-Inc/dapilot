@@ -1,0 +1,73 @@
+# Builds the runner image at a release tag and pushes it to the registry the Dapilot CDK stack
+# creates (3dapi: infrastructure/cdk/lib/dapilot-stack.ts). The image carries this checkout's
+# plugin byte for byte, so the tag of the image is the tag of the plugin.
+#
+# Pushes :vX.Y.Z (immutable by convention: never re-pushed) and moves :staging to it. :production
+# is moved by hand once staging proved the release:
+#   docker buildx imagetools create -t <repo>:production <repo>:vX.Y.Z
+#
+# Needs two repository secrets:
+#   AWS_RUNNER_IMAGE_ROLE_ARN   an IAM role GitHub assumes through OIDC, allowed to push to dapilot-runner
+#   AWS_ACCOUNT_ID              the account that holds the registry
+# and the GitHub OIDC provider in that account (one per account; the slicer or another workflow
+# may already have created it).
+name: runner image
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'tag or commit to build (default: the workflow ref)'
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      REPOSITORY: dapilot-runner
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Release name
+        id: rel
+        run: |
+          echo "release=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
+          [ -f plugins/dapilot/studio/index.html ] || { echo "plugins/dapilot/studio is missing; run scripts/dev/build_studio.sh and commit it" >&2; exit 1; }
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_RUNNER_IMAGE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runner/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            DAPILOT_RELEASE=${{ steps.rel.outputs.release }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY }}:${{ steps.rel.outputs.release }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY }}:staging
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Doctor
+        run: docker run --rm ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY }}:${{ steps.rel.outputs.release }}

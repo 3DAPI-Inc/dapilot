@@ -1,0 +1,3 @@
+# The runner's own packages, installed into the same venv as the plugin's (runner/Dockerfile).
+# boto3 is the AWS SDK for Python: the queue and the bucket. The plugin does not use it.
+boto3>=1.35,<2
