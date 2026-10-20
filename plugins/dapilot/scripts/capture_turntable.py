@@ -5,30 +5,42 @@
                        [--passes beauty,depth,normal] [--start-yaw 35] [--no-video]
                        [--out DIR/renders] [--rotate x,y,z] [--elevation 18]
   capture_turntable.py --workdir DIR --yaws 20,110,200,290 --size 2048 --passes beauty --no-video
+  capture_turntable.py --workdir DIR --mode draft [--frames 8] [--size 512]
 
 Writes OUT/<pass>/frame_0000.png ... , OUT/turntable.mp4 and a record at
 OUT/video.json. OUT defaults to DIR/renders. Prints one JSON object. Exit 0 on
 success.
 
-Yaw follows render_scene.py: yaw N shows the side the Blender draft at yaw N
-shows. --rotate is the same orientation render_model.py takes. --yaws captures
-exactly those angles, one frame each, which is what product stills want.
+--mode draft is the preview stage: --frames evenly spaced yaws from 0, beauty
+only, no video, written as DIR/renders/draft_00.png onward with a `draft`
+record merged into DIR/renders/render.json. The file as exported: no --rotate,
+no --color. Replaced the Blender draft turntable on 2026-10-20.
 
-Why a browser: WebGL reaches a GPU that Cycles cannot on this hardware, so a
-rotation costs seconds instead of an hour. The depth and normal passes come off
-the same scene for one extra draw each, and they are what a diffusion model
-conditions on.
+Yaw N shows the side the draft at yaw N shows. --rotate is the orientation in
+degrees about the file's own x, y, z. --yaws captures exactly those angles, one
+frame each, which is what product stills want.
+
+Why a browser: WebGL draws a frame in milliseconds on any machine, with
+software rendering where there is no GPU, so eight drafts cost seconds and a
+rotation under a minute. The depth and normal passes come off the same scene
+for one extra draw each, and they are what a diffusion model conditions on.
 
 How it works: this script serves a collector on a loopback port, opens the
 studio page headless with capture=1 pointing at it, and writes every frame the
 page posts. The page owns the stepping because only it knows when a frame is
 truly on the canvas; this script owns the disk and the encode.
 
-Needs: a running studio page (npm run dev in frontend/), Chrome, and ffmpeg.
+The studio page: --studio (DAPILOT_STUDIO_URL, default the console's dev
+server) is used when it answers. When nothing does, this script serves the
+page itself from --studio-dir, the built copy the plugin ships at
+plugins/dapilot/studio, on a loopback port for the length of the run. An
+installed plugin therefore needs no console, no npm and no Blender for any
+render: Chrome alone, plus ffmpeg for a video.
 """
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -40,10 +52,47 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PASSES = ("beauty", "depth", "normal")
+HERE = Path(__file__).resolve().parent
+
+
+def bundled_studio() -> Path:
+    """The built studio page the plugin ships: DAPILOT_STUDIO_DIR, else <plugin root>/studio."""
+    if os.environ.get("DAPILOT_STUDIO_DIR"):
+        return Path(os.environ["DAPILOT_STUDIO_DIR"])
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    return (Path(root) if root else HERE.parent) / "studio"
+
+
+class StaticStudio(ThreadingHTTPServer):
+    """Serves the built studio page on a loopback port for one run, when no console is answering."""
+
+    daemon_threads = True
+
+    def __init__(self, directory: Path):
+        super().__init__(("127.0.0.1", 0), functools.partial(StaticHandler, directory=str(directory)))
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.socket.getsockname()[1]}"
+
+
+class StaticHandler(SimpleHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        # A single-page app: /studio and anything else that is not a file on disk is index.html.
+        if not Path(self.translate_path(self.path)).is_file():
+            self.path = "/index.html"
+        super().do_GET()
+
+    def end_headers(self) -> None:
+        self.send_header("cache-control", "no-store")
+        super().end_headers()
+
+    def log_message(self, *_args) -> None:
+        return
 
 
 def chrome() -> str | None:
@@ -168,8 +217,10 @@ def fail(reason: str, **extra) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True)
-    ap.add_argument("--frames", type=int, default=120)
-    ap.add_argument("--size", type=int, default=720)
+    ap.add_argument("--mode", choices=["turntable", "draft"], default="turntable",
+                    help="draft: the preview stage's frames, DIR/renders/draft_NN.png, beauty only, no video")
+    ap.add_argument("--frames", type=int, default=None, help="default 120, or 8 in draft mode")
+    ap.add_argument("--size", type=int, default=None, help="square output in px; default 720, or 512 in draft mode")
     ap.add_argument("--fps", type=int, default=24)
     ap.add_argument("--passes", default="beauty,depth,normal")
     ap.add_argument("--start-yaw", type=float, default=0.0)
@@ -181,13 +232,30 @@ def main() -> int:
     ap.add_argument("--out", default=None, help="output directory; default WORKDIR/renders")
     ap.add_argument("--video-name", default="turntable.mp4")
     ap.add_argument("--color", default=None, help="filament colour hex, e.g. '#3B7DD8'")
-    ap.add_argument("--studio", default=os.environ.get("DAPILOT_STUDIO_URL", "http://localhost:8081"))
+    ap.add_argument("--studio", default=os.environ.get("DAPILOT_STUDIO_URL") or None,
+                    help="a studio page already running (the console's dev server) to use instead of the bundled page; "
+                         "DAPILOT_STUDIO_URL sets it too. Unset, the plugin's own built page is served for the run")
+    ap.add_argument("--studio-dir", default=None,
+                    help="the built studio page to serve; default DAPILOT_STUDIO_DIR, else the plugin's studio/")
     ap.add_argument("--no-video", action="store_true", help="frames only, skip ffmpeg")
     ap.add_argument("--timeout", type=float, default=900.0)
     ap.add_argument("--resume", action="store_true",
                     help="keep frames already captured with the same settings, capture only the missing ones, "
                          "and exit 3 (partial) instead of failing when --timeout runs out")
     a = ap.parse_args()
+
+    draft = a.mode == "draft"
+    if a.frames is None:
+        a.frames = 8 if draft else 120
+    if a.size is None:
+        a.size = 512 if draft else 720
+    if draft:
+        if a.yaws or a.rotate or a.color or a.out:
+            return fail("--mode draft takes no --yaws, --rotate, --color or --out: drafts are the file as exported, in DIR/renders")
+        a.passes, a.no_video = "beauty", True
+        a.yaws = ",".join(f"{360.0 * i / a.frames:g}" for i in range(a.frames))   # 45 degree steps from the front
+        if a.elevation is None:
+            a.elevation = 18.0
 
     wd = Path(a.workdir).resolve()
     sources = [p for p in wd.iterdir() if p.stem == "source"] if wd.is_dir() else []
@@ -217,11 +285,27 @@ def main() -> int:
         return fail("Chrome not found: set CHROME to the binary")
     if not a.no_video and not shutil.which("ffmpeg"):
         return fail("ffmpeg not found; install it or pass --no-video")
-    base = a.studio.rstrip("/")
-    if not page_is_up(base):
-        return fail(f"no studio page at {base}: start it with `npm run dev` in frontend/")
+    # The page: the plugin's own built copy, served here for the run, unless a running one was named.
+    # Not "whatever answers on a port": another app on 8081 once passed the liveness check and the
+    # capture waited 45 s for a model fetch that never came (2026-10-20).
+    static: StaticStudio | None = None
+    if a.studio:
+        base = a.studio.rstrip("/")
+        if not page_is_up(base):
+            return fail(f"no studio page at {base}: start the console with `npm run dev` in frontend/, or drop --studio "
+                        "and DAPILOT_STUDIO_URL to use the plugin's own page")
+    else:
+        studio_dir = Path(a.studio_dir).resolve() if a.studio_dir else bundled_studio()
+        if not (studio_dir / "index.html").is_file():
+            return fail(f"no built studio page at {studio_dir}: run scripts/dev/build_studio.sh from a checkout, "
+                        "or point --studio at a running console")
+        static = StaticStudio(studio_dir)
+        threading.Thread(target=static.serve_forever, daemon=True).start()
+        base = static.url
 
     out = Path(a.out).resolve() if a.out else wd / "renders"
+    if draft:
+        out = wd / "renders" / ".draft"   # the capture's own layout; the frames move up to renders/draft_NN.png at the end
     out.mkdir(parents=True, exist_ok=True)
     # every angle of the sequence, as the studio page computes them (lib/model/capture.ts)
     all_yaws = yaws or [(a.start_yaw - a.arc / 2 + a.arc * i / max(a.frames - 1, 1) + 360) % 360 for i in range(a.frames)]
@@ -308,15 +392,35 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 proc.kill()
         server.shutdown()
+        if static is not None:
+            static.shutdown()
         shutil.rmtree(profile, ignore_errors=True)
 
     wall = round(time.time() - t0, 1)
+    studio_used = "bundled" if static is not None else base
+    if draft:
+        # The preview stage's contract: renders/draft_00.png onward and a `draft` record in renders/render.json,
+        # the files every later stage reads to see what the object is.
+        renders = wd / "renders"
+        outputs = []
+        for i, yaw in enumerate(all_yaws):
+            (out / "beauty" / f"frame_{i:04d}.png").replace(renders / f"draft_{i:02d}.png")
+            outputs.append({"file": f"draft_{i:02d}.png", "yaw": round(yaw, 3)})
+        shutil.rmtree(out, ignore_errors=True)
+        rec_p = renders / "render.json"
+        rec = json.loads(rec_p.read_text() or "{}") if rec_p.exists() else {}
+        rec["draft"] = {"renderer": "webgl", "frames": a.frames, "res": a.size, "elevation": a.elevation,
+                        "outputs": outputs, "wall_s": wall, "studio": studio_used}
+        rec_p.write_text(json.dumps(rec, indent=2))
+        print(json.dumps({"ok": True, "mode": "draft", **rec["draft"]}))
+        return 0
+
     record = {
         "ok": True, "frames": a.frames, "size": a.size, "fps": a.fps, "passes": passes,
         "start_yaw": a.start_yaw, "arc": a.arc, "yaws": yaws or None, "rotate": a.rotate or "0,0,0",
         "elevation": a.elevation, "color": a.color,
         "captured": server.counts, "capture_s": wall, "resumed_from": a.frames - len(todo) if resumed else 0,
-        "seconds": round(a.frames / a.fps, 2), "renderer": "webgl",
+        "seconds": round(a.frames / a.fps, 2), "renderer": "webgl", "studio": studio_used,
     }
 
     if not a.no_video and "beauty" in passes:

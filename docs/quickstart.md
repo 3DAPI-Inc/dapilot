@@ -16,7 +16,7 @@ time; steps that are already done are skipped.
 Setup works through these steps:
 
 1. **Tools.** Installs whatever is missing of curl, the Claude Code CLI, node
-   and npm, ffmpeg and ffprobe, Blender and Chrome: Homebrew on macOS, apt or
+   and npm, ffmpeg and ffprobe, and Chrome: Homebrew on macOS, apt or
    dnf on Linux, Claude's own installer for the CLI. `sudo` asks for your
    password once; as root no sudo is used. `SHOP_NO_INSTALL=1` only reports
    what is missing.
@@ -61,12 +61,13 @@ dnf (Fedora, RHEL) instead of Homebrew:
 - Node from NodeSource, because apt's own node is too old for Vite 8, which
   needs 20.19+ or 22.12+.
 - Google Chrome's `.deb` or `.rpm` on x86_64, Chromium on ARM.
-- Blender and ffmpeg from the distribution.
+- ffmpeg from the distribution.
 - On Ubuntu 22.04, python3.12 comes from `ppa:deadsnakes/ppa`, which setup adds.
 
-A server has no browser and no GPU, and neither is needed. Blender renders
-with Cycles on the CPU. Chrome captures headless, with WebGL through
-SwiftShader. Run as root, Chrome gets `--no-sandbox`; a service user is safer.
+A server has no display and no GPU, and neither is needed. Every render, the
+preview drafts and the product stills, is WebGL in headless Chrome through
+SwiftShader, from the studio page the plugin ships. Run as root, Chrome gets
+`--no-sandbox`; a service user is safer.
 Two sign-ins need handling:
 - **Claude.** Put `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token` on a
   laptop) or `ANTHROPIC_API_KEY` in `store/.env`.
@@ -124,9 +125,8 @@ Secrets are shown by length only, never by value.
 | `DAPILOT_BILLING` | every worker | no | `auto`, `api` or `subscription` |
 | `DAPILOT_STORE_DIR` | everything | no | default `./store` |
 | `DAPILOT_PYTHON` | everything | no | default `./.venv/bin/python` |
-| `BLENDER` | preview | no | default `/Applications/Blender.app/...` |
-| `CHROME` | design | no | found on its own on macOS |
-| `DAPILOT_STUDIO_URL` | design | no | default `http://localhost:8081` |
+| `CHROME` | preview, design | no | found on its own on macOS |
+| `DAPILOT_STUDIO_URL` | preview, design | no | unset: the bundled studio page is served per capture; set to use a running console |
 | `DAPILOT_SOCIAL_ADAPTER_DIR` | publish | no | browser adapters for X, TikTok, LinkedIn |
 
 ## 3. Running an item: `shop.sh run`
@@ -148,7 +148,7 @@ nothing is missing) and stops at the price gate for a person.
 |---|---|---|
 | analyze | local geometry pre-check | a worker's tokens |
 | quote | 3DAPI slices and prices the file (18 to 40 s) | tokens |
-| preview | Blender draft turntable | tokens |
+| preview | WebGL draft turntable, a script stage | nothing |
 | research | Etsy comparables, market band, viability | tokens, up to 1.00 USD |
 | price | the model picks a candidate; `price_candidates.py --check` enforces the break-even floor | tokens |
 | **gate** | **a person approves the price** | |

@@ -638,7 +638,100 @@ each carries its own date.
   and `setup_env.py` installs with `--only-binary=:all:` so a Python
   without prebuilt wheels fails in seconds naming the package instead of
   compiling scipy. Quickstart still installs 3.12 when nothing fits.
+- **Every path reads the 3MF's colours and assembly (2026-10-15).** The
+  Mini Duck Titan3D file, a Creality project painted in three filaments,
+  went through a quickstart run as a one-colour duck: `assembly_3mf.py`
+  ran only from the console upload. `ledger.py init` now runs `read` on
+  every 3MF it registers, on the original file before any strip, and
+  `build` for `display.ply`, writing nothing for an STL or a plain
+  single-colour 3MF and never twice. The director, quickstart and the
+  console now agree on `assembly.json`. The quote still does not see the
+  colours of a stripped project; that check is the next step.
 - **License changed to AGPL-3.0 (2026-10-16).** The MIT text in `LICENSE`
   and `plugins/dapilot/LICENSE` was replaced with the GNU Affero General
   Public License v3 as published at gnu.org; `plugin.json` says
   `AGPL-3.0` and the README badge and License section follow.
+- **Blender replaced by the WebGL studio everywhere (2026-10-20).** The
+  preview drafts were Blender (`render_model.py --mode draft`, 30 to 70 s)
+  and the design stills fell back to Blender when no console was serving
+  the studio page, which is every installed plugin. Now the built console
+  is committed at `plugins/dapilot/studio/` (`scripts/dev/build_studio.sh`
+  refreshes it; `release.sh` refuses to release without it and warns when
+  the studio source is newer) and `capture_turntable.py` serves it on a
+  loopback port for each capture unless `--studio` or `DAPILOT_STUDIO_URL`
+  names a running console. It no longer takes whatever answers on 8081:
+  another app's dev server there passed the liveness check and the capture
+  waited 45 s for a model fetch that never came. New `--mode draft` writes
+  `renders/draft_00.png` onward and the `draft` record in `render.json`
+  that `design_product.py context` reads; new `preview_model.py` wraps it
+  as the preview stage's script, and `stages.json` names it, so the
+  director runs preview itself at no model cost (it was a worker at about
+  0.09 USD per item). `design_product.py` loses `studio_up`,
+  `blender_stills` and `design.stills.blender`; `studio_url` defaults to
+  null. `setup_env.py`, quickstart, `shop.sh`, `up.sh`, `shop_inspect.py`,
+  `test_phase0.sh`, the templates and the docs stop looking for or
+  installing Blender. Measured on the sphere fixture: eight drafts 3.1 s
+  at 512 px against Blender's 47.9 s at 320 px; four 2048 px stills 8.4 s.
+  The WebGL frame is softer, with a wider product in frame; the yaws match.
+  `render_model.py`, `render_scene.py` and `render_turntable.py` stay in
+  the tree for reference, run by nothing. The 3dapi runner Dockerfile
+  still installs Blender from apt; that line can go.
+- **The hosted runner moves into this repository (2026-10-20).** The runner
+  image written in the 3dapi repository on 2026-10-16 (`workers/dapilot`)
+  was in a directory that deploys on Coolify, and the runner goes to ECS
+  Fargate, so it now lives here as `runner/` with the design in
+  `docs/hosting.md` (moved from 3dapi's `docs/dapilot-platform.md`). The
+  Dockerfile builds from this checkout: it copies `plugins/dapilot` in,
+  so the image for a tag runs that release byte for byte, instead of
+  cloning the plugin from GitHub inside the build. Blender, the frontend
+  build and the static server are gone from it (the studio page is
+  bundled; `capture_turntable.py` serves it); the base is
+  `python:3.12-slim-bookworm`, the CLI comes from its own installer pinned
+  to 2.1.304 under a `runner` user (uid 1000), and `doctor.sh` now proves
+  a WebGL render by capturing two frames of a cube through the bundled
+  page. A root `.dockerignore` keeps the build context to the plugin and
+  `runner/`. Not built: this Mac has no Docker. The AWS stack stays in the
+  3dapi CDK app (it shares the slicer's cluster and VPC); the consumer is
+  planned as `runner/consumer.py` in Python. The copies in the 3dapi
+  repository are untouched and are the person's to remove.
+- **The queue consumer exists (2026-10-20).** `runner/consumer.py`: `serve`
+  long-polls the SQS FIFO queue and heartbeats each message's visibility
+  while a job runs; per message it pulls the seller's root from the bucket
+  to `$DAPILOT_DATA_DIR/<seller>`, seeds a new store from the plugin's
+  templates, writes the store's env file (mode 600, never synced) from the
+  backend's per-seller credentials and the plan limits into `config.json`,
+  runs the director (`run`), or `approve_price.py approve --no-start` then
+  the director on that item (`approve`), or clears the failed marker and
+  reruns the item (`retry`), turns every director log line into an event
+  with the same regexes as `watch_run.py`, reads the outcome from the
+  ledger and the markers (open gates with their candidates included), pushes
+  the root back, and deletes the message. SIGTERM stops the director's
+  process group and leaves the message unacknowledged. The bucket and the
+  backend are each one class with an S3 or HTTP form and a directory form,
+  so `once --message FILE --local-bucket DIR --local-backend DIR` runs the
+  whole loop on a laptop; verified with a dry-run director: model pulled,
+  store seeded, limits merged, event and outcome posted, five files pushed
+  and the env file absent from the push. The plugin is never imported. The
+  image installs boto3 into the plugin's venv (`runner/requirements.txt`)
+  and copies the consumer in; `doctor.sh` stays the default command and the
+  task definition overrides it with `consumer.py serve`. Untested: the
+  approve and retry paths (they need a run at the gate) and anything against
+  real SQS or S3. The backend routes the consumer calls are listed in
+  `runner/README.md` and do not exist yet.
+- **The Fargate stack and the image workflow (2026-10-20).** In the 3dapi
+  CDK app, new `lib/dapilot-stack.ts` (`Dapilot-<env>`): the
+  `dapilot-runner` registry, the `dapilot-runs` FIFO queue with its
+  dead-letter queue, the private sellers bucket with CORS for the dashboard,
+  two Secrets Manager secrets the operator fills (Anthropic key, backend
+  token), a task role that can only consume the queue and read and write
+  the bucket, a 2 vCPU 8 GB task with 60 GB of disk and an init process,
+  and a one-task On-Demand service in the slicer's cluster and VPC, which
+  the public API stack now exposes as `vpc` and `cluster`. The command is a
+  context flag: `doctor` by default to prove the image on the cluster,
+  `serve` for the consumer. Here, `.github/workflows/runner-image.yml`
+  builds `runner/Dockerfile` on a `v*` tag, pushes `:vX.Y.Z` and `:staging`
+  through an OIDC role, and runs the doctor inside the pushed image. The
+  deploy order and every setting with its reason are in `runner/README.md`.
+  Typechecked and synthesised on this Mac (the stack is 19 resources: three
+  roles, two queues, two secrets, the registry, the bucket, the log group,
+  the task definition, the security group, the service); not deployed.

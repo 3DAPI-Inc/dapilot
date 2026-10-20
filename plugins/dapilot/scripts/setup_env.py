@@ -7,9 +7,10 @@ What it does, in order, and says in one line each:
   Python    an interpreter with the plugin's packages. $DAPILOT_PYTHON when it is set and works; else a
             venv under the store (~/.dapilot/venv) made from this Python, with requirements.txt installed
             when they changed. The path is written to the store's .env as DAPILOT_PYTHON.
-  Blender   found at the usual places or on PATH, else installed with the system's package manager
-            (winget on Windows, brew on macOS, apt or dnf on Linux). The path is written as BLENDER.
-  Chrome    the same, written as CHROME. Chromium counts.
+  Chrome    found at the usual places or on PATH, else installed with the system's package manager
+            (winget on Windows, brew on macOS, apt or dnf on Linux). The path is written as CHROME.
+            Chromium counts. Every render, the preview drafts and the product stills, is WebGL in
+            headless Chrome from the studio page the plugin ships; Blender is not needed since 2026-10-20.
   ffmpeg    the same; it has to be on PATH, which a fresh terminal gets after the install.
 
 Installing may ask the person for permission on their screen: winget raises Windows' own elevation
@@ -36,7 +37,7 @@ import integrate  # noqa: E402  read_env / write_env: the store's .env, edited i
 OS = platform.system()          # Darwin, Linux, Windows
 REQUIREMENTS = HERE.parent / "requirements.txt"
 IMPORT_CHECK = "import trimesh, scipy, networkx, numpy, jsonschema, fal_client"
-BLENDER_URL, CHROME_URL, FFMPEG_URL = "https://www.blender.org/download/", "https://www.google.com/chrome/", "https://ffmpeg.org/download.html"
+CHROME_URL, FFMPEG_URL = "https://www.google.com/chrome/", "https://ffmpeg.org/download.html"
 
 
 def say(line: str) -> None:
@@ -108,18 +109,6 @@ def first_existing(cands) -> str | None:
     return None
 
 
-def find_blender() -> str | None:
-    local = os.environ.get("LOCALAPPDATA", "")
-    return first_existing([
-        os.environ.get("BLENDER"),
-        "/Applications/Blender.app/Contents/MacOS/Blender",
-        shutil.which("blender"), "/snap/bin/blender", "/opt/blender/blender", "/opt/blender-4*/blender",
-        "C:/Program Files/Blender Foundation/Blender */blender.exe",
-        f"{local}/Programs/Blender Foundation/Blender */blender.exe" if local else None,
-        f"{local}/Microsoft/WinGet/Packages/BlenderFoundation.Blender*/**/blender.exe" if local else None,
-    ])
-
-
 def find_chrome() -> str | None:
     local = os.environ.get("LOCALAPPDATA", "")
     return first_existing([
@@ -139,13 +128,12 @@ def find_ffmpeg() -> str | None:
 def installer(tool: str) -> list[str] | None:
     """The command that installs `tool` here, or None when there is no package manager to do it."""
     if OS == "Windows" and shutil.which("winget"):
-        ids = {"blender": "BlenderFoundation.Blender", "chrome": "Google.Chrome", "ffmpeg": "Gyan.FFmpeg"}
+        ids = {"chrome": "Google.Chrome", "ffmpeg": "Gyan.FFmpeg"}
         return ["winget", "install", "--id", ids[tool], "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
     if OS == "Darwin" and shutil.which("brew"):
-        return {"blender": ["brew", "install", "--cask", "blender"], "chrome": ["brew", "install", "--cask", "google-chrome"],
-                "ffmpeg": ["brew", "install", "ffmpeg"]}[tool]
+        return {"chrome": ["brew", "install", "--cask", "google-chrome"], "ffmpeg": ["brew", "install", "ffmpeg"]}[tool]
     if OS == "Linux":
-        pkgs = {"blender": "blender", "chrome": "chromium", "ffmpeg": "ffmpeg"}
+        pkgs = {"chrome": "chromium", "ffmpeg": "ffmpeg"}
         if shutil.which("apt-get"):
             return ["sudo", "-n", "apt-get", "install", "-y", pkgs[tool] if tool != "chrome" else "chromium-browser"]
         if shutil.which("dnf"):
@@ -154,7 +142,7 @@ def installer(tool: str) -> list[str] | None:
 
 
 def setup_tool(name: str, find, url: str, install: bool) -> str | None:
-    label = {"blender": "Blender", "chrome": "Chrome", "ffmpeg": "ffmpeg"}[name]
+    label = {"chrome": "Chrome", "ffmpeg": "ffmpeg"}[name]
     path = find()
     if path:
         say(f"{label} found")
@@ -184,7 +172,7 @@ def main() -> int:
     store = store_dir()
     env_file = store / ".env"
     saved = integrate.read_env(env_file)
-    for k in ("DAPILOT_PYTHON", "BLENDER", "CHROME"):   # what an earlier run wrote counts as set
+    for k in ("DAPILOT_PYTHON", "CHROME"):   # what an earlier run wrote counts as set
         if saved.get(k) and not os.environ.get(k):
             os.environ[k] = saved[k]
 
@@ -192,9 +180,6 @@ def main() -> int:
     py = setup_python(store, install)
     if py and saved.get("DAPILOT_PYTHON") != py:
         updates["DAPILOT_PYTHON"] = py
-    blender = setup_tool("blender", find_blender, BLENDER_URL, install)
-    if blender and saved.get("BLENDER") != blender:
-        updates["BLENDER"] = blender
     chrome = setup_tool("chrome", find_chrome, CHROME_URL, install)
     if chrome and saved.get("CHROME") != chrome:
         updates["CHROME"] = chrome
@@ -203,7 +188,7 @@ def main() -> int:
         say("ffmpeg is installed but not on this session's PATH yet; a new terminal will have it.")
     if updates:
         integrate.write_env(env_file, updates)
-    return 0 if all((py, blender, chrome, ffmpeg)) else 1
+    return 0 if all((py, chrome, ffmpeg)) else 1
 
 
 if __name__ == "__main__":

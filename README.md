@@ -118,8 +118,9 @@ It stops at the price for your approval.
 ## What you need
 
 - Claude Code, or the Claude desktop app, on macOS, Linux or Windows
-- Python 3.10 to 3.13. Quickstart installs the packages, Blender, Chrome and
-  ffmpeg where it can, and tells you where it cannot
+- Python 3.10 to 3.15. Quickstart installs the packages, Chrome and ffmpeg
+  where it can, and tells you where it cannot. Every render is WebGL in
+  headless Chrome; no Blender
 - a 3DAPI account and API key, an Etsy shop with a seller app, a fal.ai key
 - for the social posts, the accounts you want to post to
 

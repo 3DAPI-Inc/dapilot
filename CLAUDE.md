@@ -45,7 +45,7 @@ the agent, and the plugin's PreToolUse hook (`scripts/guard_secrets.py`)
 refuses the agent's tools on the env file, the Etsy token and `social/`.
 Scripts take the file only as `--env <file>`. `/dapilot:quickstart` is the
 first-run command: `scripts/quickstart.py` seeds the store from the plugin's
-templates, runs `setup_env.py` (venv under the store, Blender, Chrome, ffmpeg
+templates, runs `setup_env.py` (venv under the store, Chrome, ffmpeg
 found or installed with winget, brew, apt or dnf, paths written to the store's
 .env) on every system, then `shop.sh setup` from a checkout on macOS or Linux,
 prints the 3DAPI wordmark, opens the page on port 3106 and shows the table;
@@ -70,8 +70,6 @@ anything the pipeline produced.
   2 per plate, so its full-plate unit cost is inflated.
 - Multicolour cost. `strip_3mf.py` drops the extruder assignment, so a
   two-colour file is quoted as one filament.
-- `run_intake.py <folder>` does not read Bambu assemblies; only the server
-  upload does.
 - Quantity variations on one Etsy listing.
 - The console has no Etsy draft, media or activate buttons and no Instagram
   sign-in. Review on the job page is a placeholder.
@@ -86,11 +84,15 @@ anything the pipeline produced.
 
 - **Internal first.** The shop is ours. No multi-tenancy, no seller signup,
   no billing. Do not build for users who do not exist yet.
-- **The agent runs locally.** A Claude Code session or `run_intake.py` with
-  this repo as cwd. There is no hosted orchestrator, no VPS, no Managed Agents
-  deployment. When something needs to run, a person runs it. Design so that
-  moving to a scheduled or hosted runner later changes nothing about the
-  skills, only about who invokes them.
+- **The agent runs locally; a hosted runner is designed, not deployed.** A
+  Claude Code session or `run_intake.py` with this repo as cwd. When
+  something needs to run, a person runs it. The hosted tier
+  (`docs/hosting.md`, 2026-10-16 to 2026-10-20) is a container in `runner/`
+  that runs the released plugin unchanged on ECS Fargate, driven by an SQS
+  queue and S3, with the stack and the web app in the 3dapi repository. It
+  touches the plugin only through the surface every local user has: a store
+  directory, env, the director's command line and the files it writes.
+  Nothing in `runner/` is a dependency of the plugin.
 - **The skills will be published.** They drive 3DAPI through its documented
   public API and are meant to be usable by anyone holding a 3DAPI API key.
   Write them so a stranger with no access to 3DAPI's internals can run them.
@@ -114,7 +116,7 @@ sell, and nothing after the price runs until a person approves it.
 |---|---|---|---|---|
 | analyze | worker, `analyze-model` | `source.*` | `analysis.json` | `analyze_mesh.py`: bodies, watertightness, volume, bounding box. A cheap pre-check, not a source of truth |
 | quote | worker, `quote-model` | source, analysis | `quote.json` | `quote.py`: upload, create, poll 3DAPI's quote. Named by sha256, never sliced twice, resumable |
-| preview | worker, `preview-model` | source, analysis | `renders/draft_00.png` and 7 more | `render_model.py`: 8-frame Blender draft turntable. No judgement |
+| preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20) |
 | research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict |
 | price | worker, `propose-price` | quote, comparables, viability, drafts | `price.json` | `price_candidates.py` computes the candidates and the break-even floor; the model picks one; `--check` refuses anything below the floor |
 | gate | a person | `price.json` | `price.approved.json` | The one approval. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
@@ -207,22 +209,31 @@ Resume button picks up every work dir with a stage left and no live worker.
   0.96 USD) animated from the lifestyle photo the brief names. A standard
   item is about 1.56 USD against `usd_cap_per_item`. A rejected or failed
   paid asset is remade once with the rejection in its prompt.
-- **No studio page, no problem.** The browser studio lives in the frontend,
-  so an installed plugin has none. `design_product.py` checks
-  `studio_url` once per produce call; when nothing answers it renders the
-  stills with Blender (`render_model.py --out`, one frame per call so a
-  deadline never loses a finished frame, size and samples in
-  `design.stills.blender`) and skips the turntable. Chrome is then not
-  needed for design at all. Decided 2026-10-14 after the first installed
-  run blocked at the stills.
+- **The studio page ships with the plugin; Blender is gone (2026-10-20).**
+  `plugins/dapilot/studio/` is the built console, committed, refreshed with
+  `scripts/dev/build_studio.sh` after any change to the studio code.
+  `capture_turntable.py` serves it on a loopback port for each capture
+  unless `--studio` or `DAPILOT_STUDIO_URL` names a running console, so an
+  installed plugin renders drafts and stills with headless Chrome and
+  nothing else. Every render is WebGL: the preview drafts (`--mode draft`,
+  8 frames at 512 px, about 3 s), the four 2048 px stills (about 8 s) and
+  the turntable. `render_model.py`, `render_scene.py` and
+  `render_turntable.py` stay in the tree for reference and are run by
+  nothing; the Blender fallback in `design_product.py` and the
+  `design.stills.blender` config are removed. Measured against Blender on
+  the sphere fixture: 3 s against 48 s for the eight drafts, softer
+  highlights, the same yaws.
 - The 240-frame studio turntable is a fallback only (`turntable.when`):
   rendered when fal failed to make the clip. A clip the reviewer rejected
   gets no video at all. Nothing downstream may depend on the turntable.
 - Paid requests are written on submit and a rerun attaches (`fal_queue.py`);
   spend is counted from those files. `produce` exits 3 at its deadline so a
   worker's Bash call never outlives 10 minutes; the worker runs it again.
-- **Assembly and colours come from the Bambu project file.** `assembly_3mf.py
-  read` writes `assembly.json` (`required_assembly` when the Assembly View
+- **Assembly and colours come from the project file, read at registration.**
+  `ledger.py init` runs `assembly_3mf.py read` on every 3MF it registers,
+  on the file the person gave and before anything strips it, so the headless
+  director, quickstart and the console all get the same files (2026-10-15;
+  before that only the console upload read them). `read` writes `assembly.json` (`required_assembly` when the Assembly View
   differs from the print layout and the parts touch, `multicolour`, per-part
   transforms, extruder and colour) and `build` writes `display.ply`, which
   both renderers show instead of `source.<ext>`. The slicer, the quote and
@@ -390,13 +401,18 @@ plugins/
       validate_result.py          the result-line contract check
       dapi.py                     spec-driven client: spec, ops, describe, validate, call, upload
       analyze_mesh.py load_3mf.py make_fixtures.py quote.py strip_3mf.py assembly_3mf.py source_thumbnails.py
-      render_model.py render_scene.py render_turntable.py   Blender drafts (render_turntable is older, reference)
+      preview_model.py            the preview stage script: eight WebGL drafts through capture_turntable
+      render_model.py render_scene.py render_turntable.py   the retired Blender renderer (2026-10-20), reference only
       design_product.py capture_turntable.py generate_image.py generate_video.py fal_queue.py upscale_video.py
+    studio/                       the built console, served by capture_turntable.py; scripts/dev/build_studio.sh refreshes it
       etsy_search.py etsy_auth.py market_stats.py pricing.py price_candidates.py product_record.py
       listing_copy.py etsy_listing.py publish_product.py
       social_post.py social/      Integration and Session contracts, instagram_api
 docs/
   agents.md skills.md store-plan.md market-research.md social-plan.md quickstart.md changelog.md
+  hosting.md                      the hosted tier: runner, queue, storage, accounts, what is not built
+runner/                           the Fargate image for the hosted tier (Dockerfile, doctor.sh); not part of the plugin
+.dockerignore                     limits the image's build context to plugins/dapilot and runner/
 server/app.py                     FastAPI job API for the console (:3100)
 frontend/                         React 19 + Vite 8 + Tailwind 4 + shadcn console (:8081), /studio capture page
 store/                            the dev machine's store, private and gitignored (config.json .env reference/
@@ -415,7 +431,7 @@ The plugin is the thing that ships. A skill may only call scripts that live
 inside `plugins/dapilot/scripts/`, referenced as
 `${CLAUDE_PLUGIN_ROOT}/scripts/<name>`, so that an installed copy works
 without this repo. External dependencies the plugin cannot bundle (the Python
-venv with trimesh, scipy and networkx; Blender; Chrome; ffmpeg) are declared
+venv with trimesh, scipy and networkx; Chrome; ffmpeg) are declared
 in the plugin's README and checked for by the scripts at startup.
 `CLAUDE_PLUGIN_ROOT` is empty inside headless workers; `run_intake.py`
 exports it.
@@ -456,10 +472,11 @@ cd frontend && npm run dev                               # :8081; starts the job
 .venv/bin/python plugins/dapilot/scripts/dapi.py --spec plugins/dapilot/skills/dapi-request/eval/openapi.json ops
 ```
 
-Blender is a binary, found at the default macOS path or via `BLENDER` in
-`store/.env`. The design stage needs the studio page served, Chrome and
-ffmpeg. Measured on the reference laptop (4 cores): draft turntable about 30
-s; slicer 18 to 40 s per file; studio-only design run 7 min and 37 turns.
+Chrome is found at the default macOS path or via `CHROME` in `store/.env`;
+the preview and design stages need it and ffmpeg, nothing else. Measured on
+the reference laptop (4 cores): eight drafts about 3 s, four 2048 px stills
+about 8 s; slicer 18 to 40 s per file; studio-only design run 7 min and 37
+turns.
 
 Environment every skill expects, in `store/.env` (gitignored), which
 `run_intake.py`, `server/app.py` and `shop.sh` source:
@@ -496,7 +513,10 @@ Bambu exports .3mf, so it matters as much as .stl.
 **Read it with `load_3mf.py`, never trimesh.** trimesh builds an XML DOM and
 per-vertex Python objects; 3DAPI measured 183 s and 6.08 GB peak on an 8.4 MB
 project. Our streaming reader did the same job on a larger file in 1.1 s at
-0.14 GB. Blender is not an escape hatch: 4.5 has no 3mf importer.
+0.14 GB. In the browser, three's 3MF loader is the same kind of cost, so the
+studio parses stl, obj and ply in a worker and shows a large 3MF through
+its embedded plate render; `display.ply` from `assembly_3mf.py` is what a
+3MF is rendered from.
 
 **Bambu wraps the geometry in a component.** The mesh sits on one object; a
 second, component-only object references it; the build item points at the
@@ -534,7 +554,8 @@ while every body is closed. Volume must be summed per body.
 model to read one: a 200k-triangle file is about 15M tokens of float triples.
 Convert to numbers and renders, and reason over those.
 
-**Blender: update the view layer before reading `matrix_world`**
+**Blender (retired 2026-10-20; the notes stay with the reference scripts):
+update the view layer before reading `matrix_world`**
 (`bpy.context.view_layer.update()`), turntable the product and not the camera,
 scale before centering, Cycles only (EEVEE and Workbench need a GL context),
 and the 4.x STL importer is `bpy.ops.wm.stl_import`.

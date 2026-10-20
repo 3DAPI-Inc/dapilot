@@ -8,8 +8,9 @@ what a person reads, so it says little: the wordmark, one line per setup item, t
 and one sentence about what happens next. Details go to the scripts' own logs.
 
 1. The store, seeded from the plugin's templates when new: the env file, the config, the pricing policy.
-2. The environment (setup_env.py): a Python with the pipeline's packages, Blender, Chrome, ffmpeg,
-   found or installed, their paths written to the store's .env. From a checkout on macOS or Linux,
+2. The environment (setup_env.py): a Python with the pipeline's packages, Chrome and ffmpeg,
+   found or installed, their paths written to the store's .env. Every render is WebGL in headless
+   Chrome from the studio page the plugin ships, so Blender is not needed. From a checkout on macOS or Linux,
    scripts/dev/shop.sh setup then adds the console's packages and the Etsy taxonomy.
 3. The required accounts (3DAPI, Etsy, fal), each checked against its platform. Optional ones such as
    Instagram do not block. Anything required and not connected ends the run here: the person connects
@@ -58,8 +59,8 @@ def seed(store: Path) -> None:
 
 def setup(root: Path, store: Path) -> None:
     seed(store)
-    print("Setting up this computer: Python packages, Blender, Chrome, ffmpeg. The first run can take a few minutes.")
-    # the environment, the same way everywhere: a venv under the store, the three tools found or installed,
+    print("Setting up this computer: Python packages, Chrome, ffmpeg. The first run can take a few minutes.")
+    # the environment, the same way everywhere: a venv under the store, the two tools found or installed,
     # their paths written to the store's .env. Its lines are the person's report.
     run([sys.executable, str(HERE / "setup_env.py")],
         env={**os.environ, "DAPILOT_STORE_DIR": str(store), "DAPILOT_PROJECT_DIR": str(root)})

@@ -7,7 +7,7 @@
 # nothing else: it looks for an interpreter the pipeline's packages support (3.10 to 3.15), installs
 # one when there is none (the system's package manager when it can, else the official standalone
 # CPython build unpacked under the store, no root needed), and hands over to quickstart.py with the
-# same arguments. Everything after that (the venv, Blender, Chrome, ffmpeg, the accounts) is
+# same arguments. Everything after that (the venv, Chrome, ffmpeg, the accounts) is
 # quickstart.py's job.
 #
 # DAPILOT_BOOTSTRAP_ONLY=1 prints the interpreter it would use and exits: a check, not a run.

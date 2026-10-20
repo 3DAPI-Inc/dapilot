@@ -36,6 +36,14 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+# The plugin ships the built studio page; a page older than the studio source is a stale release.
+STUDIO="$ROOT/plugins/dapilot/studio/index.html"
+if [ ! -f "$STUDIO" ]; then
+  echo "plugins/dapilot/studio is missing; run scripts/dev/build_studio.sh and commit it first" >&2; exit 1
+elif [ -n "$(find frontend/src/lib/model frontend/src/pages/Studio.tsx -newer "$STUDIO" 2>/dev/null)" ]; then
+  echo "warning: frontend studio code is newer than plugins/dapilot/studio; run scripts/dev/build_studio.sh, commit, then release" >&2
+fi
+
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 OLD="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$MANIFEST")"
 NEW="$(python3 - "$OLD" "$PART" <<'EOF'
