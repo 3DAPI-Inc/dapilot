@@ -102,30 +102,36 @@ The stack is `Dapilot-<env>` in the 3dapi CDK app
 (`infrastructure/cdk/lib/dapilot-stack.ts`); the image comes from this
 repository's `runner-image` workflow. First time, in this order:
 
-1. **Deploy the stack with the doctor command** (the default). From
-   `3dapi/infrastructure/cdk`: `npm install`, then
-   `npx cdk deploy Dapilot-staging --context env=staging`. It creates the
-   registry, the queues, the bucket, two empty secrets, the roles and a
-   service that wants an image that does not exist yet, so the service shows
-   as failing to start. That is expected.
-2. **Set the two secrets** once:
-   `aws secretsmanager put-secret-value --secret-id staging/dapilot/anthropic-api-key --secret-string sk-ant-...`
-   and the same for `staging/dapilot/backend-token`.
-3. **Push an image.** Either tag a release so the workflow builds it, or by
-   hand from a machine with Docker: `aws ecr get-login-password | docker login ...`,
-   `docker build -f runner/Dockerfile --build-arg DAPILOT_RELEASE=$(git describe --tags --always) -t <RunnerRepositoryUri>:staging .`,
-   `docker push`. The workflow needs the `AWS_RUNNER_IMAGE_ROLE_ARN` secret,
-   an OIDC role allowed to push to `dapilot-runner`.
-4. **Watch the task.** The service pulls the image and runs `doctor.sh
-   --hold`; the log group `/ecs/staging/dapilot-runner` shows one `ok` per
-   check ending in "all checks passed", including a real WebGL render. A
-   `FAIL` line names what the image is missing.
-5. **Switch to the consumer** once the backend serves the four routes:
-   `npx cdk deploy Dapilot-staging --context env=staging --context dapilotCommand=serve`.
-   The task then long-polls the queue and the first message starts a run.
+Staging is not deployed to AWS (decided 2026-10-20: it runs on a laptop
+against directories); production is the only environment on the cluster.
 
-Production is the same with `--context env=production`, after moving the
-`:production` tag onto the image staging proved.
+1. **Deploy the stack with no tasks.** From `3dapi/infrastructure/cdk`:
+   `npm install`, then
+   `npx cdk deploy Dapilot-production --context env=production`. The
+   default desired count is 0, on purpose: a service whose tasks cannot
+   pull an image trips its circuit breaker and CloudFormation rolls the
+   whole stack creation back, registry included. It creates the registry,
+   the queues, the bucket, two empty secrets, the roles, the task
+   definition and an idle service. Note the `RunnerRepositoryUri` output.
+2. **Set the two secrets** once:
+   `aws secretsmanager put-secret-value --secret-id production/dapilot/anthropic-api-key --secret-string sk-ant-...`
+   and the same for `production/dapilot/backend-token` (any long random
+   string until the backend routes exist).
+3. **Push an image.** Tag a release (`vX.Y.Z`) so the `runner-image`
+   workflow builds it, which needs the `AWS_RUNNER_IMAGE_ROLE_ARN` secret,
+   an OIDC role allowed to push to `dapilot-runner`. Or by hand from a
+   machine with Docker: `aws ecr get-login-password | docker login ...`,
+   `docker build -f runner/Dockerfile --build-arg DAPILOT_RELEASE=$(git describe --tags --always) -t <RunnerRepositoryUri>:vX.Y.Z .`,
+   `docker push`.
+4. **Start one task on that image:**
+   `npx cdk deploy Dapilot-production --context env=production --context dapilotImageTag=vX.Y.Z --context dapilotDesiredCount=1`.
+   Two to four minutes later the log group `/ecs/production/dapilot-runner`
+   shows one `ok` per check ending in "all checks passed", including a real
+   WebGL render. A `FAIL` line names what the image is missing.
+5. **Switch to the consumer** once the backend serves the four routes: the
+   same command with `--context dapilotCommand=serve`. The task then
+   long-polls the queue and the first message starts a run. Until then,
+   `--context dapilotDesiredCount=0` stops paying for an idle task.
 
 The settings, and why:
 

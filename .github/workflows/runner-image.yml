@@ -44,6 +44,21 @@ jobs:
           echo "release=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
           [ -f plugins/dapilot/studio/index.html ] || { echo "plugins/dapilot/studio is missing; run scripts/dev/build_studio.sh and commit it" >&2; exit 1; }
 
+      # What AWS will see: the token's issuer, audience and subject, and which role is asked for.
+      # The subject has to match the role's trust condition (repo:3DAPI-Inc/dapilot:*). The token
+      # itself is never printed.
+      - name: OIDC claims
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+            core.info(`iss=${claims.iss} aud=${claims.aud} sub=${claims.sub} repository=${claims.repository} ref=${claims.ref}`);
+            const arn = process.env.ROLE_ARN || '';
+            core.info(arn ? `role-to-assume is set, ${arn.length} chars, ends with ${arn.slice(-24)}` : 'role-to-assume is EMPTY: the AWS_RUNNER_IMAGE_ROLE_ARN secret is not reaching this job');
+        env:
+          ROLE_ARN: ${{ secrets.AWS_RUNNER_IMAGE_ROLE_ARN }}
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_RUNNER_IMAGE_ROLE_ARN }}
