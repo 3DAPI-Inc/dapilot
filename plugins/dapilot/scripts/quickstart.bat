@@ -7,7 +7,7 @@ rem quickstart.py is Python, so something has to find a Python before it can run
 rem and nothing else: it looks for an interpreter the pipeline's packages support (3.10 to 3.15),
 rem installs one when there is none (winget, else the official standalone CPython build unpacked
 rem under the store, no admin rights needed), and hands over to quickstart.py with the same
-rem arguments. The venv, Blender, Chrome, ffmpeg and the accounts are quickstart.py's job.
+rem arguments. The venv, Chrome, ffmpeg and the accounts are quickstart.py's job.
 rem
 rem Set DAPILOT_BOOTSTRAP_ONLY=1 to print the interpreter it would use and stop: a check, not a run.
 setlocal EnableExtensions

@@ -138,11 +138,10 @@ through `design_product.py`, and `check` refuses a plan above
 `design.usd_cap_per_item`. Nothing here touches 3DAPI or Etsy.
 
 ## Failure
-- No studio page at `design.studio_url`: not a failure. The script renders
-  the stills with Blender instead (`design.stills.blender`), one frame per
-  call, and skips the turntable, so the listing has no video when fal
-  cannot make the clip. Blender or ffmpeg missing: `ok:false` with the
-  script's reason; it is an environment problem for a person.
+- The studio page is bundled with the plugin and served by the capture
+  script itself, so there is no "no studio" case. Chrome or ffmpeg missing:
+  `ok:false` with the script's reason; it is an environment problem for a
+  person.
 - fal key missing or balance empty (exit 2): `ok:false`. The studio assets
   already captured stay and are reused by the retry.
 - One lifestyle asset failed on fal: the script records it under `failed`

@@ -45,3 +45,6 @@ test-runs/
 
 # Marketing material: the LinkedIn film and its music, fonts and shots (170 MB). Not part of the product.
 /marketing/
+
+# Internal notes: analysis and known-problem write-ups for the team, not for the public repository.
+/docs/internal/

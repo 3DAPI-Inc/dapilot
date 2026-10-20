@@ -38,6 +38,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -241,6 +242,36 @@ def thumbnails(wd: Path, state: dict) -> None:
         state.setdefault("notes", []).append(f"{now()} {wd.name[:8]}: thumbnails not extracted: {e}")
 
 
+ASSEMBLY = Path(__file__).resolve().parent / "assembly_3mf.py"
+
+
+def assembly(wd: Path, state: dict, original: Path | None = None) -> None:
+    """A 3MF's project files, read at registration, before anything strips them: assembly.json (placement per
+    part, extruder and filament colour per part, painted extruders, the filament list) and display.ply for
+    the renderers. Runs on the file the person gave when there is one, else on the work dir's source. Writes
+    nothing for an STL, for a 3MF with neither an assemble block nor a second colour, or when assembly.json
+    is already there. Added 2026-10-15: only the console upload read these, so a quickstart run never knew a
+    file was multicolour and rendered, designed and wrote it in one colour."""
+    src = original if original is not None else next(iter(wd.glob("source.*")), None)
+    out_p = wd / "assembly.json"
+    if src is None or src.suffix.lower() != ".3mf" or out_p.exists():
+        return
+    try:
+        r = subprocess.run([sys.executable, str(ASSEMBLY), "read", str(src), "--out", str(out_p)],
+                           capture_output=True, text=True, timeout=300)
+        doc = json.loads(out_p.read_text()) if r.returncode == 0 and out_p.exists() else None
+        if not doc or not (doc.get("source") or doc.get("multicolour")):
+            out_p.unlink(missing_ok=True)
+            return
+        b = subprocess.run([sys.executable, str(ASSEMBLY), "build", "--workdir", str(wd)],
+                           capture_output=True, text=True, timeout=600)
+        if b.returncode != 0:
+            state.setdefault("notes", []).append(f"{now()} {wd.name[:8]}: display.ply not built: {(b.stderr or b.stdout).strip()[-160:]}")
+    except Exception as e:  # a bad zip is the quote stage's problem to report; the ledger only loses the colours
+        out_p.unlink(missing_ok=True)
+        state.setdefault("notes", []).append(f"{now()} {wd.name[:8]}: assembly not read: {e}")
+
+
 def cmd_init(a) -> int:
     cfg = load_config()
     stages = load_stages(a.stages)
@@ -267,6 +298,7 @@ def cmd_init(a) -> int:
             state["items"][h] = {"file": meta.get("file", h), "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
         thumbnails(wd, state)
+        assembly(wd, state)
     # A folder of models, or one model file: a person drops one file far more often than a folder.
     for f in ([] if not folder else [folder] if folder.is_file() else sorted(folder.iterdir())):
         if f.suffix.lower() not in SUPPORTED or not f.is_file():
@@ -284,6 +316,7 @@ def cmd_init(a) -> int:
             state["items"][h] = {"file": f.name, "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
         thumbnails(wd, state)
+        assembly(wd, state, f)
     save_state(state)
     return out({"ok": True, "run": a.run, "state": str(state_path), "items": len(state["items"]), "added": added})
 

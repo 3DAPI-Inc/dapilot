@@ -24,11 +24,11 @@ check "3DAPI ops lists 35 operations" "[ \$($PY $S/dapi.py --spec $SPEC ops | j 
 check "3DAPI validate rejects bad body" "! $PY $S/dapi.py --spec $SPEC validate createQuote --body plugins/dapilot/skills/dapi-request/eval/bad-create-quote.json"
 check "3DAPI gated op dry-runs without --confirm" "DAPI_API_URL=http://127.0.0.1:1 DAPI_API_KEY=k $PY $S/dapi.py --spec $SPEC call updatePrintFarmOrderStatus --path orderId=X --body plugins/dapilot/skills/dapi-request/eval/status.json | j \"d['dry_run']\" | grep -q True"
 check "validator rejects malformed result" "! echo '{\"ok\":true}' | $PY $V"
-if [ -x "${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}" ]; then
+if $PY -c "import sys; sys.path.insert(0, '$S'); import capture_turntable as c; sys.exit(0 if c.chrome() else 1)" 2>/dev/null; then
   RW=$(mktemp -d); cp fixtures/multi.stl "$RW/source.stl"
-  check "render draft produces 2 frames" "$PY $S/render_model.py --workdir $RW --mode draft --frames 2 --res 160 --samples 8 && [ -f $RW/renders/draft_01.png ]"
+  check "preview draft produces 2 frames" "$PY $S/preview_model.py --workdir $RW --frames 2 --size 160 && [ -f $RW/renders/draft_01.png ]"
   rm -rf "$RW"
-else echo "skip  render draft (no Blender)"; fi
+else echo "skip  preview draft (no Chrome)"; fi
 GOOD='{"ok":true,"cached":true,"run":"r","item":"i","stage":"analyze","agent":"a","department":"catalogue","outputs":[],"needs_human":null,"reason":null,"summary":"s"}'
 check "validator accepts well-formed result" "echo '$GOOD' | $PY $V"
 

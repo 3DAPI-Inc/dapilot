@@ -48,7 +48,6 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,14 +58,16 @@ HERE = Path(__file__).resolve().parent
 PY = sys.executable
 
 DEFAULTS = {
-    "studio_url": "http://localhost:8081",
+    # The studio page the stills and the turntable are captured from. Null: capture_turntable.py serves the
+    # plugin's own built page for each run, so nothing has to be running. Set it to use a console's dev
+    # server instead (the page under development). DAPILOT_STUDIO_URL in the env does the same.
+    "studio_url": None,
     # The filaments the shop prints in, hex to the word a prompt uses. Store-specific: override in config.
     "palette": {"#E8E4DC": "warm white", "#1F1F1F": "matte black", "#3B7DD8": "blue", "#D8453B": "red",
                 "#F2C230": "yellow", "#4E9A5B": "green", "#F08BB4": "pink", "#8A5CC7": "purple"},
-    "stills": {"count": 4, "size": 2048, "elevation": 18,
-               # without a studio page (an installed plugin has none) the stills come from Blender at this
-               # size and sample count: one frame per call so a produce deadline never loses a finished frame
-               "blender": {"res": 1536, "samples": 64}},
+    # Four WebGL stills from the studio page, a few seconds in all. Blender was the fallback renderer until
+    # 2026-10-20; the page is bundled with the plugin now, so there is no case without one.
+    "stills": {"count": 4, "size": 2048, "elevation": 18},
     # when "fallback" (decided 2026-09-22) the turntable is rendered only after fal failed to make the
     # lifestyle clip and its redo; "always" renders it on every item, as before. It is the listing video
     # only then, and on a server without a GPU it costs about half an hour of CPU.
@@ -420,44 +421,6 @@ def cmd_check(a, cfg: dict) -> int:
 
 # ------------------------------------------------------------------ produce
 
-def studio_up(url: str) -> bool:
-    """True when the browser studio answers; an installed plugin has none and renders stills with Blender."""
-    try:
-        with urllib.request.urlopen(url.rstrip("/") + "/", timeout=2) as r:
-            return r.status < 500
-    except Exception:
-        return False
-
-
-def blender_stills(wd: Path, b: dict, cfg: dict, yaws: list[float], elevation: str, stills: Path, left) -> tuple[int, dict]:
-    """The studio stills from Blender, one frame per call so a finished frame survives the deadline.
-    Returns (0, record) when every frame is there, (3, partial) at the deadline, (1, reason) on a failure."""
-    beauty = stills / "beauty"
-    beauty.mkdir(parents=True, exist_ok=True)
-    bcfg = (cfg.get("stills") or {}).get("blender") or {}
-    res, samples = int(bcfg.get("res", 1536)), int(bcfg.get("samples", 64))
-    t0 = time.time()
-    for i, yaw in enumerate(yaws):
-        frame = beauty / f"frame_{i:04d}.png"
-        if frame.exists():
-            continue
-        if left() < 120:
-            return 3, {"partial": True, "frames_done": i, "frames": len(yaws)}
-        tmp = stills / f"_blender_{i}"
-        code, res_j = run_json([PY, str(HERE / "render_model.py"), "--workdir", str(wd), "--mode", "final",
-                                "--angles", f"{yaw:g}", "--elevation", elevation, "--rotate", str(b.get("rotate", "0,0,0")),
-                                "--color", b["color"], "--res", str(res), "--samples", str(samples), "--out", str(tmp)])
-        hero = tmp / "hero.png"
-        if code != 0 or not hero.exists():
-            return 1, {"reason": f"Blender still {i} failed: {res_j.get('reason') or res_j}"}
-        hero.replace(frame)
-        shutil.rmtree(tmp, ignore_errors=True)
-    record = {"renderer": "blender", "res": res, "samples": samples, "yaws": yaws, "elevation": float(elevation),
-              "color": b["color"], "frames": len(yaws), "capture_s": round(time.time() - t0, 1)}
-    (stills / "video.json").write_text(json.dumps(record, indent=2))
-    return 0, record
-
-
 def still_yaws(b: dict) -> list[float]:
     return [float(b["hero_yaw"]) % 360] + [float(v) % 360 for v in b["angles"]]
 
@@ -482,7 +445,8 @@ def cmd_produce(a, cfg: dict) -> int:
     deadline = a.deadline if a.deadline is not None else cfg["deadline_s"]
     t0 = time.time()
     left = lambda: deadline - (time.time() - t0)  # noqa: E731
-    capture = [PY, str(HERE / "capture_turntable.py"), "--workdir", str(wd), "--studio", cfg["studio_url"],
+    capture = [PY, str(HERE / "capture_turntable.py"), "--workdir", str(wd),
+               *(["--studio", cfg["studio_url"]] if cfg.get("studio_url") else []),   # else the bundled page, served per call
                "--rotate", str(b.get("rotate", "0,0,0")), "--color", b["color"]]
     elevation = str(b.get("elevation", cfg["stills"]["elevation"]))
     steps: list[dict] = []
@@ -515,28 +479,18 @@ def cmd_produce(a, cfg: dict) -> int:
             return fail("the pose changed after captures were made; a person clears design/frames to redo them", step="display")
         produced["pose"], produced["multicolour"] = res.get("pose"), res.get("multicolour")
 
-    # 1. studio stills: the browser studio when it answers, else Blender (an installed plugin has no studio page)
+    # 1. studio stills from the WebGL studio in headless Chrome: a few seconds for the four
     yaws = still_yaws(b)
     stills = dz / "frames" / "stills"
-    studio = studio_up(cfg["studio_url"])
     if frames_in(stills / "beauty") != len(yaws) or not (stills / "video.json").exists():
         if left() < 60:
             return pending_exit("stills")
-        if studio:
-            code, res = run_json(capture + ["--yaws", ",".join(f"{y:g}" for y in yaws), "--size", str(cfg["stills"]["size"]),
-                                            "--passes", "beauty", "--no-video", "--elevation", elevation,
-                                            "--out", str(stills), "--timeout", str(max(left(), 60))])
-            if code != 0:
-                return fail(f"stills capture failed: {res.get('reason')}", step="stills")
-            steps.append({"step": "stills", "renderer": "studio", "seconds": res.get("capture_s")})
-        else:
-            code, res = blender_stills(wd, b, cfg, yaws, elevation, stills, left)
-            if code == 3:
-                steps.append({"step": "stills", "renderer": "blender", **res})
-                return pending_exit(f"stills ({res['frames_done']}/{res['frames']} frames, Blender)")
-            if code != 0:
-                return fail(res["reason"], step="stills")
-            steps.append({"step": "stills", "renderer": "blender", "seconds": res.get("capture_s")})
+        code, res = run_json(capture + ["--yaws", ",".join(f"{y:g}" for y in yaws), "--size", str(cfg["stills"]["size"]),
+                                        "--passes", "beauty", "--no-video", "--elevation", elevation,
+                                        "--out", str(stills), "--timeout", str(max(left(), 60))])
+        if code != 0:
+            return fail(f"stills capture failed: {res.get('reason')}", step="stills")
+        steps.append({"step": "stills", "renderer": "studio", "seconds": res.get("capture_s")})
     ids = ["hero"] + [f"angle_{i + 1}" for i in range(len(yaws) - 1)]
     for i, (sid, yaw) in enumerate(zip(ids, yaws)):
         assets[sid] = {"file": f"design/frames/stills/beauty/frame_{i:04d}.png", "kind": "studio", "yaw": yaw}

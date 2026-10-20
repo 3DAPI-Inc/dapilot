@@ -66,8 +66,8 @@ Two ways in, same plugin:
 - **Clone the repository from GitHub.** `git clone` it and run
   `/dapilot:quickstart` from a session started in the checkout (or
   `scripts/dev/shop.sh setup` in a terminal). This route also sets up the
-  tools the pipeline itself needs (Python venv, Blender, Chrome, ffmpeg,
-  the console). The store is `~/.dapilot` here too unless `DAPILOT_STORE_DIR`
+  tools the pipeline itself needs (Python venv, Chrome, ffmpeg, the
+  console). The store is `~/.dapilot` here too unless `DAPILOT_STORE_DIR`
   says otherwise; the templates it starts from are in `templates/`.
 
 From a terminal, the same install and its updates:
@@ -135,7 +135,7 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `quote-model` | Prices one model through 3DAPI's slicer; quotes named by sha256 so a file is never sliced twice. |
 | `design-product` | Design stage, run by the `product-designer` agent: names the product and writes one brief (orientation, hero angle, stills, colour, lifestyle scenes); `design_product.py` captures studio stills and a turntable in the browser, generates lifestyle photos and a clip on fal under a per-item spend cap, and writes `design.json` with the photos in Etsy order and the listing video. |
 | `render-model` | Retired 2026-09-13 in favour of `design-product`; kept for reference. |
-| `preview-model` | The 8-frame draft turntable, so research and pricing can see the object before any final render is paid for. Needs Blender. |
+| `preview-model` | The 8-frame draft turntable, so research and pricing can see the object before any final render is paid for. A script stage (`preview_model.py`, WebGL in headless Chrome): no worker, no tokens. |
 | `research-comparables` | Finds the Etsy listings a model competes with, picks the true comparables, and writes the market band and our margin (`viability.json`). Needs Etsy credentials, no 3DAPI key. |
 | `propose-price` | Picks the sale price from the candidates `price_candidates.py` allows, with a rationale; the script's `--check` refuses anything below break-even or outside the candidates. Needs the store pricing policy. |
 | `run-intake` | Director skill for an interactive session; the headless equivalent is `scripts/run_intake.py`. |
@@ -154,16 +154,17 @@ General, loaded into every agent: `hierarchy`, `guardrails`, `output-format`, `w
 | `validate_result.py` | the result-line contract every level checks on the level below |
 | `run_intake.py` | deterministic director and lead: launches one worker per brief |
 | `quote.py` | upload, create, poll one quote; resumable; finds an existing quote by hash |
-| `render_model.py`, `render_scene.py` | Blender render driver and scene; the preview drafts |
+| `preview_model.py` | the preview stage: eight draft frames through `capture_turntable.py --mode draft`; run by the director directly |
+| `render_model.py`, `render_scene.py` | the former Blender renderer, retired 2026-10-20; kept for reference, run by nothing |
 | `design_product.py` | the design stage: `context`, `check` (brief schema and spend cap), `produce` (resumable, exit 3 at its deadline), `finalize` (photo order, listing video, Etsy limits) |
-| `capture_turntable.py` | headless Chrome over the studio page: stills at exact yaws, turntables, depth passes; encodes with ffmpeg |
+| `capture_turntable.py` | headless Chrome over the studio page: preview drafts (`--mode draft`), stills at exact yaws, turntables, depth passes; encodes with ffmpeg. Serves the page the plugin ships in `studio/` unless a running console is named |
 | `generate_image.py`, `generate_video.py`, `fal_queue.py` | lifestyle photo (image edit) and depth-conditioned clip (Wan) on fal; a request is written on submit and a rerun attaches, so nothing is paid twice |
 | `upscale_video.py` | Topaz upscale on fal; manual, not part of any stage |
 | `strip_3mf.py` | removes foreign slicer project settings (Creality Print, Orca, Prusa) from a 3mf so Bambu Studio accepts it; `--check` to test first |
 | `source_thumbnails.py` | copies the plate and top previews a 3MF carries into `thumbnails/`; run by `ledger init`, so the research worker has the designer's own pictures before any draft exists |
 | `etsy_search.py`, `etsy_auth.py` | Etsy comparables search with size and digital filters; OAuth login and refresh for the inventory pass |
 | `integrate.py` | the Integrations page: `serve` (local server and page), `status`, `test`; writes the env file and `integrations.json`, verifies each credential with a free call |
-| `setup_env.py` | the environment, the same on macOS, Linux and Windows: a venv under the store with the plugin's packages, Blender, Chrome and ffmpeg found or installed (winget, brew, apt, dnf), their paths written to the store's `.env`; `--no-install` only reports |
+| `setup_env.py` | the environment, the same on macOS, Linux and Windows: a venv under the store with the plugin's packages, Chrome and ffmpeg found or installed (winget, brew, apt, dnf), their paths written to the store's `.env`; `--no-install` only reports |
 | `quickstart.sh`, `quickstart.bat` | the entry point of `/dapilot:quickstart`: find a Python 3.10 to 3.15 (a pinned `DAPILOT_PYTHON`, then by version, then the installer folders), install one with the system's package manager when there is none, hand over to `quickstart.py`. The `.sh` relays to the `.bat` under Git Bash on Windows. `DAPILOT_BOOTSTRAP_ONLY=1` prints the pick and stops |
 | `watch_run.py` | what the monitor runs: tails every `runs/<id>/director.log` under the working directory and watches `work/*/price.json` without an approval; prints `dapilot: ...` lines. `--once` says what is open now and exits |
 | `approve_price.py` | the price gate without the console: `pending [--wait S]` (items at the gate as JSON, with proposal, candidates, floor, pack; `--wait` polls until something is pending or nothing is running), `approve --workdir W [--price P] [--by] [--reason] [--no-start]` (a candidate or a typed price, checked against the floor by `price_candidates.py --check`, then `price.approved.json`, the product record and a director on the item), `decline --workdir W` (writes `design.blocked.json`) |

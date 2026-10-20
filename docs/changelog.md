@@ -638,7 +638,41 @@ each carries its own date.
   and `setup_env.py` installs with `--only-binary=:all:` so a Python
   without prebuilt wheels fails in seconds naming the package instead of
   compiling scipy. Quickstart still installs 3.12 when nothing fits.
+- **Every path reads the 3MF's colours and assembly (2026-10-15).** The
+  Mini Duck Titan3D file, a Creality project painted in three filaments,
+  went through a quickstart run as a one-colour duck: `assembly_3mf.py`
+  ran only from the console upload. `ledger.py init` now runs `read` on
+  every 3MF it registers, on the original file before any strip, and
+  `build` for `display.ply`, writing nothing for an STL or a plain
+  single-colour 3MF and never twice. The director, quickstart and the
+  console now agree on `assembly.json`. The quote still does not see the
+  colours of a stripped project; that check is the next step.
 - **License changed to AGPL-3.0 (2026-10-16).** The MIT text in `LICENSE`
   and `plugins/dapilot/LICENSE` was replaced with the GNU Affero General
   Public License v3 as published at gnu.org; `plugin.json` says
   `AGPL-3.0` and the README badge and License section follow.
+- **Blender replaced by the WebGL studio everywhere (2026-10-20).** The
+  preview drafts were Blender (`render_model.py --mode draft`, 30 to 70 s)
+  and the design stills fell back to Blender when no console was serving
+  the studio page, which is every installed plugin. Now the built console
+  is committed at `plugins/dapilot/studio/` (`scripts/dev/build_studio.sh`
+  refreshes it; `release.sh` refuses to release without it and warns when
+  the studio source is newer) and `capture_turntable.py` serves it on a
+  loopback port for each capture unless `--studio` or `DAPILOT_STUDIO_URL`
+  names a running console. It no longer takes whatever answers on 8081:
+  another app's dev server there passed the liveness check and the capture
+  waited 45 s for a model fetch that never came. New `--mode draft` writes
+  `renders/draft_00.png` onward and the `draft` record in `render.json`
+  that `design_product.py context` reads; new `preview_model.py` wraps it
+  as the preview stage's script, and `stages.json` names it, so the
+  director runs preview itself at no model cost (it was a worker at about
+  0.09 USD per item). `design_product.py` loses `studio_up`,
+  `blender_stills` and `design.stills.blender`; `studio_url` defaults to
+  null. `setup_env.py`, quickstart, `shop.sh`, `up.sh`, `shop_inspect.py`,
+  `test_phase0.sh`, the templates and the docs stop looking for or
+  installing Blender. Measured on the sphere fixture: eight drafts 3.1 s
+  at 512 px against Blender's 47.9 s at 320 px; four 2048 px stills 8.4 s.
+  The WebGL frame is softer, with a wider product in frame; the yaws match.
+  `render_model.py`, `render_scene.py` and `render_turntable.py` stay in
+  the tree for reference, run by nothing. The 3dapi runner Dockerfile
+  still installs Blender from apt; that line can go.

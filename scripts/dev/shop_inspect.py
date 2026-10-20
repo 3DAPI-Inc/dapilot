@@ -81,7 +81,6 @@ ENV = [
     ("DAPILOT_BILLING", ["workers"], False, False, "auto | api | subscription"),
     ("ETSY_KEYSTRING", ["research", "publish"], True, True, "Etsy Open API v3 app"),
     ("ETSY_SHARED_SECRET", ["research", "publish"], True, True, "Etsy Open API v3 app"),
-    ("BLENDER", ["preview"], False, False, "Blender binary; default /Applications/Blender.app"),
     ("FAL_KEY", ["design"], True, True, "or FAL_API_KEY; lifestyle photos and clip, paid"),
     ("CHROME", ["design"], False, False, "Chrome binary for studio captures; found on its own on macOS"),
     ("DAPILOT_STUDIO_URL", ["design"], False, False, "default http://localhost:8081"),
@@ -203,14 +202,6 @@ def check(offline: bool) -> int:
     claude = shutil.which("claude")
     ck.add("tools", "claude CLI", "ok" if claude else "missing",
            f"{claude} ({version([claude, '--version'])})" if claude else "install Claude Code; every worker is claude -p", ["all"])
-    blender = next((b for b in (os.environ.get("BLENDER"), "/Applications/Blender.app/Contents/MacOS/Blender", shutil.which("blender"),
-                                "/snap/bin/blender", "/opt/blender/blender") if b and os.access(b, os.X_OK)), None)
-    bv = version([blender, "--version"]) if blender else ""
-    bm = re.match(r"Blender (\d+)\.", bv)
-    ck.add("tools", "blender", "ok" if bm and int(bm[1]) >= 4 else "missing",
-           f"{blender} ({bv})" if bm and int(bm[1]) >= 4
-           else f"{blender} ({bv}): the preview render needs Blender 4.0+; scripts/dev/shop.sh setup installs 4.5 LTS" if blender
-           else "scripts/dev/shop.sh setup installs it, or set BLENDER", ["preview"])
     chrome = next((b for b in (os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                                *(shutil.which(n) for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")))
                    if b and os.access(b, os.X_OK)), None)
@@ -251,7 +242,7 @@ def check(offline: bool) -> int:
                 continue
         if name == "DAPILOT_BILLING" and val not in ("auto", "api", "subscription"):
             problem = f"{val!r} is not auto, api or subscription"
-        if name in ("BLENDER", "CHROME") and not os.access(val, os.X_OK):
+        if name == "CHROME" and not os.access(val, os.X_OK):
             problem = f"{val} is not an executable"
         if problem:
             ck.add("env", name, "missing", problem, gates)

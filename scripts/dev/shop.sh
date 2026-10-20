@@ -141,9 +141,6 @@ prefer_good_node() {
   return 1
 }
 
-# the preview render uses AgX and Blender 4's importers: 4.0 or newer
-blender_ok() { "$1" --version 2>/dev/null | head -1 | grep -qE '^Blender ([4-9]|[1-9][0-9])\.'; }
-
 # ------------------------------------------------------------------ setup
 
 # how to install a tool on this machine: Homebrew on macOS, apt or dnf on Linux; empty when unknown
@@ -156,7 +153,6 @@ install_cmd() {
       python)  echo "brew install python@3.12" ;;
       node)    echo "brew install node" ;;
       ffmpeg)  echo "brew install ffmpeg" ;;
-      blender) echo "brew install --cask blender" ;;
       chrome)  echo "brew install --cask google-chrome" ;;
     esac
   elif command -v apt-get > /dev/null; then
@@ -167,9 +163,6 @@ install_cmd() {
       venv)    echo "$APT install -y $2-venv" ;;
       node)    echo "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && $APT install -y nodejs" ;;   # apt's own node is too old for vite 8
       ffmpeg)  echo "$APT update && $APT install -y ffmpeg" ;;
-      blender) [ "$arch" = x86_64 ] || { echo "$APT update && $APT install -y blender"; return 0; }
-               # the distribution's blender is often 2.x; take the official 4.5 LTS build into /opt and link it onto PATH
-               echo "$APT update && $APT install -y xz-utils libxi6 libxkbcommon0 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6 libegl1 && v=\$(curl -fsSL https://download.blender.org/release/Blender4.5/ | grep -oE 'blender-4\\.5\\.[0-9]+-linux-x64' | sort -uV | tail -1) && [ -n \"\$v\" ] && { [ -x /opt/\$v/blender ] || { curl -fL -o /tmp/\$v.tar.xz https://download.blender.org/release/Blender4.5/\$v.tar.xz && sudo tar -xJf /tmp/\$v.tar.xz -C /opt; }; } && { [ ! -e /usr/local/bin/blender ] || [ -L /usr/local/bin/blender ]; } && sudo ln -sf /opt/\$v/blender /usr/local/bin/blender" ;;
       chrome)  if [ "$arch" = x86_64 ]; then echo "curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && $APT install -y /tmp/chrome.deb"
                else echo "$APT update && $APT install -y chromium"; fi ;;
     esac
@@ -179,7 +172,6 @@ install_cmd() {
       python)  echo "sudo dnf install -y python3.12" ;;
       node)    echo "sudo dnf install -y nodejs" ;;
       ffmpeg)  echo "sudo dnf install -y ffmpeg" ;;   # Fedora ships ffmpeg-free; RHEL needs RPM Fusion
-      blender) echo "sudo dnf install -y blender" ;;
       chrome)  [ "$arch" = x86_64 ] && echo "sudo dnf install -y https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm" || echo "sudo dnf install -y chromium" ;;
     esac
   fi
@@ -199,7 +191,6 @@ install_tool() {
   run_logged "install $name" bash -c "$cmd"
 }
 
-blender_bin() { local b; for b in "${BLENDER:-}" /Applications/Blender.app/Contents/MacOS/Blender "$(command -v blender)" /snap/bin/blender /opt/blender/blender $(ls -d /opt/blender-4* 2>/dev/null | sort -V | tail -1 | sed 's|$|/blender|'); do [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }; done; return 1; }
 chrome_bin() { local b; for b in "${CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$(command -v google-chrome)" "$(command -v google-chrome-stable)" "$(command -v chromium)" "$(command -v chromium-browser)"; do [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }; done; return 1; }
 
 setup_tools() {
@@ -218,17 +209,11 @@ setup_tools() {
   command -v node > /dev/null && log "node $(node --version), npm $(npm --version 2>/dev/null) at $(command -v node)"
   command -v ffmpeg > /dev/null && command -v ffprobe > /dev/null || install_tool ffmpeg "$(install_cmd ffmpeg)"
   command -v ffmpeg > /dev/null && log "ffmpeg at $(command -v ffmpeg): $(ffmpeg -version 2>/dev/null | head -1)"
-  b=$(blender_bin)
-  if [ -z "$b" ]; then install_tool "Blender 4" "$(install_cmd blender)"
-  elif ! blender_ok "$b"; then install_tool "Blender 4 (found $b: $("$b" --version 2>/dev/null | head -1 || echo 'does not run'))" "$(install_cmd blender)"; fi
-  hash -r
-  if b=$(blender_bin) && blender_ok "$b"; then log "blender at $b: $("$b" --version 2>/dev/null | head -1)"
-  elif [ -n "$b" ]; then log "${R}blender at $b is not 4.0 or newer; the preview stage will fail. Set BLENDER in store/.env to a Blender 4 binary${N}"; fi
   chrome_bin > /dev/null || install_tool "Chrome or Chromium" "$(install_cmd chrome)"
   if b=$(chrome_bin); then log "chrome at $b: $("$b" --version 2>/dev/null)"; fi
   if [ "$OS" = Linux ]; then
-    [ "$(id -u)" = 0 ] && log "running as root: the design stage starts Chrome with --no-sandbox (a service user is safer)"
-    [ -z "${DISPLAY:-}" ] && logq "no DISPLAY: fine, Blender renders with Cycles on the CPU and Chrome captures headless with SwiftShader WebGL"
+    [ "$(id -u)" = 0 ] && log "running as root: the preview and design stages start Chrome with --no-sandbox (a service user is safer)"
+    [ -z "${DISPLAY:-}" ] && logq "no DISPLAY: fine, every render is headless Chrome with SwiftShader WebGL"
   fi
   command -v brew > /dev/null && logq "brew $(brew --version 2>/dev/null | head -1) at $(command -v brew)"
   return 0

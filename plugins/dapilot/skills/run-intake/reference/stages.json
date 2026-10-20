@@ -38,7 +38,8 @@
         "renders/draft_00.png"
       ],
       "gate": "auto",
-      "enabled": true
+      "enabled": true,
+      "script": "preview_model.py"
     },
     {
       "stage": "research",
