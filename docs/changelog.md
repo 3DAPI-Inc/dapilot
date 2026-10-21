@@ -748,3 +748,22 @@ each carries its own date.
   deleted resources the branch did not know about. `runner/README.md` has
   the Coolify settings and the environment table. The `runner-image`
   workflow still pushes to ECR and is now unused.
+- **First cold run through the staging queue** (2026-10-21). The consumer
+  loop (`runner/consumer.py serve`) ran on the dev Mac against the real
+  `staging-dapilot-runs.fifo` queue and the staging sellers bucket, with a
+  directory standing in for the backend, whose routes are not deployed. A
+  dry run took 6 s end to end. The Happy Shark then went through all eight
+  stages by messages alone: `run` to the price gate in 5 min, `approve` at
+  the worker's 9.99 USD proposal, `retry` for design, and a sandbox
+  `published.json`; the heartbeat held a 19-minute design job, no secret
+  reached the bucket, nothing reached the dead-letter queue. Found on the
+  way, none of it in the queue code: the design worker reads Claude Code's
+  own "USD budget" reminder as the fal cap and refuses a plan `check`
+  passed (a guardrails bullet now says the two are different); a `retry`
+  under the same run id is a no-op because the ledger never re-checks a
+  stage it recorded as blocked (the console's Try again starts a fresh run
+  id, the consumer should too); `push` never deletes, so a marker cleared
+  locally returns from S3 on the next pull; and a dev machine with several
+  copies of the plugin sends headless workers to whichever one they find
+  (a clean `CLAUDE_CONFIG_DIR` for the workers fixed it here; the container
+  has one copy).

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The queue consumer: the hosted tier's runner loop, one director invocation per message.
 
-  consumer.py serve                                   poll the SQS queue forever (the Fargate task's command)
+  consumer.py serve                                   poll the SQS queue forever (what doctor.sh --serve runs)
   consumer.py once --message FILE [--local-bucket DIR --local-backend DIR] [--director-args "..."]
                                                       handle one message from a JSON file, for a laptop test
 
@@ -56,9 +56,9 @@ DATA_DIR = Path(os.environ.get("DAPILOT_DATA_DIR") or "/data/dapilot")
 PLUGIN_DIR = Path(os.environ.get("DAPILOT_PLUGIN_DIR") or HERE.parent / "plugins" / "dapilot")
 PYTHON = os.environ.get("DAPILOT_PYTHON") or sys.executable
 HEARTBEAT_S = 60          # how often the message's visibility is extended while a job runs
-VISIBILITY_S = 300        # by how much; a dead task stops extending and the message reappears
+VISIBILITY_S = 300        # by how much; a dead container stops extending and the message reappears
 WAIT_S = 20               # SQS long poll
-# What never leaves the task: the store's secrets, the plugin's locks, a director's liveness file, and
+# What never leaves the container: the store's secrets, the plugin's locks, a director's liveness file, and
 # the intake copy of an upload (the bucket already holds it under intake/, and the work dir holds source.*).
 NEVER_SYNCED = ("store/.env", "store/etsy_token", "store/social/", "/.lock", "director.alive", ".sync.json", "intake/")
 

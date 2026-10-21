@@ -12,9 +12,9 @@
 #   docker build -f runner/Dockerfile --build-arg DAPILOT_RELEASE=$(git describe --tags --always) -t dapilot-runner .
 #   docker run --rm dapilot-runner                  # doctor: one line per check, then exits
 #
-# It is meant for ECS Fargate (one task, the queue consumer as its command once that exists), and
-# runs anywhere Docker does. Not Coolify: the 3dapi workers directory deploys there and this does
-# not belong in it.
+# It runs as a Coolify resource on the EC2 host, built from this repository at a release tag, and
+# runs anywhere Docker does. It stays in this repository rather than the 3dapi workers directory so
+# that the plugin inside the image is the release, byte for byte.
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 FROM ${PYTHON_IMAGE}
@@ -39,8 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # A container has no user namespaces, so Chromium's sandbox cannot start even for a non-root user.
 # The plugin finds Chrome through $CHROME; pointing that at a wrapper keeps the flag out of the
-# plugin, which only adds --no-sandbox on its own when it runs as root. /dev/shm is tiny on
-# Fargate, hence --disable-dev-shm-usage. The capture script adds the SwiftShader flags itself.
+# plugin, which only adds --no-sandbox on its own when it runs as root. /dev/shm is tiny in a
+# container, hence --disable-dev-shm-usage. The capture script adds the SwiftShader flags itself.
 RUN printf '#!/bin/sh\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage "$@"\n' \
       > /usr/local/bin/chromium-container \
     && chmod 755 /usr/local/bin/chromium-container

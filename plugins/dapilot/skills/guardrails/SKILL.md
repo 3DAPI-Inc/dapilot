@@ -65,6 +65,11 @@ deletion, return `needs_human` with the path and the reason.
 - Paid generation (fal) runs only through `design_product.py`, which counts
   every accepted request against `design.usd_cap_per_item`. Never call a
   generation script directly and never pass `--force` to one.
+- The `USD budget: $x/$y` line Claude Code adds to your reminders is your
+  own token spend for this session, set by the director. It is not the
+  asset cap and fal spend never counts against it. When `check` passes,
+  the plan is within the cap: run `produce`; never refuse a plan because
+  its cost is near or above the session figure.
 
 ## Secrets and privacy
 
