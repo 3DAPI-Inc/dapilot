@@ -2,8 +2,9 @@
 # Proves the image can run the plugin: every tool the pipeline needs answers, the plugin is at the
 # expected release and read-only, the data directory is writable, and a real render goes through
 # the bundled studio page in headless Chromium. Prints one line per check. Exit 1 on the first
-# failure. With --hold, stays up after the checks so a service with this as its command shows as
-# running before the queue consumer exists.
+# failure. With --serve (the image's default command), goes on to run the queue consumer once every
+# check has passed, so a broken image stops loudly at start instead of taking a seller's message.
+# With --hold, stays up idle after the checks, to prove the image somewhere with no queue.
 set -u
 fail() { echo "FAIL  $1"; exit 1; }
 ok()   { echo "ok    $1"; }
@@ -118,7 +119,11 @@ rm -rf "$d"
 [ -n "${ANTHROPIC_API_KEY:-}" ] && ok "ANTHROPIC_API_KEY set (workers bill the API)" || echo "warn  ANTHROPIC_API_KEY not set; workers cannot run"
 echo "all checks passed"
 
-if [ "${1:-}" = "--hold" ]; then
-  echo "no queue consumer in this image yet; holding"
-  exec sleep infinity
-fi
+case "${1:-}" in
+  --serve)
+    echo "starting the queue consumer"
+    exec "$DAPILOT_PYTHON" ./consumer.py serve ;;
+  --hold)
+    echo "holding"
+    exec sleep infinity ;;
+esac

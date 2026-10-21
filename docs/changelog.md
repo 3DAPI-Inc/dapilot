@@ -735,3 +735,16 @@ each carries its own date.
   Typechecked and synthesised on this Mac (the stack is 19 resources: three
   roles, two queues, two secrets, the registry, the bucket, the log group,
   the task definition, the security group, the service); not deployed.
+- **The runner moves to Coolify** (2026-10-21). The hosted runner is a Coolify
+  resource on the EC2 host, built from this repository at a release tag, not
+  an ECS Fargate service. `runner/Dockerfile`'s default command is now
+  `doctor.sh --serve`: every check, the WebGL render, then the queue
+  consumer, so a broken image exits before taking a message. The 3dapi stack
+  `Dapilot-<env>` keeps only the FIFO queue, its dead-letter queue, the
+  sellers bucket, an IAM user for the runner and grants for the backend's
+  user; it imports nothing from the slicer's stack and is deployed with
+  `--exclusively`. The reason is in `docs/hosting.md`: the Fargate deploy of
+  2026-10-20, run from a stale branch, also rewrote the slicer's stack and
+  deleted resources the branch did not know about. `runner/README.md` has
+  the Coolify settings and the environment table. The `runner-image`
+  workflow still pushes to ECR and is now unused.

@@ -16,8 +16,8 @@ the same plugin for sellers who do not, at dapilot.dapi.digital.
 | Piece | Repository | Why |
 |---|---|---|
 | The plugin | this one, `plugins/dapilot` | the thing that ships; unchanged by hosting |
-| The runner image and its consumer | this one, `runner/` | released with the plugin, byte for byte; deployed on ECS Fargate, not Coolify, so it does not belong in the 3dapi workers directory |
-| The AWS stack: queue, bucket, registry, task, service | 3dapi, `infrastructure/cdk` | it shares the slicer's cluster and VPC, and the backend that sends the messages is deployed from there |
+| The runner image and its consumer | this one, `runner/` | released with the plugin, byte for byte: Coolify builds it from this repository at a release tag, which the 3dapi workers directory could not promise |
+| The AWS stack: queue, bucket, identities | 3dapi, `infrastructure/cdk` | the backend that sends the messages is deployed from there; the stack stands alone and touches nothing of the slicer's |
 | The web app, the backend routes, accounts | 3dapi | dapi.digital's own frontend, backend and Supabase project |
 
 The image is built from this repository at a release tag and pushed to the
@@ -101,7 +101,7 @@ backend (3dapi)           one row per run; mints the dapilot API key; holds cred
 SQS FIFO queue  (message group id = seller id)       |
    |  ReceiveMessage                                 |
    v                                                 |
-runner (runner/, one Fargate task)  -----------------+
+runner (runner/, one Coolify container)  -----------+
    |  pull s3://<bucket>/<seller>/ -> /data/dapilot/<seller>
    |  DAPILOT_STORE_DIR=/data/dapilot/<seller>  run_intake.py <intake> --run <id> --billing api
    |  push /data/dapilot/<seller> -> s3://<bucket>/<seller>/   (env file and tokens excluded)
@@ -123,42 +123,45 @@ that knows S3, SQS, other sellers or the backend exist.
 - Root-owned and world-readable only. Workers run with permissions skipped;
   a read-only plugin is what stops one from "fixing" a script mid-run.
 - `CHROME` points at a wrapper that adds `--no-sandbox` and
-  `--disable-dev-shm-usage`: a container has no user namespaces, and
-  Fargate's `/dev/shm` is small.
+  `--disable-dev-shm-usage`: a container has no user namespaces, and a
+  container's `/dev/shm` is small.
 - Runs as `runner`, uid 1000. Claude Code refuses the unattended permission
   mode as root and the director starts every worker in that mode.
-- `/data/dapilot` is one subdirectory per seller during a run. On Fargate it
-  is the task's ephemeral disk (raise it from the 20 GB default); S3 is the
-  durable copy.
-- Default command is `doctor.sh`: every tool, the plugin read-only, the data
-  directory writable, and two frames of a cube rendered through the bundled
-  studio page. `--hold` keeps the task up. The consumer replaces this
-  command when it exists.
+- `/data/dapilot` is one subdirectory per seller during a run, a persistent
+  volume of the Coolify resource; S3 is the durable copy.
+- Default command is `doctor.sh --serve`: every tool, the plugin read-only,
+  the data directory writable, two frames of a cube rendered through the
+  bundled studio page, and then the queue consumer. A failed check exits
+  before any message is taken.
 
-## The AWS stack (written: 3dapi `infrastructure/cdk/lib/dapilot-stack.ts`; not deployed)
+## Where it runs (decided 2026-10-21: Coolify, not Fargate)
 
-A second stack in the 3dapi CDK app, `Dapilot-<env>`, next to the public
-API's, taking its cluster and VPC through props (public subnets, no NAT,
-tasks get a public IP as the slicer does). Written 2026-10-20, typechecks
-and synthesises (`cdk synth Dapilot-staging --context env=staging`), not
-deployed. Context flags: `dapilotImageTag` (default the env
-name), `dapilotCommand` (`doctor` first, `serve` once the backend routes
-exist), `dapilotBackendUrl`. The image is built and pushed by this
-repository's `runner-image` workflow on a release tag; the deploy order is
-in `runner/README.md`.
+The runner is a Coolify resource on the EC2 host, next to 3dapi's other
+workers, built by Coolify from this repository at a release tag. The first
+design put it on ECS Fargate in the slicer's cluster; that stack was deployed
+to production once with zero tasks (2026-10-20), and the deploy, run from a
+feature branch, also rewrote the slicer's stack and deleted resources the
+branch did not know about. Two lessons went into what follows: the AWS stack
+for dapilot imports nothing from any other stack, and it is deployed with
+`--exclusively` after reading `cdk diff`. The host already pays for itself,
+so the runner's marginal cost is zero until it needs its own instance.
+
+## The AWS stack (3dapi `infrastructure/cdk/lib/dapilot-stack.ts`)
+
+A second stack in the 3dapi CDK app, `Dapilot-<env>`, standing alone. The
+deploy order and the Coolify settings are in `runner/README.md`.
 
 | Piece | Notes |
 |---|---|
-| ECR repository | the runner image, pushed by this repository's release workflow |
-| SQS FIFO queue plus dead-letter queue | copy of the slicer queue definitions; group id is the seller id |
-| S3 bucket | one prefix per seller; a lifecycle rule for work dirs that never reached an approved price |
-| Secrets Manager | our Anthropic key, the backend service token; injected as task secrets |
-| Task role | consume the queue, read and write the bucket, read those secrets, nothing else |
-| Task definition | 2 vCPU, 8 GB, ephemeral storage raised; `CMD` is the consumer |
-| Fargate service | one task, On-Demand first; Spot once the SIGTERM handler is tested; scale to zero from queue depth later, the way the slicer's design workers do |
+| SQS FIFO queue plus dead-letter queue | copy of the slicer queue definitions; group id is the seller id; visibility 5 min, DLQ after 3 |
+| S3 bucket | `intake/` expires after 30 days, `sellers/<id>/` kept; private, CORS for the dashboard origin |
+| IAM user `<env>-dapilot-runner` | the container's identity: consume the queue, read and write the bucket, nothing else; the access key is made in the console and lives only in Coolify |
+| Grants on the backend's existing user | send on the queue, read and write on the bucket, so the Hono backend can queue runs and presign uploads |
 
-Approximate cost of one always-on task at that size: about 85 USD a month
-On-Demand, about a third of that on Spot, pennies when scaled to zero.
+No ECR registry (Coolify builds the image), no Secrets Manager (the
+Anthropic key and the backend token are Coolify environment variables), no
+task or service. Staging and production are the same stack with the
+environment name; staging's bucket and queues are destroyable.
 
 ## Storage
 
@@ -172,8 +175,8 @@ relies on. So:
   the local layout. Pulled before the director starts, pushed after it exits.
   The exit is the only moment the root is consistent (no worker mid-write,
   no lock held, ledger written last), which is why the sync is at job
-  boundaries and never continuous. On Fargate the local copy is deleted
-  after the push.
+  boundaries and never continuous. The local copy on the volume is a cache
+  the next job overwrites from S3.
 - **Never synced:** the store's env file and the Etsy token. The runner
   writes them fresh per job from the backend's per-seller credentials.
 - **The browser reads S3 through the backend** with short-lived presigned
@@ -292,7 +295,8 @@ reads what they write:
   writes per job.
 - **Secrets stay out of the model's reach** the way the plugin already
   guarantees: in the env file its hook fences, never in a prompt or a
-  message. S3 and SQS access is the task role's and never enters the store.
+  message. S3 and SQS access is the runner's own IAM user and never enters
+  the store.
 
 ## What self-hosting users keep
 

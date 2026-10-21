@@ -95,12 +95,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}
     && claude --version
 
 # Where every seller's store directory lives during a run, one subdirectory per seller, each
-# pointed at through DAPILOT_STORE_DIR for that seller's jobs. On Fargate this is the task's
-# ephemeral disk and S3 is the durable copy; for docker run, mount a volume here to keep it.
+# pointed at through DAPILOT_STORE_DIR for that seller's jobs. Mount a volume here (the Coolify
+# resource does); S3 is the durable copy either way.
 
-# The default command checks the toolchain, renders two frames through the studio page, and exits:
-# the first thing to run on a new cluster. The service's task definition overrides it with the
-# consumer once the queue exists:
-#   command: ["/opt/dapilot/.venv/bin/python", "consumer.py", "serve"]
-# `doctor.sh --hold` keeps a task up without a queue, to prove the image on the cluster.
-CMD ["./doctor.sh"]
+# The default command runs every check, renders two frames through the studio page, and then
+# starts the queue consumer. A failed check exits 1 before any message is taken, which Coolify
+# shows as a restarting container with the FAIL line in its log. `docker run ... ./doctor.sh`
+# runs the checks alone and exits; `./doctor.sh --hold` keeps a container up with no queue.
+CMD ["./doctor.sh", "--serve"]

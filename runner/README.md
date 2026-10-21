@@ -2,10 +2,11 @@
 
 The container that hosts the dapilot plugin for the hosted tier: the plugin
 as released, the Claude Code CLI, Python with the plugin's packages, ffmpeg
-and Chromium, nothing else. It is meant for ECS Fargate, and it is in this
-repository because the plugin and the image that runs it are released
-together: a release tag builds the image for that release, byte for byte.
-It is not a Coolify worker and does not live in the 3dapi workers directory.
+and Chromium, nothing else. It runs as a Coolify resource on the EC2 host,
+next to 3dapi's other workers, and it is in this repository rather than the
+3dapi workers directory because the plugin and the image that runs it are
+released together: Coolify builds the image from a release tag, so the plugin
+inside it is that release, byte for byte.
 
 The whole design (queue, storage, accounts, what is built and what is not)
 is `docs/hosting.md`. The rule that governs this directory: the runner never
@@ -17,12 +18,14 @@ its exit code and the files it writes.
 
 - `Dockerfile`: the image. Build from the repository root; the root
   `.dockerignore` limits the context to `plugins/dapilot` and this directory.
-- `doctor.sh`: the image's default command. Checks every tool, that the
-  plugin is read-only, that the data directory is writable, and renders two
-  frames of a cube through the bundled studio page in headless Chromium.
-  `--hold` keeps the container up after the checks.
-- `consumer.py`: the queue consumer, the service's real command
-  (`consumer.py serve`). Per message it pulls the seller's root from S3 to
+- `doctor.sh`: the image's default command, as `doctor.sh --serve`. Checks
+  every tool, that the plugin is read-only, that the data directory is
+  writable, renders two frames of a cube through the bundled studio page in
+  headless Chromium, and then starts the consumer. A failed check exits
+  before any message is taken. Without a flag it runs the checks and exits;
+  `--hold` keeps the container up idle after them.
+- `consumer.py`: the queue consumer (`consumer.py serve`). Per message it
+  pulls the seller's root from S3 to
   `$DAPILOT_DATA_DIR/<seller>`, seeds the store from the plugin's templates
   on first use, writes the store's env file from the seller's credentials
   and the plan limits into its config, runs `run_intake.py` (or
@@ -80,77 +83,71 @@ export DAPILOT_STORE_DIR=/data/dapilot/trial
 "$DAPILOT_PYTHON" "$DAPILOT_PLUGIN_DIR/scripts/run_intake.py" /path/to/model.stl --dry-run
 ```
 
-## Environment the task sets
+## Environment the container gets
 
 ```
 ANTHROPIC_API_KEY        bills the workers the director spawns (DAPILOT_BILLING=api is baked in)
-AWS_REGION               the queue and the bucket; credentials come from the task role, never from env
-DAPILOT_QUEUE_URL        the dapilot FIFO queue (not consumed yet)
-DAPILOT_BUCKET           the bucket the seller stores live in (not used yet)
-DAPILOT_BACKEND_URL      where events go and per-seller credentials come from (not used yet)
-DAPILOT_BACKEND_TOKEN    the runner's service token for that backend
+AWS_REGION               us-east-1
+AWS_ACCESS_KEY_ID        an access key of the stack's <env>-dapilot-runner IAM user: consume the
+AWS_SECRET_ACCESS_KEY    queue, read and write the bucket, nothing else
+DAPILOT_QUEUE_URL        the dapilot FIFO queue (the stack's RunsQueueUrl output)
+DAPILOT_BUCKET           the bucket the seller stores live in (SellersBucketName output)
+DAPILOT_BACKEND_URL      where events go and per-seller values come from; the backend's Hono app is
+                         mounted under /api, so it ends in /api: https://staging-api.dapi.digital/api
+DAPILOT_BACKEND_TOKEN    the runner's service token; the backend holds the same value
 ```
 
 Per-seller values (the 3DAPI API key, Etsy keys and token, the fal key) are
-never task environment. The runner fetches them per job from the backend and
-writes them into that seller's store env file, which the plugin's own hook
+never container environment. The runner fetches them per job from the backend
+and writes them into that seller's store env file, which the plugin's own hook
 keeps the workers' tools away from.
 
-## Deploying on ECS Fargate
+## Deploying on Coolify
 
-The stack is `Dapilot-<env>` in the 3dapi CDK app
-(`infrastructure/cdk/lib/dapilot-stack.ts`); the image comes from this
-repository's `runner-image` workflow. First time, in this order:
+The AWS side is the stack `Dapilot-<env>` in the 3dapi CDK app
+(`infrastructure/cdk/lib/dapilot-stack.ts`): the FIFO queue and its
+dead-letter queue, the sellers bucket, an IAM user for the runner and grants
+for the backend's user. It stands alone and imports nothing from the slicer's
+stack. Staging first, production the same way afterwards.
 
-Staging is not deployed to AWS (decided 2026-10-20: it runs on a laptop
-against directories); production is the only environment on the cluster.
+1. **Deploy the stack, and only it.** From `3dapi/infrastructure/cdk`:
+   `npm install`, `npx cdk diff Dapilot-staging --exclusively --context env=staging`,
+   read it, then the same command with `deploy`. Note the `RunsQueueUrl`,
+   `SellersBucketName` and `RunnerUserName` outputs. `--exclusively` matters:
+   a plain deploy also deploys every stack the target depends on, from the
+   branch you are on, which is how production lost resources once
+   (2026-10-20).
+2. **Create the runner's access key** in the IAM console for the
+   `<env>-dapilot-runner` user. It is pasted into Coolify in the next step
+   and nowhere else.
+3. **The Coolify resource**, one instance:
+   - Source: this repository, at the release tag to run. Build pack
+     Dockerfile, Dockerfile location `runner/Dockerfile`, base directory `/`
+     (the image copies `plugins/dapilot` from the repository root; the root
+     `.dockerignore` keeps the context to that and `runner/`). Build
+     argument `DAPILOT_RELEASE` = the tag.
+   - No port, no domain, no health check URL. "Running" is the health check,
+     and the log is the report: one `ok` per check, `all checks passed`,
+     then `starting the queue consumer`. A `FAIL` line names what the image
+     is missing and the container exits.
+   - Environment: the table above.
+   - A persistent volume at `/data/dapilot`. The container runs as uid 1000
+     (`runner`); a volume created by an earlier root image needs
+     `chown -R 1000:1000` once.
+   - Memory limit about 3 GB on the shared host; the peaks are Chromium
+     rendering stills and up to three `claude -p` workers. Watch the first
+     real run; if it swaps, the runner moves to its own small instance.
+4. **The backend's side.** The same `DAPILOT_QUEUE_URL`, `DAPILOT_BUCKET` and
+   `DAPILOT_BACKEND_TOKEN` in that environment's backend, which already runs
+   as the IAM user the stack granted. The first message starts a run.
 
-1. **Deploy the stack with no tasks.** From `3dapi/infrastructure/cdk`:
-   `npm install`, then
-   `npx cdk deploy Dapilot-production --context env=production`. The
-   default desired count is 0, on purpose: a service whose tasks cannot
-   pull an image trips its circuit breaker and CloudFormation rolls the
-   whole stack creation back, registry included. It creates the registry,
-   the queues, the bucket, two empty secrets, the roles, the task
-   definition and an idle service. Note the `RunnerRepositoryUri` output.
-2. **Set the two secrets** once:
-   `aws secretsmanager put-secret-value --secret-id production/dapilot/anthropic-api-key --secret-string sk-ant-...`
-   and the same for `production/dapilot/backend-token` (any long random
-   string until the backend routes exist).
-3. **Push an image.** Tag a release (`vX.Y.Z`) so the `runner-image`
-   workflow builds it, which needs the `AWS_RUNNER_IMAGE_ROLE_ARN` secret,
-   an OIDC role allowed to push to `dapilot-runner`. Or by hand from a
-   machine with Docker: `aws ecr get-login-password | docker login ...`,
-   `docker build -f runner/Dockerfile --build-arg DAPILOT_RELEASE=$(git describe --tags --always) -t <RunnerRepositoryUri>:vX.Y.Z .`,
-   `docker push`.
-4. **Start one task on that image:**
-   `npx cdk deploy Dapilot-production --context env=production --context dapilotImageTag=vX.Y.Z --context dapilotDesiredCount=1`.
-   Two to four minutes later the log group `/ecs/production/dapilot-runner`
-   shows one `ok` per check ending in "all checks passed", including a real
-   WebGL render. A `FAIL` line names what the image is missing.
-5. **Switch to the consumer** once the backend serves the four routes: the
-   same command with `--context dapilotCommand=serve`. The task then
-   long-polls the queue and the first message starts a run. Until then,
-   `--context dapilotDesiredCount=0` stops paying for an idle task.
-
-The settings, and why:
-
-| Setting | Value | Why |
-|---|---|---|
-| CPU, memory | 2 vCPU, 8 GB | a run mostly waits on the model, the slicer and fal; the bursts are Chromium rendering and up to three workers |
-| Ephemeral storage | 60 GB | the seller's root is pulled whole and work dirs carry media |
-| Networking | public subnets, public IP, no inbound | the VPC has no NAT; the task needs S3, SQS, ECR, Anthropic, 3DAPI, Etsy and fal |
-| Capacity | one task, On-Demand | Spot after the SIGTERM path is seen to push a consistent root |
-| Stop timeout | 120 s | the consumer stops the director, pushes, and leaves the message |
-| Init process | on | the director and workers are child processes that get killed on their caps |
-| Queue | FIFO, group = seller id, visibility 5 min, DLQ after 3 | per-seller serialisation; a dead task's message reappears |
-| Bucket | private, SSL only, CORS for the dashboard origin | presigned PUT from the browser, presigned GET for renders |
-| Secrets | Anthropic key, backend token, from Secrets Manager | never in the task definition's plain environment |
-| Task role | consume the queue, read and write the bucket | nothing else |
+What is deliberately not here: no Fargate task, no ECR registry, no Secrets
+Manager. The first version of the stack had all three and was deployed to
+production once with zero tasks; the Coolify host made them unnecessary.
 
 ## Updating the plugin in production
 
-Release the plugin (`scripts/dev/release.sh`), build the image from that tag
-and push it to the registry; the service's task definition points at the
-tag. Read the changelog first: a release that changes what a stage writes
-changes what the dashboard reads.
+Release the plugin (`scripts/dev/release.sh`), then point the Coolify
+resource at the new tag and redeploy; Coolify rebuilds the image from it.
+Read the changelog first: a release that changes what a stage writes changes
+what the dashboard reads.
