@@ -87,7 +87,7 @@ export DAPILOT_STORE_DIR=/data/dapilot/trial
 
 ```
 ANTHROPIC_API_KEY        bills the workers the director spawns (DAPILOT_BILLING=api is baked in)
-AWS_REGION               us-east-1
+AWS_REGION               us-east-1 (the SDK's own name, AWS_DEFAULT_REGION, is accepted too)
 AWS_ACCESS_KEY_ID        an access key of the stack's <env>-dapilot-runner IAM user: consume the
 AWS_SECRET_ACCESS_KEY    queue, read and write the bucket, nothing else
 DAPILOT_QUEUE_URL        the dapilot FIFO queue (the stack's RunsQueueUrl output)

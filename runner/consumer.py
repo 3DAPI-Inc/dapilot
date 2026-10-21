@@ -32,7 +32,8 @@ Environment (the task definition sets these; nothing per seller is in them):
   DAPILOT_QUEUE_URL, DAPILOT_BUCKET, DAPILOT_BACKEND_URL, DAPILOT_BACKEND_TOKEN
   DAPILOT_DATA_DIR (default /data/dapilot), DAPILOT_PLUGIN_DIR, DAPILOT_PYTHON, CHROME
   ANTHROPIC_API_KEY   bills the workers; written into every seller's env file for the run
-  AWS_REGION          credentials come from the task role, never from the environment
+  AWS_REGION          the queue's and bucket's region (AWS_DEFAULT_REGION is read too); credentials come
+                      from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, the runner's own IAM user
 """
 from __future__ import annotations
 
@@ -55,6 +56,15 @@ HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DAPILOT_DATA_DIR") or "/data/dapilot")
 PLUGIN_DIR = Path(os.environ.get("DAPILOT_PLUGIN_DIR") or HERE.parent / "plugins" / "dapilot")
 PYTHON = os.environ.get("DAPILOT_PYTHON") or sys.executable
+def aws_region() -> str:
+    """The region for every AWS client. botocore reads only AWS_DEFAULT_REGION on its own; Coolify
+    resources and the README name AWS_REGION, so both are accepted and the error names them."""
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    if not region:
+        raise SystemExit("AWS_REGION is not set (us-east-1 for the dapilot queue and bucket)")
+    return region
+
+
 HEARTBEAT_S = 60          # how often the message's visibility is extended while a job runs
 VISIBILITY_S = 300        # by how much; a dead container stops extending and the message reappears
 WAIT_S = 20               # SQS long poll
@@ -95,7 +105,7 @@ class Bucket:
         self.s3 = None
         if local is None:
             import boto3  # only the task needs it; a laptop test does not
-            self.s3 = boto3.client("s3")
+            self.s3 = boto3.client("s3", region_name=aws_region())
 
     # -- listing
     def _remote(self, prefix: str) -> dict[str, int]:
@@ -405,7 +415,7 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
 
 def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
     import boto3
-    sqs = boto3.client("sqs")
+    sqs = boto3.client("sqs", region_name=aws_region())
     queue = os.environ["DAPILOT_QUEUE_URL"]
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

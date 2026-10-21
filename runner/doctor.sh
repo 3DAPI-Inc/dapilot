@@ -121,6 +121,15 @@ echo "all checks passed"
 
 case "${1:-}" in
   --serve)
+    # The consumer's settings, checked by name before it starts, so a missing one is a line in
+    # this log rather than a traceback from the AWS SDK.
+    missing=""
+    for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY DAPILOT_QUEUE_URL DAPILOT_BUCKET DAPILOT_BACKEND_URL DAPILOT_BACKEND_TOKEN; do
+      eval "val=\${$v:-}"; [ -n "$val" ] || missing="$missing $v"
+    done
+    [ -n "${AWS_REGION:-}${AWS_DEFAULT_REGION:-}" ] || missing="$missing AWS_REGION"
+    [ -z "$missing" ] || fail "environment not set:$missing"
+    ok "consumer settings present"
     echo "starting the queue consumer"
     exec "$DAPILOT_PYTHON" ./consumer.py serve ;;
   --hold)
