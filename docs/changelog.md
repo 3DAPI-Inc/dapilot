@@ -827,3 +827,8 @@ each carries its own date.
   stop event; `doctor.sh --serve` runs the triage self-test first and says
   so, or warns that nothing supervises. `supervisor.py serve` and
   `doctor.sh --supervise` stay as the standalone form.
+- **The image copies the supervisor** (2026-10-22, same evening). The
+  runner Dockerfile names the files it takes from `runner/`, and
+  `supervisor.py` and `triage.py` were not on the list, so the first
+  staging start with `DAPILOT_SUPERVISE_QUEUE_URL` set died in the doctor
+  on "can't open file triage.py". Both are copied now.
