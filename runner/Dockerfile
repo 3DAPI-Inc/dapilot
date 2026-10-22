@@ -101,8 +101,8 @@ RUN useradd --uid 1000 --create-home --shell /bin/sh runner \
     && chown -R runner:runner /data/dapilot /app
 
 WORKDIR /app/runner
-COPY --chown=runner:runner runner/doctor.sh runner/consumer.py ./
-RUN chmod 755 doctor.sh consumer.py
+COPY --chown=runner:runner runner/doctor.sh runner/consumer.py runner/supervisor.py runner/triage.py ./
+RUN chmod 755 doctor.sh consumer.py supervisor.py triage.py
 
 # The plugin's own environment names (docs/quickstart.md). CLAUDE_PLUGIN_ROOT is what the skills
 # use to find the scripts and the studio page; the director exports it to workers as well.
