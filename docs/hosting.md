@@ -254,25 +254,64 @@ An approval is a message: the backend writes `price.approved.json` into the
 seller's S3 prefix and enqueues `approve`; the runner pulls and runs the
 director again, which continues from design.
 
-## Retry agent (not built)
+## Supervisor (built 2026-10-22: `runner/supervisor.py` and `runner/triage.py`)
 
-Between reading the outcome and pushing, for each item that ended failed, the
-runner spawns one bounded `claude -p` with the failed marker, that worker's
-transcript file and the stage's expected outputs, and one question: is this
-transient, a wrong-shaped output, or something a person must answer. It
-returns one JSON line.
+A second queue, `<env>-dapilot-supervise` in the 3dapi CDK stack (standard,
+not FIFO, so one message can carry its own delay), wakes the supervisor: the
+backend sends one message per stage that stopped failed after it has stored
+the outcome, so the row is written first and a supervisor that is down loses
+nothing a person cannot still see. Blocked stages, a question for a person,
+are never sent. The supervisor is the runner image's second command
+(`doctor.sh --supervise`), its own Coolify resource, read-only on the store;
+it never sends to the runs queue itself. Before every decision it asks the
+backend for the run (`GET /internal/dapilot/runs/<id>`, flat: status and the
+stopped stages with the ledger's `retries` and `previous`), so a cancelled
+run and a stage that moved on are left alone whatever the message says. It
+has two answers and no third: a retry, through
+`POST /internal/dapilot/runs/<id>/retry`, which is the same message and
+event a seller's Try again sends with `by: supervisor` and the kind as the
+ledger's reason; or leave the stage as it is, as a `supervisor.left` event
+with the code, the sentence and what the stop waits for. A retry that should
+wait (a transient stop) goes back onto the supervise queue as the same body
+with `act: "retry"` and `not_before`, in hops of 900 s, the SQS ceiling,
+and the run is looked at again when the time comes. There is no escalate,
+because a stop it cannot make work is already on the dashboard exactly as
+it is.
 
-- transient or wrong output: the runner enqueues `retry` with its reason and
-  its name in `by`; the ledger's `retries` count on the stage record, next
-  to an unchanged `previous`, is what tells it a retry proved nothing.
-- person: the marker stays and the dashboard shows the question.
+The question it answers is not "is this bad" but "could the next attempt end
+differently". `runner/triage.py` holds that judgement as one class per kind
+of stop, each with the code a script may put in its result line (tier one),
+the text patterns for results without a code (tier two), and its policy:
 
-Turn cap, dollar cap, no Agent tool, plugin read-only, so it cannot loop and
-cannot edit anything but the marker. It lives in the runner, outside the
-director's loop. An agent orchestrator in place of the Python director was
-considered and dropped on 2026-10-16, and so was LangGraph on 2026-10-20:
-both would re-express the ledger's semantics and the second would need every
-skill ported out of Claude Code.
+- `config.*` (a value missing, a key refused): never on a timer; a retry only
+  when the seller's configuration fingerprint moved since the stop.
+- `upstream.transient`: retries spaced 2, 10 and 60 minutes apart, then left.
+- `upstream.quota`: one retry after the window, then left.
+- `content.*` (the file, the market): never; the same bytes fail the same way.
+- `worker.*` (malformed result, out of time): one retry with the reason in
+  the brief, which is the one retry the hierarchy already allows.
+- `runtime.tool_missing`: never; the image is wrong.
+- `blocked`: a question a stage asked a person; a retry is not an answer.
+- `unknown`: left and logged; the log is where new codes and patterns come from.
+
+The ledger's `retries` count next to an unchanged `previous` is what tells it
+a retry proved nothing. `triage.py selftest` runs the fixture table of real
+reasons and must pass before a pattern or a policy changes; `doctor.sh
+--supervise` runs it before the supervisor starts. The model is not in the
+first version; the `unknown` bucket's log says whether it is needed.
+
+The `changed` flag on a message is the backend's, not the supervisor's: the
+backend hashes what a config stop depends on (Etsy connected, the dapilot
+key, the platform keys present, the public API, its own build) and sends the
+open config stops again with the current hash when the backend starts and
+when a seller connects an integration. A change made only on the runner is
+not seen until the next backend start or a person's Try again.
+
+An agent orchestrator in place of the Python director was considered and
+dropped on 2026-10-16, and so was LangGraph on 2026-10-20: both would
+re-express the ledger's semantics and the second would need every skill
+ported out of Claude Code. The supervisor sits outside the director's loop
+for the same reason.
 
 ## Plugin work hosting needs first
 

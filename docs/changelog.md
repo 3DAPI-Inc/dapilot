@@ -795,3 +795,27 @@ each carries its own date.
   next pull, and posts the ledger's verdict in `stage.retried`. Tested by
   hand through failed, blocked, rm and the refusals, and end to end with
   the consumer against local directories and a dry-run director.
+- **Triage for the supervisor** (2026-10-22). `runner/triage.py`: one class
+  per kind of stop, each with the code a script may put in its result line,
+  the text patterns for results without one, and its policy, answering the
+  only question the supervisor asks: could the next attempt end differently.
+  Config stops wait for the seller's configuration to change, transient
+  ones retry on a growing delay and then stop, content stops never retry,
+  worker stops get the one retry the hierarchy allows, blocked questions
+  wait for a person, and anything unmatched is left and logged. Twenty-six
+  real reasons from the staging runs of these two days are the fixture
+  table; `selftest` runs them. The supervise queue is in the 3dapi CDK
+  stack; the consumer that reads it and sends retries is next.
+- **The supervisor** (2026-10-22). `runner/supervisor.py`, the image's
+  second command (`doctor.sh --supervise`): one message per stage that
+  stopped failed, sent by the 3dapi backend after it stored the outcome on
+  a standard queue of its own; the supervisor asks the backend for the run
+  first (`GET /internal/dapilot/runs/<id>`), so a cancelled run or a stage
+  that moved on is left alone, then triage decides: a retry through the
+  backend's `POST .../retry` (the same message and event as a seller's Try
+  again, `by: supervisor`), a delayed copy of the message back on its queue
+  for a transient stop, or a `supervisor.left` event with the code and what
+  the stop waits for. The receive, heartbeat, delete loop moved out of
+  `consumer.serve` into `consumer.poll`, shared by both commands. Tested by
+  hand against a directory: left, retried on change, scheduled and waited
+  out, cancelled, moved on.

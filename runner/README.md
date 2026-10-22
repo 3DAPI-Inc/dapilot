@@ -35,6 +35,20 @@ its exit code and the files it writes.
   pushes the root back with the secrets excluded, and deletes the message.
   The plugin sees a directory and a command, nothing else; the consumer
   never imports it.
+- `triage.py`: the supervisor's judgement, one class per kind of stop with
+  its code, its text patterns and its policy; `triage.py selftest` checks
+  the fixture table of real reasons, `triage.py classify "<reason>"` shows
+  one decision. Stdlib only.
+- `supervisor.py`: the second command of this image (`doctor.sh
+  --supervise`, its own Coolify resource with `DAPILOT_SUPERVISE_QUEUE_URL`,
+  the backend URL and token, and the runner user's key). Reads one message
+  per stopped stage, looks at the run through the backend, lets triage
+  decide, and answers with the backend's retry route, a delayed copy of the
+  message on its own queue, or a `supervisor.left` event. Never touches the
+  bucket or a store. `once --message FILE --local-backend DIR` runs one
+  message against a directory: `run.json` is what the backend would answer,
+  and retries, events and re-queued messages land in `retries.jsonl`,
+  `events.jsonl` and `requeued.jsonl` there.
 - `requirements.txt`: boto3, the AWS SDK for Python, installed into the same
   venv as the plugin's packages.
 

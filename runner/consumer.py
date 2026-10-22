@@ -435,10 +435,13 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
 
 # ------------------------------------------------------------------ the loop
 
-def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
+def poll(queue: str, handler, label: str = "job") -> int:
+    """The receive, heartbeat, handle, delete loop, shared with the supervisor (supervisor.py): one message
+    at a time, its visibility extended while the handler runs, deleted when the handler returns (done or
+    final-for-a-person, both are final), left for redelivery when the handler raises (three of those send
+    it to the dead-letter queue), and left unacknowledged on SIGTERM so the next process takes it."""
     import boto3
     sqs = boto3.client("sqs", region_name=aws_region())
-    queue = os.environ["DAPILOT_QUEUE_URL"]
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -460,18 +463,23 @@ def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
             threading.Thread(target=heartbeat, daemon=True).start()
             try:
                 body = json.loads(msg["Body"])
-                result = handle(body, backend, bucket, extra_args, stop)
+                result = handler(body, stop)
                 if stop.is_set():
                     log("stopping with the message unacknowledged; it reappears for the next task")
                     return 0
                 if not result.get("ok"):
-                    log(f"job ended not ok: {result.get('reason') or result.get('summary', {}).get('exit')}")
-                sqs.delete_message(QueueUrl=queue, ReceiptHandle=handle_id)   # done or failed-for-a-person: both are final
-            except Exception as e:  # noqa: BLE001  a crash leaves the message; three of them send it to the dead-letter queue
-                log(f"job crashed, message left for redelivery: {e!r}")
+                    log(f"{label} ended not ok: {result.get('reason') or result.get('summary', {}).get('exit')}")
+                sqs.delete_message(QueueUrl=queue, ReceiptHandle=handle_id)
+            except Exception as e:  # noqa: BLE001
+                log(f"{label} crashed, message left for redelivery: {e!r}")
             finally:
                 beat.set()
     return 0
+
+
+def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
+    return poll(os.environ["DAPILOT_QUEUE_URL"],
+                lambda body, stop: handle(body, backend, bucket, extra_args, stop))
 
 
 def main() -> int:
