@@ -779,3 +779,19 @@ each carries its own date.
   copies of the plugin sends headless workers to whichever one they find
   (a clean `CLAUDE_CONFIG_DIR` for the workers fixed it here; the container
   has one copy).
+- **A retry is a ledger verb** (2026-10-22). The hosted Try again did
+  nothing: the consumer removed the failed marker and resumed the same run,
+  whose `state.json` still said failed, and the ledger only re-read markers
+  for stages it had as queued. `ledger.py retry --run --item --stage
+  [--reason --by]` now clears the marker, failed or blocked alike, and
+  queues the stage in that run with fresh attempts, keeping what it ended
+  with as `previous` and counting `retries` on the record, so a supervisor
+  that sees the same `previous` behind a growing count knows the retry
+  changed nothing. A failed or blocked record whose marker is gone is
+  queued again on the next refresh, so `rm` works as the marker's own text
+  says. The consumer calls the verb for a `retry` message (new optional
+  `reason` and `by`), deletes the cleared marker from the bucket too, since
+  `push` never deletes and a marker cleared only locally came back on the
+  next pull, and posts the ledger's verdict in `stage.retried`. Tested by
+  hand through failed, blocked, rm and the refusals, and end to end with
+  the consumer against local directories and a dry-run director.

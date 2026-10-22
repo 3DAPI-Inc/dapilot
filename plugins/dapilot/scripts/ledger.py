@@ -9,6 +9,8 @@ never edits state.json by hand.
   ledger.py record --run ID --result FILE|- [--tokens N --model M]
   ledger.py status --run ID
   ledger.py report --run ID                                   write runs/ID/report.md
+  ledger.py retry  --run ID --item HASH --stage S [--reason T --by NAME]
+                                                              take a stopped stage up again
 
 Layout: <root>/work/<sha256>/ per item, <root>/runs/<ID>/state.json per run.
 <root> is DAPILOT_PROJECT_DIR, else CLAUDE_PROJECT_DIR, else cwd. Config is
@@ -29,6 +31,16 @@ marker (the console's Try again, or rm), no run dispatches that stage again.
 Before the marker, failure lived only in one run's state.json and every
 resume re-bought it. A marker is cleared by the ledger itself when the
 stage's outputs turn up on disk.
+
+Taking a stopped stage up again is `retry` (2026-10-22): it clears the
+stage's marker and queues the stage in the named run with fresh attempts,
+keeping what it ended with as `previous` and counting the retry on the
+record, so a retry is a ledger fact with a reason and not an rm. The run's
+own state used to outlive the marker: a stage the run had recorded as
+failed or blocked stayed so after the marker was removed, which made a
+retry under the same run id a no-op (seen on the hosted runner 2026-10-21).
+Now a failed or blocked record whose marker is gone is queued again on the
+next refresh, so rm still works as the marker says it does.
 """
 from __future__ import annotations
 
@@ -191,6 +203,17 @@ def write_marker(wd: Path, stage: str, kind: str, run: str, attempt: int, text: 
 def clear_markers(wd: Path, stage: str) -> None:
     for kind in MARKERS:
         marker(wd, stage, kind).unlink(missing_ok=True)
+
+
+def requeue(rec: dict, why: str) -> None:
+    """A stopped stage queued again with fresh attempts. What it ended with stays as `previous`, so the
+    next brief carries it, and `retries` counts how often this happened: a supervisor reading the same
+    `previous` behind a growing count knows the retry proved nothing."""
+    prior = rec.get("reason") or rec.get("question") or rec.get("previous")
+    for k in ("reason", "question", "summary", "finished", "dispatched", "agent", "cached"):
+        rec.pop(k, None)
+    rec.update({"status": "queued", "attempt": 0, "previous": prior,
+                "retries": int(rec.get("retries") or 0) + 1, "retried": now(), "retried_why": why})
 
 
 def unfinished(wd: Path, stages: dict) -> bool:
@@ -359,6 +382,11 @@ def refresh(state: dict, stages: dict) -> None:
                     rec["status"] = kind
                     rec[("question" if kind == "blocked" else "reason")] = doc.get("question") or doc.get("reason") or f"{kind} in run {doc.get('run')}"
                     rec["summary"] = rec.get("summary") or f"{kind} in run {doc.get('run')}, held by {marker(wd, st['stage'], kind).name}"
+            elif rec["status"] in MARKERS and not read_marker(wd, st["stage"]):
+                # The marker is the fact and it is gone: someone cleared it (rm, or `retry` on another run's
+                # state), so this run takes the stage up again instead of remembering the stop forever.
+                requeue(rec, "marker cleared")
+                state["notes"].append(f"{now()} {h[:8]} {st['stage']}: marker cleared; queued again")
 
 
 def ready_briefs(state: dict, stages: dict) -> list[dict]:
@@ -505,6 +533,45 @@ def cmd_status(a) -> int:
                 "over_budget": over, "work_left": (ready + r["running"]) > 0 and not over})
 
 
+# ----------------------------------------------------------------- retry
+
+def cmd_retry(a) -> int:
+    """A person, the console or the hosted runner takes a stopped stage up again: the stage's marker is
+    cleared and its record in this run is queued with fresh attempts (`requeue`). The next `next` dispatches
+    it, with what it ended with as `previous`. Refused while a live worker holds the item, for a stage the
+    table does not know, and for a stage that is done: outputs are never regenerated from here; a person
+    deletes them to force a redo. A stage with no marker and no record in this run is nothing to retry."""
+    wd = root() / "work" / a.item
+    if not (wd / "meta.json").exists():
+        return out({"ok": False, "reason": f"no such item: {a.item}"}, 1)
+    state_p = run_dir(a.run) / "state.json"
+    state = json.loads(state_p.read_text()) if state_p.exists() else None
+    stages = load_stages(state.get("stages_file") if state else None)
+    if a.stage not in {s["stage"] for s in stages["stages"]}:
+        return out({"ok": False, "reason": f"unknown stage {a.stage!r}"}, 1)
+    if (wd / ".lock").exists() and not lock_is_stale(wd):
+        return out({"ok": False, "reason": "a worker holds this item; retry when its stage ends"}, 1)
+    rec = ((state or {}).get("items", {}).get(a.item) or {}).get("stages", {}).get(a.stage)
+    was = rec["status"] if rec else None
+    if was == "done":
+        return out({"ok": False, "reason": f"{a.stage} is done on this item; delete its outputs to redo it"}, 1)
+    cleared = [marker(wd, a.stage, kind).name for kind in MARKERS if marker(wd, a.stage, kind).exists()]
+    if not cleared and was not in MARKERS:
+        return out({"ok": False, "reason": f"nothing to retry: {a.stage} has no marker and is {was or 'not in this run'}"}, 1)
+    clear_markers(wd, a.stage)
+    who = f"{a.by}: " if a.by else ""
+    why = f"{who}{a.reason or 'retry'}"
+    retries = None
+    if rec is not None:
+        requeue(rec, why)
+        retries = rec["retries"]
+    if state is not None:
+        state.setdefault("notes", []).append(
+            f"{now()} {a.item[:8]} {a.stage}: retried ({why}); was {was or 'unrecorded'}; cleared {cleared or 'no marker'}")
+        save_state(state)
+    return out({"ok": True, "run": a.run, "item": a.item, "stage": a.stage, "was": was, "cleared": cleared, "retries": retries})
+
+
 # ---------------------------------------------------------------- report
 
 def cmd_report(a) -> int:
@@ -560,6 +627,10 @@ def main() -> int:
     s.add_argument("--model"); s.set_defaults(fn=cmd_record)
     s = sub.add_parser("status"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_status)
     s = sub.add_parser("report"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_report)
+    s = sub.add_parser("retry", help="clear a stage's marker and queue it again in this run with fresh attempts")
+    s.add_argument("--run", required=True); s.add_argument("--item", required=True, help="the work-dir hash")
+    s.add_argument("--stage", required=True); s.add_argument("--reason", help="why a retry could end differently")
+    s.add_argument("--by", help="who asked: a person's name, or the supervisor"); s.set_defaults(fn=cmd_retry)
     a = ap.parse_args()
     try:
         return a.fn(a)

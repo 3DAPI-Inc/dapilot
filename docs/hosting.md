@@ -209,7 +209,8 @@ Message body, ids and keys only, never files:
 
 ```json
 { "kind": "run" | "approve" | "retry", "seller": "<uuid>", "run": "<id>",
-  "keys": ["<s3 key of each uploaded model>"], "item": "<hash>", "stage": "<stage>" }
+  "keys": ["<s3 key of each uploaded model>"], "item": "<hash>", "stage": "<stage>",
+  "reason": "<retry only, optional: why it could end differently>", "by": "<optional: who asked>" }
 ```
 
 ## The consumer (built: `runner/consumer.py`; run on a laptop, never against AWS)
@@ -218,8 +219,13 @@ Python with boto3, the same language as everything else in this repository.
 `serve` polls the queue; `once --message FILE --local-bucket DIR
 --local-backend DIR` handles one message with directories standing in for
 S3 and the backend, which is how it was tested on 2026-10-20 with a dry-run
-director (`runner/README.md` has the commands). The approve and retry paths
-are written and untested: they need a run that reached the gate. Per message:
+director (`runner/README.md` has the commands). The approve path ran against
+the staging queue on 2026-10-21. The retry path is `ledger.py retry` since
+2026-10-22: it clears the stage's marker, failed or blocked, queues the stage
+in the same run with fresh attempts and the message's reason on the record,
+and the runner deletes the marker from the bucket as well, because `push`
+never deletes and a marker cleared only locally came back on the next pull.
+Per message:
 
 1. **Receive** by long poll, one message at a time.
 2. **Heartbeat.** Extend the message's visibility every minute while the job
@@ -256,9 +262,9 @@ transcript file and the stage's expected outputs, and one question: is this
 transient, a wrong-shaped output, or something a person must answer. It
 returns one JSON line.
 
-- transient or wrong output: the runner deletes the marker (what the
-  console's "Try again" does) and enqueues `retry`, at most once per item per
-  stage.
+- transient or wrong output: the runner enqueues `retry` with its reason and
+  its name in `by`; the ledger's `retries` count on the stage record, next
+  to an unchanged `previous`, is what tells it a retry proved nothing.
 - person: the marker stays and the dashboard shows the question.
 
 Turn cap, dollar cap, no Agent tool, plugin read-only, so it cannot loop and

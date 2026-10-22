@@ -1,7 +1,7 @@
 {
   "name": "dapilot",
   "displayName": "dapilot",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Skills that run a 3D print shop on the 3DAPI platform through its public API.",
   "author": {
     "name": "3DAPI",

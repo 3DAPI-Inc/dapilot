@@ -29,7 +29,8 @@ its exit code and the files it writes.
   `$DAPILOT_DATA_DIR/<seller>`, seeds the store from the plugin's templates
   on first use, writes the store's env file from the seller's credentials
   and the plan limits into its config, runs `run_intake.py` (or
-  `approve_price.py` then the director, for an approval), posts one event
+  `approve_price.py` then the director for an approval, `ledger.py retry`
+  then the director for a retry of a failed or blocked stage), posts one event
   per director log line, reads the outcome from the ledger and the markers,
   pushes the root back with the secrets excluded, and deletes the message.
   The plugin sees a directory and a command, nothing else; the consumer

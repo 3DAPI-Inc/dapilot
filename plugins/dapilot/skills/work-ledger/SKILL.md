@@ -14,7 +14,8 @@ work/<sha256>/          one model, forever, whatever it was called on upload
   log.md                one paragraph per stage
   .lock                 present while a worker holds the dir
   <stage>.failed.json   the ledger's marker: the stage failed (or .blocked.json: asked a
-                        person); no run dispatches it until a person clears the file
+                        person); no run dispatches it until a person clears it with
+                        ledger.py retry (the console's Try again), or rm
 runs/<id>/
   state.json            written only by ledger.py
   report.md             written only by ledger.py report
@@ -55,6 +56,11 @@ $PY ledger.py report --run $RUN            # writes report.md
 - Never edit `state.json`. Never delete an output. Never remove a `.lock`
   younger than its stage's `minutes_per_stage` (else `max_worker_minutes`);
   the ledger handles stale ones.
+- Never take a stopped stage up again. `ledger.py retry --run $RUN --item H
+  --stage S [--reason T --by NAME]` exists for a person, the console and the
+  hosted runner: it clears the marker and queues the stage with fresh
+  attempts, with the reason on the record. A lead or worker that calls it is
+  the loop the guardrails forbid.
 
 ## Everyone
 
