@@ -130,11 +130,18 @@ case "${1:-}" in
     [ -n "${AWS_REGION:-}${AWS_DEFAULT_REGION:-}" ] || missing="$missing AWS_REGION"
     [ -z "$missing" ] || fail "environment not set:$missing"
     ok "consumer settings present"
+    if [ -n "${DAPILOT_SUPERVISE_QUEUE_URL:-}" ]; then
+      # The consumer runs the supervisor's loop in a second thread when this is set; its judgement
+      # must hold before a single decision is made.
+      "$DAPILOT_PYTHON" ./triage.py selftest >/dev/null && ok "triage self-test passed; supervising in this container" || fail "triage self-test failed"
+    else
+      echo "warn  DAPILOT_SUPERVISE_QUEUE_URL not set; stopped stages are not supervised"
+    fi
     echo "starting the queue consumer"
     exec "$DAPILOT_PYTHON" ./consumer.py serve ;;
   --supervise)
-    # The same image as its own Coolify resource: the supervisor reads the supervise queue and talks
-    # only to the backend. No bucket, no store, no runs queue.
+    # The supervisor alone, as its own process: for splitting it from the runner later, or a laptop.
+    # Normally not needed: --serve runs it inside the consumer when DAPILOT_SUPERVISE_QUEUE_URL is set.
     missing=""
     for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY DAPILOT_SUPERVISE_QUEUE_URL DAPILOT_BACKEND_URL DAPILOT_BACKEND_TOKEN; do
       eval "val=\${$v:-}"; [ -n "$val" ] || missing="$missing $v"

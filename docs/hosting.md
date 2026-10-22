@@ -261,9 +261,12 @@ not FIFO, so one message can carry its own delay), wakes the supervisor: the
 backend sends one message per stage that stopped failed after it has stored
 the outcome, so the row is written first and a supervisor that is down loses
 nothing a person cannot still see. Blocked stages, a question for a person,
-are never sent. The supervisor is the runner image's second command
-(`doctor.sh --supervise`), its own Coolify resource, read-only on the store;
-it never sends to the runs queue itself. Before every decision it asks the
+are never sent. The supervisor runs inside the runner's container: when
+`DAPILOT_SUPERVISE_QUEUE_URL` is set, `consumer.serve` starts its loop in a
+second thread, so the one Coolify resource does both and the only setup is
+that variable (`doctor.sh --supervise` runs it alone, for a laptop or for
+splitting the two later). It is read-only on the store and never sends to
+the runs queue itself. Before every decision it asks the
 backend for the run (`GET /internal/dapilot/runs/<id>`, flat: status and the
 stopped stages with the ledger's `retries` and `previous`), so a cancelled
 run and a stage that moved on are left alone whatever the message says. It
