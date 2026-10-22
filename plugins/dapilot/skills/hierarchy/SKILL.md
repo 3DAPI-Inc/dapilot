@@ -58,3 +58,12 @@ You ask your direct superior, nobody else, and only in the result line:
 
 A lead that cannot resolve a worker's problem passes it up the same way.
 The director puts it in the report. Nobody loops on a problem.
+
+Outside the run there is one more reader of the report: on the hosted
+platform a supervisor (`runner/supervisor.py`, judgement in
+`runner/triage.py`) looks at each stage that stopped failed and takes it up
+again through `ledger.py retry` only when the next attempt could end
+differently: a platform that was overloaded, a configuration that changed, a
+worker that may be given the reason once. It never acts inside a run, never
+answers a `needs_human` question, and never retries a stage whose reason has
+not changed. For you nothing changes: you ask upward, once, and stop.

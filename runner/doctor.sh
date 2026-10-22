@@ -132,6 +132,18 @@ case "${1:-}" in
     ok "consumer settings present"
     echo "starting the queue consumer"
     exec "$DAPILOT_PYTHON" ./consumer.py serve ;;
+  --supervise)
+    # The same image as its own Coolify resource: the supervisor reads the supervise queue and talks
+    # only to the backend. No bucket, no store, no runs queue.
+    missing=""
+    for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY DAPILOT_SUPERVISE_QUEUE_URL DAPILOT_BACKEND_URL DAPILOT_BACKEND_TOKEN; do
+      eval "val=\${$v:-}"; [ -n "$val" ] || missing="$missing $v"
+    done
+    [ -n "${AWS_REGION:-}${AWS_DEFAULT_REGION:-}" ] || missing="$missing AWS_REGION"
+    [ -z "$missing" ] || fail "environment not set:$missing"
+    "$DAPILOT_PYTHON" ./triage.py selftest >/dev/null && ok "triage self-test passed" || fail "triage self-test failed"
+    echo "starting the supervisor"
+    exec "$DAPILOT_PYTHON" ./supervisor.py serve ;;
   --hold)
     echo "holding"
     exec sleep infinity ;;

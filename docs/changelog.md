@@ -779,3 +779,43 @@ each carries its own date.
   copies of the plugin sends headless workers to whichever one they find
   (a clean `CLAUDE_CONFIG_DIR` for the workers fixed it here; the container
   has one copy).
+- **A retry is a ledger verb** (2026-10-22). The hosted Try again did
+  nothing: the consumer removed the failed marker and resumed the same run,
+  whose `state.json` still said failed, and the ledger only re-read markers
+  for stages it had as queued. `ledger.py retry --run --item --stage
+  [--reason --by]` now clears the marker, failed or blocked alike, and
+  queues the stage in that run with fresh attempts, keeping what it ended
+  with as `previous` and counting `retries` on the record, so a supervisor
+  that sees the same `previous` behind a growing count knows the retry
+  changed nothing. A failed or blocked record whose marker is gone is
+  queued again on the next refresh, so `rm` works as the marker's own text
+  says. The consumer calls the verb for a `retry` message (new optional
+  `reason` and `by`), deletes the cleared marker from the bucket too, since
+  `push` never deletes and a marker cleared only locally came back on the
+  next pull, and posts the ledger's verdict in `stage.retried`. Tested by
+  hand through failed, blocked, rm and the refusals, and end to end with
+  the consumer against local directories and a dry-run director.
+- **Triage for the supervisor** (2026-10-22). `runner/triage.py`: one class
+  per kind of stop, each with the code a script may put in its result line,
+  the text patterns for results without one, and its policy, answering the
+  only question the supervisor asks: could the next attempt end differently.
+  Config stops wait for the seller's configuration to change, transient
+  ones retry on a growing delay and then stop, content stops never retry,
+  worker stops get the one retry the hierarchy allows, blocked questions
+  wait for a person, and anything unmatched is left and logged. Twenty-six
+  real reasons from the staging runs of these two days are the fixture
+  table; `selftest` runs them. The supervise queue is in the 3dapi CDK
+  stack; the consumer that reads it and sends retries is next.
+- **The supervisor** (2026-10-22). `runner/supervisor.py`, the image's
+  second command (`doctor.sh --supervise`): one message per stage that
+  stopped failed, sent by the 3dapi backend after it stored the outcome on
+  a standard queue of its own; the supervisor asks the backend for the run
+  first (`GET /internal/dapilot/runs/<id>`), so a cancelled run or a stage
+  that moved on is left alone, then triage decides: a retry through the
+  backend's `POST .../retry` (the same message and event as a seller's Try
+  again, `by: supervisor`), a delayed copy of the message back on its queue
+  for a transient stop, or a `supervisor.left` event with the code and what
+  the stop waits for. The receive, heartbeat, delete loop moved out of
+  `consumer.serve` into `consumer.poll`, shared by both commands. Tested by
+  hand against a directory: left, retried on change, scheduled and waited
+  out, cancelled, moved on.

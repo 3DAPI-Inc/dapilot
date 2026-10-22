@@ -16,12 +16,18 @@ Messages are ids and keys only, never files:
 
   {"kind": "run",     "seller": "<id>", "run": "<id>", "keys": ["intake/<seller>/<run>/<file>", ...]}
   {"kind": "approve", "seller": "<id>", "run": "<id>", "item": "<hash>", "price": 12.99, "by": "<name>"}
-  {"kind": "retry",   "seller": "<id>", "run": "<id>", "item": "<hash>", "stage": "<stage>"}
+  {"kind": "retry",   "seller": "<id>", "run": "<id>", "item": "<hash>", "stage": "<stage>",
+                      "reason": "<optional: why it could end differently>", "by": "<optional: who asked>"}
+
+A retry takes one stopped stage up again, failed or blocked alike (the dashboard's Try again and Continue,
+and the supervisor when it exists): `ledger.py retry` clears the marker and queues the stage in the same
+run with fresh attempts, the marker is deleted from the bucket as well (push never deletes, so a marker
+only cleared locally came back on the next pull, seen 2026-10-21), and the director continues from there.
 
 The plugin is never imported, patched or reached into. It sees a directory and a command: the root
 at $DAPILOT_DATA_DIR/<seller> (store/, work/, runs/, intake/), DAPILOT_STORE_DIR and
-DAPILOT_PROJECT_DIR pointing at it, and run_intake.py or approve_price.py as the plugin ships them.
-Anything the runner needs the plugin to do differently is a plugin feature, not a line here.
+DAPILOT_PROJECT_DIR pointing at it, and run_intake.py, approve_price.py or ledger.py as the plugin ships
+them. Anything the runner needs the plugin to do differently is a plugin feature, not a line here.
 
 The bucket and the backend are each behind one small class with an S3 or HTTP form and a local
 directory form, so the whole loop runs on a laptop with no AWS account: `once --local-bucket DIR
@@ -139,6 +145,15 @@ class Bucket:
             shutil.copyfile(src, dst)
         else:
             self.s3.upload_file(str(src), self.name, key)
+
+    def delete(self, key: str) -> None:
+        """One object, gone for good. `push` never deletes, on purpose: the root is a seller's store and
+        a missing local file is more often a failed pull than a decision. The one thing that is decided
+        away is a stage marker a retry cleared, and that is the only caller."""
+        if self.local is not None:
+            (self.local / key).unlink(missing_ok=True)
+        else:
+            self.s3.delete_object(Bucket=self.name, Key=key)
 
     def pull(self, prefix: str, root: Path) -> int:
         """Bring the seller's root down: files missing locally or of another size. Returns the count."""
@@ -391,12 +406,19 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
             return {"ok": False, "reason": f"approval refused: {verdict.get('reason')}", "outcome": outcome(root, run)}
         d.start(["--items", body["item"], "--run", run, *extra_args])
     elif kind == "retry":
-        wd = root / "work" / body["item"]
-        marker = wd / f"{body['stage']}.failed.json"
-        if marker.exists():
-            marker.unlink()                                  # what the console's Try again does
-        backend.event(seller, run, "stage.retried", item=body["item"], stage=body["stage"])
-        d.start(["--items", body["item"], "--run", run, *extra_args])
+        item, stage = body["item"], body["stage"]
+        cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "ledger.py"), "retry", "--run", run, "--item", item, "--stage", stage,
+               *(["--reason", str(body["reason"])] if body.get("reason") else []),
+               *(["--by", str(body["by"])] if body.get("by") else [])]
+        res = subprocess.run(cmd, cwd=root, env=plugin_env(root), capture_output=True, text=True)
+        verdict = next((json.loads(c) for c in _json_candidates(res.stdout) if c), {"ok": False, "reason": res.stderr[-300:]})
+        # The ledger cleared the marker on disk; the bucket still has it, and push never deletes.
+        for name in verdict.get("cleared") or []:
+            bucket.delete(f"sellers/{seller}/work/{item}/{name}")
+        backend.event(seller, run, "stage.retried", item=item, stage=stage, ok=bool(verdict.get("ok")), detail=verdict)
+        if res.returncode != 0 or not verdict.get("ok"):
+            return {"ok": False, "reason": f"retry refused: {verdict.get('reason')}", "outcome": outcome(root, run)}
+        d.start(["--items", item, "--run", run, *extra_args])
     else:
         return {"ok": False, "reason": f"unknown message kind {kind!r}"}
 
@@ -413,10 +435,13 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
 
 # ------------------------------------------------------------------ the loop
 
-def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
+def poll(queue: str, handler, label: str = "job") -> int:
+    """The receive, heartbeat, handle, delete loop, shared with the supervisor (supervisor.py): one message
+    at a time, its visibility extended while the handler runs, deleted when the handler returns (done or
+    final-for-a-person, both are final), left for redelivery when the handler raises (three of those send
+    it to the dead-letter queue), and left unacknowledged on SIGTERM so the next process takes it."""
     import boto3
     sqs = boto3.client("sqs", region_name=aws_region())
-    queue = os.environ["DAPILOT_QUEUE_URL"]
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -438,18 +463,23 @@ def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
             threading.Thread(target=heartbeat, daemon=True).start()
             try:
                 body = json.loads(msg["Body"])
-                result = handle(body, backend, bucket, extra_args, stop)
+                result = handler(body, stop)
                 if stop.is_set():
                     log("stopping with the message unacknowledged; it reappears for the next task")
                     return 0
                 if not result.get("ok"):
-                    log(f"job ended not ok: {result.get('reason') or result.get('summary', {}).get('exit')}")
-                sqs.delete_message(QueueUrl=queue, ReceiptHandle=handle_id)   # done or failed-for-a-person: both are final
-            except Exception as e:  # noqa: BLE001  a crash leaves the message; three of them send it to the dead-letter queue
-                log(f"job crashed, message left for redelivery: {e!r}")
+                    log(f"{label} ended not ok: {result.get('reason') or result.get('summary', {}).get('exit')}")
+                sqs.delete_message(QueueUrl=queue, ReceiptHandle=handle_id)
+            except Exception as e:  # noqa: BLE001
+                log(f"{label} crashed, message left for redelivery: {e!r}")
             finally:
                 beat.set()
     return 0
+
+
+def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
+    return poll(os.environ["DAPILOT_QUEUE_URL"],
+                lambda body, stop: handle(body, backend, bucket, extra_args, stop))
 
 
 def main() -> int:
