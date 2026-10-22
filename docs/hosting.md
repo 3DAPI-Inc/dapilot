@@ -116,7 +116,11 @@ that knows S3, SQS, other sellers or the backend exist.
 
 - `python:3.12-slim-bookworm`, with ffmpeg, Chromium and fonts from apt, the
   plugin's packages in a venv (`DAPILOT_PYTHON`), and the Claude Code CLI
-  through its own installer, pinned by `ARG CLAUDE_CODE_VERSION`.
+  as one native binary at `/usr/local/bin/claude`, pinned by
+  `ARG CLAUDE_CODE_VERSION`: the Dockerfile downloads it from Anthropic's
+  release bucket and checks it against the sha256 in that version's
+  manifest. The installer script is not used (it fetches the newest CLI
+  first, then installs the pinned one). Auto-update is off in the image.
 - The plugin is `COPY`'d from the checkout the image is built from, so the
   image for tag `vX.Y.Z` runs exactly that release. `ARG DAPILOT_RELEASE`
   records which, for doctor and the run events.

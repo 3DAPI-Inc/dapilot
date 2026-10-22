@@ -22,12 +22,16 @@ FROM ${PYTHON_IMAGE}
 # The Claude Code CLI the director spawns workers with (`claude -p`). Pinned so a CLI release
 # cannot change worker behaviour under a plugin release that was tested against another one.
 ARG CLAUDE_CODE_VERSION=2.1.304
+# Where Anthropic publishes the CLI's native binaries: <base>/<version>/manifest.json carries a
+# sha256 per platform and <base>/<version>/<platform>/claude is the binary. The same place
+# https://claude.ai/install.sh downloads from.
+ARG CLAUDE_DOWNLOADS=https://downloads.claude.ai/claude-code-releases
 # What the image carries, written to /opt/dapilot/.release for doctor.sh and the run events.
 ARG DAPILOT_RELEASE=dev
 
 # What the plugin's own setup_env.py installs on Linux, minus Blender (retired 2026-10-20: every
 # render is WebGL in headless Chromium from the studio page the plugin ships). ffmpeg encodes the
-# turntable; curl fetches the CLI; the fonts keep Chromium from drawing boxes in the studio page.
+# turntable; curl fetches the CLI binary; the fonts keep Chromium from drawing boxes in the studio page.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -44,6 +48,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN printf '#!/bin/sh\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage "$@"\n' \
       > /usr/local/bin/chromium-container \
     && chmod 755 /usr/local/bin/chromium-container
+
+### The Claude Code CLI, as one native binary
+# The binary for the pinned version, fetched straight from the release bucket and checked against
+# the sha256 the version's manifest names, placed at /usr/local/bin/claude. The installer script
+# (claude.ai/install.sh) is not used: it always fetches the newest CLI first and only then has that
+# one install the pinned version, which is two downloads of 280 MB where one does, and the build
+# then depends on a script that changes under it. The binary is root-owned and read-only like the
+# plugin, and the auto-updater is off: a worker could not replace it and must not try. The CLI
+# still keeps its state under the runtime user's ~/.claude.
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64|amd64) arch=x64 ;; \
+        aarch64|arm64) arch=arm64 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    platform="linux-${arch}"; \
+    curl -fsSL "${CLAUDE_DOWNLOADS}/${CLAUDE_CODE_VERSION}/manifest.json" -o /tmp/claude-manifest.json; \
+    checksum=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["platforms"][sys.argv[2]]["checksum"])' \
+        /tmp/claude-manifest.json "${platform}"); \
+    echo "${checksum}" | grep -Eq '^[0-9a-f]{64}$' || { echo "no sha256 for ${platform} in the manifest" >&2; exit 1; }; \
+    curl -fsSL "${CLAUDE_DOWNLOADS}/${CLAUDE_CODE_VERSION}/${platform}/claude" -o /usr/local/bin/claude; \
+    echo "${checksum}  /usr/local/bin/claude" | sha256sum -c - >/dev/null; \
+    chmod 755 /usr/local/bin/claude; \
+    rm /tmp/claude-manifest.json; \
+    claude --version
+ENV DISABLE_AUTOUPDATER=1
 
 ### The plugin, from this checkout
 COPY plugins/dapilot /opt/dapilot/plugins/dapilot
@@ -86,13 +116,7 @@ ENV CLAUDE_PLUGIN_ROOT=/opt/dapilot/plugins/dapilot \
     PYTHONUNBUFFERED=1
 
 USER runner
-ENV HOME=/home/runner \
-    PATH=/home/runner/.local/bin:$PATH
-
-# The CLI through its own installer, as the plugin's shop.sh does, pinned. It lives under the
-# runtime user's home, where the CLI also keeps its state (~/.claude).
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}" \
-    && claude --version
+ENV HOME=/home/runner
 
 # Where every seller's store directory lives during a run, one subdirectory per seller, each
 # pointed at through DAPILOT_STORE_DIR for that seller's jobs. Mount a volume here (the Coolify

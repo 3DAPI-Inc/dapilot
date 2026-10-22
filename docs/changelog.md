@@ -5,6 +5,18 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The runner image installs the CLI as a binary (2026-10-22).**
+  `runner/Dockerfile` downloads the pinned Claude Code release straight
+  from Anthropic's release bucket (`ARG CLAUDE_DOWNLOADS`), verifies the
+  sha256 from that version's `manifest.json`, and places it root-owned at
+  `/usr/local/bin/claude` before the runtime user exists. The installer
+  script at claude.ai/install.sh is no longer piped into bash: it always
+  downloaded the newest CLI first and had that one install the pinned
+  version, two 280 MB downloads for one, and a build that depended on a
+  script changing under it. `DISABLE_AUTOUPDATER=1` keeps the CLI from
+  trying to replace a binary it cannot write. The download and checksum
+  steps were run by hand on the dev Mac against 2.1.304; the image itself
+  builds at the next release tag.
 - **Intake is the first slice** (model file -> listed, priced, photographed
   product). Geometry analysis and rendering exist as scripts. Quoting is
   available through 3DAPI's public API. Listing creation needs a new public
