@@ -819,3 +819,11 @@ each carries its own date.
   `consumer.serve` into `consumer.poll`, shared by both commands. Tested by
   hand against a directory: left, retried on change, scheduled and waited
   out, cancelled, moved on.
+- **The supervisor lives in the runner's container** (2026-10-22, same
+  day). No second Coolify resource: `consumer.serve` starts the supervisor's
+  loop in a second thread of its own process when
+  `DAPILOT_SUPERVISE_QUEUE_URL` is set, both loops sharing one SIGTERM, so
+  the setup is that one variable on the runner. `poll` takes the shared
+  stop event; `doctor.sh --serve` runs the triage self-test first and says
+  so, or warns that nothing supervises. `supervisor.py serve` and
+  `doctor.sh --supervise` stay as the standalone form.

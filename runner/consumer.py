@@ -435,16 +435,25 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
 
 # ------------------------------------------------------------------ the loop
 
-def poll(queue: str, handler, label: str = "job") -> int:
-    """The receive, heartbeat, handle, delete loop, shared with the supervisor (supervisor.py): one message
-    at a time, its visibility extended while the handler runs, deleted when the handler returns (done or
-    final-for-a-person, both are final), left for redelivery when the handler raises (three of those send
-    it to the dead-letter queue), and left unacknowledged on SIGTERM so the next process takes it."""
-    import boto3
-    sqs = boto3.client("sqs", region_name=aws_region())
+def stop_on_signal() -> threading.Event:
+    """One event for every loop in this process, set by SIGTERM or SIGINT. Called from the main thread,
+    the only place Python lets a handler be installed."""
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
+    return stop
+
+
+def poll(queue: str, handler, label: str = "job", stop: threading.Event | None = None) -> int:
+    """The receive, heartbeat, handle, delete loop, shared with the supervisor (supervisor.py): one message
+    at a time, its visibility extended while the handler runs, deleted when the handler returns (done or
+    final-for-a-person, both are final), left for redelivery when the handler raises (three of those send
+    it to the dead-letter queue), and left unacknowledged on SIGTERM so the next process takes it. A caller
+    running several loops in one process passes the shared `stop`; alone, the loop installs its own."""
+    import boto3
+    sqs = boto3.client("sqs", region_name=aws_region())
+    if stop is None:
+        stop = stop_on_signal()
     log(f"polling {queue}")
     while not stop.is_set():
         res = sqs.receive_message(QueueUrl=queue, MaxNumberOfMessages=1, WaitTimeSeconds=WAIT_S,
@@ -478,8 +487,21 @@ def poll(queue: str, handler, label: str = "job") -> int:
 
 
 def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
+    """The runs queue in this thread and, when DAPILOT_SUPERVISE_QUEUE_URL is set, the supervisor's loop
+    in a second one: the same container, the same credentials, one SIGTERM for both. The supervisor is
+    read-only on the store and talks only to the backend, so it has nothing to share with a job beyond
+    the process. Without the variable the runner behaves as before and nothing supervises."""
+    stop = stop_on_signal()
+    supervise_url = os.environ.get("DAPILOT_SUPERVISE_QUEUE_URL")
+    if supervise_url:
+        from supervisor import SelfQueue, SupervisorBackend, handle as supervise   # same directory, imported late: supervisor imports this module
+        sup_backend = SupervisorBackend(backend.url, backend.token, backend.local)
+        sup_queue = SelfQueue(supervise_url, None)
+        threading.Thread(target=poll, args=(supervise_url, lambda body, _stop: supervise(body, sup_backend, sup_queue), "decision", stop),
+                         name="supervisor", daemon=True).start()
+        log("supervising in this container as well")
     return poll(os.environ["DAPILOT_QUEUE_URL"],
-                lambda body, stop: handle(body, backend, bucket, extra_args, stop))
+                lambda body, stop_: handle(body, backend, bucket, extra_args, stop_), "job", stop)
 
 
 def main() -> int:

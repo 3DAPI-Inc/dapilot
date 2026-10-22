@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""The supervisor: the second command in the runner image, one decision per stopped stage.
+"""The supervisor: one decision per stopped stage, run inside the runner's container.
 
-  supervisor.py serve                                        poll the supervise queue forever (doctor.sh --supervise)
+  supervisor.py serve                                        poll the supervise queue forever, as its own process
   supervisor.py once --message FILE [--local-backend DIR]    handle one message from a JSON file, for a laptop test
+
+Where it runs: the runner's consumer starts this module's loop in a second thread of its own process when
+DAPILOT_SUPERVISE_QUEUE_URL is set (consumer.serve), so the one Coolify resource does both and the only
+setup is that variable. `serve` here is the standalone form, for a laptop or for splitting the two apart
+later; `doctor.sh --supervise` runs it.
 
 What wakes it (docs/hosting.md, "Supervisor"): one message per stage that stopped failed, sent by the
 3dapi backend after it has stored the outcome, so the row always holds the failure before anyone acts:
