@@ -72,6 +72,13 @@ for captures. The script fails with a one-line reason when one is missing.
    config; `ok:false` with the error.
 5. Run, with a Bash timeout of 600000 ms:
    `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py produce --workdir $WORKDIR`
+   Run it as soon as `check` passed. The `USD budget: $x/$y` line in your
+   reminders is your own token spend, not the asset cap: fal spend never
+   counts against it, `check` has already held the plan against
+   `design.usd_cap_per_item`, and the script refuses anything over the cap
+   itself. Never skip `produce`, block, or answer "budget too low" because
+   the plan's cost is near or above that line (a 2026-10-23 run did, at
+   0.10 USD spent).
    - Exit 0: continue.
    - Exit 3: the deadline passed with a capture or a fal request still
      running. Run the same command again, at most 5 runs in all. Nothing is

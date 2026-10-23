@@ -250,9 +250,23 @@ Per message:
 Poison messages land in the dead-letter queue and the backend marks the run
 as needing someone, with the last error attached.
 
-An approval is a message: the backend writes `price.approved.json` into the
-seller's S3 prefix and enqueues `approve`; the runner pulls and runs the
-director again, which continues from design.
+An approval is a message: the backend enqueues `approve`, the runner pulls
+the seller's root and runs the plugin's `approve_price.py` on the item (the
+floor check and `price.approved.json` are the plugin's), then the director
+again, which continues from design. The gate is answered once: the backend
+marks the item's gate answered on the run row before it sends the message,
+in one conditional update, so a second click or a changed price is refused
+until the runner has refused the first (2026-10-23; before that the buttons
+stayed live for the whole design-to-publish run and a second approve was
+sent, which the plugin answered with the first price). A retry is locked the
+same way, per marker. The consumer is idempotent on what reaches it
+(2026-10-23): an approval already on disk starts nothing, a retry the ledger
+refuses starts nothing, and no director is started while
+`runs/<id>/director.alive` is fresh on the root; a job waits for the live one
+to end. The runner also writes the plugin template's `budget` block under the
+plan limits on every job, so a stage budget a release raised reaches sellers
+whose config was seeded earlier (the design worker's 1.50 USD of 2026-10-23
+was the old template value, frozen in S3).
 
 ## Supervisor (built 2026-10-22: `runner/supervisor.py` and `runner/triage.py`)
 

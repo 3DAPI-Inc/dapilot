@@ -10,7 +10,7 @@
   "usd_per_stage": {
    "research": 1.2,
    "price": 0.6,
-   "design": 1.5,
+   "design": 5.0,
    "copy": 0.8
   }
  },

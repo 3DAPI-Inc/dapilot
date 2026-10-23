@@ -256,17 +256,34 @@ def write_env(store: Path, values: dict[str, str]) -> None:
     p.chmod(0o600)
 
 
+def template_budget() -> dict:
+    """The plugin release's own `budget` block, from its config template. A seller's config.json is seeded
+    once and then persisted, so a stage budget the template raised later never reached an existing seller:
+    the design worker's 1.50 USD of 2026-10-23 was the template's old value, frozen in S3. Written under the
+    plan limits on every job, so the release's figures apply and the plan's still win."""
+    t = PLUGIN_DIR / "templates" / "config.example.json"
+    try:
+        return {"budget": json.loads(t.read_text()).get("budget") or {}}
+    except (OSError, ValueError):
+        return {}
+
+
 def write_limits(store: Path, limits: dict) -> None:
-    """Plan limits into config.json, top-level keys and `budget` merged; the plugin reads them as its own."""
+    """Plan limits into config.json, top-level keys and `budget` merged; the plugin reads them as its own.
+    Nested dicts merge one level down (`budget.usd_per_stage` keeps the keys a layer does not name)."""
     if not limits:
         return
     p = store / "config.json"
     cfg = json.loads(p.read_text()) if p.exists() else {}
-    for k, v in limits.items():
-        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-            cfg[k].update(v)
-        else:
-            cfg[k] = v
+
+    def merge(into: dict, src: dict) -> None:
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(into.get(k), dict):
+                merge(into[k], v)
+            else:
+                into[k] = v
+
+    merge(cfg, limits)
     p.write_text(json.dumps(cfg, indent=1))
 
 
@@ -284,7 +301,13 @@ def prepare(seller: str, backend: Backend, bucket: Bucket) -> Path:
     env = {**creds, "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""), "DAPILOT_BILLING": "api",
            "DAPILOT_PYTHON": PYTHON, "CHROME": os.environ.get("CHROME", "")}
     write_env(root / "store", env)
-    write_limits(root / "store", backend.limits(seller))
+    limits = template_budget()
+    for k, v in backend.limits(seller).items():
+        if isinstance(v, dict) and isinstance(limits.get(k), dict):
+            limits[k] = {**limits[k], **v}
+        else:
+            limits[k] = v
+    write_limits(root / "store", limits)
     log(f"{seller}: root ready at {root} ({pulled} files pulled)")
     return root
 
@@ -296,6 +319,43 @@ def plugin_env(root: Path) -> dict[str, str]:
 
 # ------------------------------------------------------------------ the director
 
+ALIVE_S = 30              # run_intake.py rewrites runs/<id>/director.alive every 5 s; older than this it is dead
+DIRECTOR_WAIT_S = 3600    # how long a job waits for a live director on the same root before starting its own
+
+
+def live_director(root: Path) -> dict | None:
+    """The run whose director is alive on this root now, or None: the file approve_price.py and the plugin's
+    monitor trust, aged the same way (a crash leaves it to age out). One root, one director: the plugin's
+    ledger and the S3 sync both assume a single writer, so a second one here is never started beside it."""
+    runs = root / "runs"
+    if not runs.is_dir():
+        return None
+    now_t = time.time()
+    for rd in runs.iterdir():
+        alive = rd / "director.alive"
+        try:
+            age = now_t - alive.stat().st_mtime
+        except OSError:
+            continue
+        if age <= ALIVE_S:
+            return {"run": rd.name, "age_s": int(age)}
+    return None
+
+
+def wait_for_director(root: Path, stop: threading.Event, label: str) -> bool:
+    """Blocks while a director lives on the root. The message's visibility is kept by the heartbeat
+    meanwhile. True when the root is free; False when the wait ran out or the process was told to stop."""
+    waited = 0
+    while (live := live_director(root)) is not None:
+        if waited == 0:
+            log(f"{label}: director of run {live['run']} is alive on this root; waiting for it to end")
+        if stop.is_set() or waited >= DIRECTOR_WAIT_S:
+            return False
+        stop.wait(5)
+        waited += 5
+    return True
+
+
 class Director:
     """One run_intake.py process: started, tailed into events, stopped on SIGTERM."""
 
@@ -304,6 +364,8 @@ class Director:
         self.proc: subprocess.Popen | None = None
 
     def start(self, args: list[str]) -> None:
+        if (live := live_director(self.root)) is not None:
+            raise RuntimeError(f"a director is alive on this root (run {live['run']}); not starting a second")
         cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "run_intake.py"), *args, "--billing", "api"]
         log(f"{self.seller}/{self.run}: {' '.join(cmd[2:])}")
         self.proc = subprocess.Popen(cmd, cwd=self.root, env=plugin_env(self.root), text=True,
@@ -385,8 +447,13 @@ def outcome(root: Path, run: str) -> dict:
 # ------------------------------------------------------------------ the handlers
 
 def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], stop: threading.Event) -> dict:
+    """One message, handled once. The handlers are idempotent against the queue's at-least-once delivery
+    and a person's repeated clicks (both seen on 2026-10-23): an approval already on disk starts nothing,
+    a retry the ledger refuses starts nothing, and no director is started while one lives on the root."""
     seller, run, kind = body["seller"], body["run"], body["kind"]
     root = prepare(seller, backend, bucket)
+    if not wait_for_director(root, stop, f"{seller}/{run}"):
+        raise RuntimeError("a director stayed alive on this root for the whole wait; message left for redelivery")
     d = Director(root, seller, run, backend)
     if kind == "run":
         intake = root / "intake" / run
@@ -404,6 +471,15 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
         backend.event(seller, run, "gate.answered", item=body["item"], ok=bool(verdict.get("ok")), detail=verdict)
         if res.returncode != 0 or not verdict.get("ok"):
             return {"ok": False, "reason": f"approval refused: {verdict.get('reason')}", "outcome": outcome(root, run)}
+        if verdict.get("cached"):
+            # The price was approved by an earlier message, whose director took the item on from there.
+            # This one is a repeat (a second click, a redelivery): nothing to start. The outcome goes up so
+            # the dashboard shows the item as it is, and the message is done.
+            log(f"{seller}/{run}: {body['item'][:8]} already approved at {verdict.get('at')} by {verdict.get('by')}; nothing started")
+            doc = outcome(root, run)
+            doc["director"] = {"exit": 0, "skipped": "already approved"}
+            backend.outcome(seller, run, doc)
+            return {"ok": True, "summary": doc["director"], "outcome": doc}
         d.start(["--items", body["item"], "--run", run, *extra_args])
     elif kind == "retry":
         item, stage = body["item"], body["stage"]
