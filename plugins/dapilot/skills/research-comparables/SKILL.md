@@ -14,6 +14,15 @@ A brief with `stage: research`. The work dir has `meta.json`, `analysis.json`,
 - `meta.json`: the original filename. A witness, not the verdict: it is
   what the uploader called the file, and may be a code, a printer name or
   a lie
+- `meta.json` `description`, when present: what the seller wrote about the
+  object at upload. The strongest witness you get, because the seller wrote
+  it on purpose: take its word for what the object is, what it is for and
+  who buys it, and let it settle the product name and the aisle when the
+  renders agree with it. It still does not override what you can see or
+  measure: the drafts and `bbox_mm` decide shape and size, and a claim the
+  renders contradict is noted in the log and not used. Never copy its
+  words into `comparables.json` as a fact about the market. Absent is the
+  common case and changes nothing
 - `analysis.json`: `bbox_mm`, `bodies`
 - `renders/draft_00.png` and one more draft: what it looks like
 - `thumbnails/plate_1.png` and `thumbnails/top_1.png` when they exist: the

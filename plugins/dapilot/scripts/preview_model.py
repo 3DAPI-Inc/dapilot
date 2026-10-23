@@ -31,7 +31,9 @@ def main() -> int:
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--frames", type=int, default=8)
     ap.add_argument("--size", type=int, default=512)
-    ap.add_argument("--timeout", type=float, default=240.0, help="seconds for the whole capture")
+    # 240 s until 2026-10-23: a hosted run's first attempt timed out at 240 s and the second took 223 s, headless
+    # Chrome on a CPU with no GPU being that slow. The worker wall clock (max_worker_minutes, 15) is the outer bound.
+    ap.add_argument("--timeout", type=float, default=600.0, help="seconds for the whole capture")
     a = ap.parse_args()
     wd = Path(a.workdir).resolve()
     if not (wd.is_dir() and any(p.is_file() for p in wd.glob("source.*"))):

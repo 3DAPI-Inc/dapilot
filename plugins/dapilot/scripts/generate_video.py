@@ -48,10 +48,32 @@ ENDPOINTS = {
     # Reference-to-video. No structural control, but 1080p and it accepts up to
     # three reference clips, which a full turntable suits unusually well.
     "ref": "wan/v2.6/reference-to-video",
-    # Image-to-video from a first frame. Ranked first on the Artificial Analysis image-to-video
-    # leaderboard when chosen (2026-09-21), and about half the price of the depth route per clip.
-    "i2v": "minimax/h3-max/image-to-video",
+    # Image-to-video from a first frame. FLUX 3 Max since 2026-10-23: a 10 s clip in about 11 s,
+    # 5 to 20 s, 720p or 1080p, silent on request. minimax/h3-max/image-to-video (the engine from
+    # 2026-09-21 to 2026-10-23) still works through --endpoint; i2v_payload knows both shapes.
+    "i2v": "blackforestlabs/flux-3-max/image-to-video",
 }
+
+I2V_RESOLUTIONS = ["480P", "768P", "720p", "1080P", "1080p"]
+
+
+def i2v_payload(endpoint: str, prompt: str, image_url: str, duration: int, resolution: str,
+                aspect: str, seed: int) -> dict:
+    """The image-to-video request for one endpoint family. FLUX 3 Max names resolution in lower
+    case, follows the first frame's aspect on "auto", generates audio unless told not to and has no
+    prompt expansion to switch off; MiniMax H3 Max takes 480P/768P/1080P and a prompt_expansion_mode."""
+    base = {"prompt": prompt, "image_url": image_url, "duration": duration, "seed": seed}
+    if "flux-3-max" in endpoint:
+        res = "1080p" if resolution.lower() == "1080p" else "720p"
+        return {**base, "resolution": res, "aspect_ratio": aspect if aspect != "auto" else "auto",
+                # Listing clips are silent; our own wording is the shot, so the slower prompt reasoning stays on.
+                "generate_audio": False, "reasoning_level": "high"}
+    res = resolution.upper()
+    if res == "720P":
+        res = "768P"
+    return {**base, "resolution": res,
+            # Our own wording, not a rewrite: the scene text names what must not change.
+            "prompt_expansion_mode": "disabled"}
 
 DEFAULT_PROMPT = (
     "a product photograph of a matte 3D printed object on a soft studio backdrop, "
@@ -91,9 +113,9 @@ def main() -> int:
     ap.add_argument("--endpoint", default=None, help="override the endpoint id")
     ap.add_argument("--videos", nargs="*", default=None,
                     help="ref engine: clips to send as @Video1, @Video2, @Video3")
-    ap.add_argument("--duration", type=int, default=5, help="seconds: 5 or 10 for ref, 5 to 15 for i2v")
+    ap.add_argument("--duration", type=int, default=5, help="seconds: 5 or 10 for ref, 5 to 20 for i2v (15 on MiniMax)")
     ap.add_argument("--image", metavar="PNG", help="i2v engine: the still the clip starts from")
-    ap.add_argument("--i2v-resolution", default="768P", choices=["480P", "768P", "1080P"])
+    ap.add_argument("--i2v-resolution", default="1080p", choices=I2V_RESOLUTIONS)
     ap.add_argument("--source", choices=["depth", "beauty"], default="depth")
     ap.add_argument("--frames-root", default=None, help="directory holding <source>/frame_*.png; default WORKDIR/renders")
     ap.add_argument("--out", default=None, help="output mp4; default WORKDIR/renders/<name>.mp4")
@@ -158,8 +180,9 @@ def main() -> int:
         endpoint, request_id, recorded = held["endpoint"], held["request_id"], held.get("request", {})
         fal_queue.note(f"attaching to {request_id}" + (f", submitted {held['submitted']}" if held.get("submitted") else ""))
     elif a.engine == "i2v":
-        if not 5 <= a.duration <= 15:
-            return fail("the i2v engine takes 5 to 15 seconds", 2)
+        i2v_max = 20 if "flux-3-max" in endpoint else 15
+        if not 5 <= a.duration <= i2v_max:
+            return fail(f"the i2v engine takes 5 to {i2v_max} seconds", 2)
         still = Path(a.image) if a.image else None
         if not still or not still.exists():
             return fail("--image is required for the i2v engine: the still the clip starts from", 2)
@@ -167,15 +190,7 @@ def main() -> int:
             image_url = fal_client.upload_file(str(still))
         except Exception as exc:
             return fail(f"uploading {still.name} failed: {exc}")
-        payload = {
-            "prompt": a.prompt,
-            "image_url": image_url,
-            "duration": a.duration,
-            "resolution": a.i2v_resolution,
-            "seed": a.seed,
-            # Our own wording, not a rewrite: the scene text names what must not change.
-            "prompt_expansion_mode": "disabled",
-        }
+        payload = i2v_payload(endpoint, a.prompt, image_url, a.duration, a.i2v_resolution, a.aspect, a.seed)
         recorded = {**{k2: v for k2, v in payload.items() if k2 != "image_url"}, "image": still.name}
         try:
             request_id = fal_queue.submit(endpoint, payload, req_p, recorded)

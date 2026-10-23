@@ -43,6 +43,9 @@ PLUGIN_NAME = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_t
 LEDGER = PLUGIN_ROOT / "scripts" / "ledger.py"
 LAUNCH_RETRIES = 3          # for API errors before any work (529 and friends)
 LAUNCH_PAUSE_S = 60
+INTEGRATE = PLUGIN_ROOT / "scripts" / "integrate.py"
+STOPPING = threading.Event()            # set by SIGTERM or SIGINT: finish the pass, record, exit
+RUNNING: dict[int, subprocess.Popen] = {}   # pid -> every worker process alive now, so a stop reaches them
 
 
 def log(msg: str) -> None:
@@ -127,6 +130,79 @@ def worker_minutes(brief: dict, cfg: dict) -> int:
     return int((cfg.get("minutes_per_stage") or {}).get(brief["stage"], cfg.get("max_worker_minutes", 15)))
 
 
+def agent_model(agent: str) -> str:
+    """The `model:` line of the agent file, for the ledger's record: what the stage was billed on."""
+    try:
+        head = (PLUGIN_ROOT / "agents" / f"{agent}.md").read_text().split("---", 2)[1]
+    except (OSError, IndexError):
+        return "worker"
+    m = re.search(r"^model:\s*(\S+)", head, re.MULTILINE)
+    return m.group(1) if m else "worker"
+
+
+def preflight(cfg: dict, stages_file: str | None) -> dict:
+    """Every credential the enabled stages will need, checked against its platform before the run spends a
+    cent (2026-10-23). `integrate.py test` does the checking, one free request each: 3DAPI for the quote,
+    the Etsy app key for research, the Etsy shop token when publish is live, fal when design is enabled,
+    the Anthropic key when the run bills to it. A dead Etsy token used to be found at publish, after fal
+    had been paid. Returns {"ok", "checked": [...], "failed": [...]} and decides nothing else."""
+    stages_p = Path(stages_file) if stages_file else PLUGIN_ROOT / "skills" / "run-intake" / "reference" / "stages.json"
+    try:
+        enabled = {s["stage"] for s in json.loads(stages_p.read_text())["stages"] if s.get("enabled", True)}
+    except (OSError, ValueError, KeyError):
+        enabled = {"quote", "research", "design", "publish"}
+    live = (cfg.get("publish") or {}).get("mode", "live") != "sandbox"
+    needed: list[tuple[str, bool]] = [("dapi", True)]                 # (integration, the shop token must be there too)
+    if "research" in enabled or "publish" in enabled:
+        needed.append(("etsy", "publish" in enabled and live))
+    if "design" in enabled:
+        needed.append(("fal", False))
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        needed.append(("claude", False))
+    checked, failed = [], []
+    for iid, want_token in needed:
+        p = subprocess.run([sys.executable, str(INTEGRATE), "test", "--integration", iid],
+                           capture_output=True, text=True, env=os.environ)
+        res = last_json_line(p.stdout) or {"ok": False, "summary": (p.stderr or p.stdout)[-200:] or "no answer"}
+        ok = bool(res.get("ok"))
+        # Etsy answers "app key verified; shop not authorized yet" with ok false and action authorize: research
+        # needs only the app key, so that is fine unless publish is live and needs the shop.
+        if iid == "etsy" and not ok and res.get("action") == "authorize" and not want_token:
+            ok = True
+        checked.append({"integration": iid, "ok": ok, "summary": res.get("summary")})
+        if not ok:
+            failed.append(f"{iid}: {res.get('summary') or 'not ok'}")
+    return {"ok": not failed, "checked": checked, "failed": failed}
+
+
+def install_stop_handler() -> None:
+    """SIGTERM (a deploy, a container stop) and SIGINT end the run cleanly: every live worker's process group
+    gets the same signal, their results are recorded as interrupted (attempt not counted), the heartbeat file
+    goes, the summary says `stopped`. Before this (2026-10-23) workers were in their own sessions, so a
+    SIGTERM to the director left them running and spending with nobody to record them."""
+    def on_signal(signum, _frame):
+        if STOPPING.is_set():
+            return
+        STOPPING.set()
+        log(f"stopping: signal {signum}; ending {len(RUNNING)} worker(s) and recording them as interrupted")
+        for pid in list(RUNNING):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+        def hard_stop():
+            time.sleep(15)
+            for pid in list(RUNNING):
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        threading.Thread(target=hard_stop, daemon=True).start()
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+
+
 def worker_cmd(brief: dict, a, cfg: dict) -> list[str]:
     # A stage may name its own worker (design runs product-designer); else the department's.
     agent = brief.get("agent") or cfg["departments"][brief["department"]]["worker"]
@@ -160,6 +236,7 @@ def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None,
     env.setdefault("BASH_MAX_TIMEOUT_MS", "600000")
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          start_new_session=True, env=env)
+    RUNNING[p.pid] = p
     try:
         out, err = p.communicate(timeout=timeout_s)
         return p.returncode, out, err, False
@@ -173,15 +250,20 @@ def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None,
         except subprocess.TimeoutExpired:
             out, err = "", ""
         return None, out or "", err or "", True
+    finally:
+        RUNNING.pop(p.pid, None)
 
 
-def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, err: str, meta: dict) -> None:
-    """Every worker's raw output goes to runs/<run>/workers/, so a run can be read back later."""
+def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, err: str, meta: dict) -> str:
+    """Every worker's raw output goes to runs/<run>/workers/, so a run can be read back later. Returns the
+    root-relative path, which the ledger keeps on the record and in any marker (`worker_log`)."""
     d = root / "runs" / brief["run"] / "workers"
     d.mkdir(parents=True, exist_ok=True)
     f = d / f"{brief['item'][:8]}-{brief['stage']}-{brief['attempt']}.json"
     f.write_text(json.dumps({"brief": brief, "cmd": cmd, "returncode": rc, "meta": meta,
                              "stdout": out[-200000:], "stderr": err[-20000:]}, indent=2))
+    meta["worker_log"] = str(f.relative_to(root))
+    return meta["worker_log"]
 
 
 def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
@@ -197,18 +279,21 @@ def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dic
     cmd = [os.environ.get("DAPILOT_PYTHON") or sys.executable, str(PLUGIN_ROOT / "scripts" / brief["script"]), "--workdir", str(wd)]
     t0 = time.time()
     rc, stdout, stderr, timed_out = run_headless(cmd, root, timeout_s)
-    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": round(time.time() - t0, 1), "launch_attempts": 1}
+    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": round(time.time() - t0, 1), "launch_attempts": 1,
+            "model": "script", "interrupted": STOPPING.is_set() and rc != 0}
     keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
     lock.unlink(missing_ok=True)
     out = last_json_line(stdout) or last_json_line(stderr) or {}
     ok = rc == 0 and out.get("ok") is not False and all(list(wd.glob(g)) for g in brief["produces"])
-    reason = "" if ok else (f"{brief['script']} exceeded {timeout_s}s" if timed_out else
+    reason = "" if ok else ("director stopped while the script ran" if meta["interrupted"] else
+                            f"{brief['script']} exceeded {timeout_s}s" if timed_out else
                             str(out.get("reason") or out.get("error") or (stderr or stdout)[-200:] or f"exit {rc}"))
     summary = json.dumps({k: v for k, v in out.items() if k in ("etsy", "posted", "failed", "skipped", "cached")}) if ok else reason
     log(f"{tag}: script {'ok' if ok else 'failed: ' + reason[:120]}")
     return {"ok": ok, "cached": bool(out.get("cached")), "run": brief["run"], "item": brief["item"], "stage": brief["stage"],
             "agent": "run_intake", "department": brief["department"], "outputs": brief["produces"] if ok else [],
-            "needs_human": None, "reason": reason, "summary": summary[:300]}, meta
+            "needs_human": None, "reason": reason, "summary": summary[:300],
+            **({"error": out["error"]} if isinstance(out.get("error"), str) and out["error"] else {})}, meta
 
 
 def heartbeat(root: Path, run: str, items: int) -> threading.Event:
@@ -245,7 +330,8 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
         "agent": "run_intake", "department": brief["department"], "outputs": [], "needs_human": None,
         "reason": "", "summary": "worker produced no result line",
     }
-    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": 0.0, "launch_attempts": 0}
+    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": 0.0, "launch_attempts": 0, "interrupted": False,
+            "model": agent_model(brief.get("agent") or cfg["departments"][brief["department"]]["worker"])}
     cmd = worker_cmd(brief, a, cfg)
     # The .lock is the worker's: the work-ledger skill has it refuse a work dir that already holds one, so a
     # lock written here made every worker return "not started" (kumiko run, 2026-10-14, reverted the same
@@ -255,6 +341,12 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
         t0 = time.time()
         rc, stdout, stderr, timed_out = run_headless(cmd, root, timeout_s)
         meta["seconds"] = round(time.time() - t0, 1)
+        if STOPPING.is_set() and rc != 0:
+            meta["interrupted"] = True
+            synthetic["reason"] = "director stopped while the worker ran; attempt not counted"
+            log(f"{tag}: interrupted")
+            keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
+            return synthetic, meta
         if timed_out:
             synthetic["reason"] = f"worker exceeded {timeout_s}s wall clock; process group killed"
             log(f"{tag}: timeout after {timeout_s}s")
@@ -299,7 +391,9 @@ def main() -> int:
     ap.add_argument("--max-turns", type=int, default=20)
     ap.add_argument("--budget-per-worker", type=float)
     ap.add_argument("--stages")
+    ap.add_argument("--description", help="what the seller wrote about the upload, optional; the ledger keeps it on each item for research")
     ap.add_argument("--dry-run", action="store_true", help="init and show the first pass of worker commands; launch nothing")
+    ap.add_argument("--no-preflight", action="store_true", help="skip the credential checks before the run (they cost a few free requests)")
     ap.add_argument("--billing", choices=["auto", "api", "subscription"], default=os.environ.get("DAPILOT_BILLING", "auto"),
                     help="api: require ANTHROPIC_API_KEY; subscription: hide the key from workers so they use the logged-in account; auto: whatever is set")
     a = ap.parse_args()
@@ -333,6 +427,14 @@ def main() -> int:
 
     if not (a.folder or a.items or a.resume):
         print(json.dumps({"ok": False, "reason": "give a folder, --items or --resume"})); return 2
+    if not a.no_preflight and not a.dry_run:
+        pf = preflight(cfg, a.stages)
+        if not pf["ok"]:
+            log("preflight failed: " + "; ".join(pf["failed"]))
+            print(json.dumps({"ok": False, "reason": "preflight failed: " + "; ".join(pf["failed"]), "preflight": pf,
+                              "error": "config.key_rejected" if any("rejected" in f or "refused" in f for f in pf["failed"]) else "config.env_missing"}))
+            return 2
+        log("preflight ok: " + ", ".join(c["integration"] for c in pf["checked"]))
     init_args = ["init", "--run", run, "--department", a.department]
     if a.folder:
         init_args += ["--folder", a.folder]
@@ -342,6 +444,8 @@ def main() -> int:
         init_args += ["--resume"]
     if a.stages:
         init_args += ["--stages", a.stages]
+    if a.description:
+        init_args += ["--description", a.description]
     init = ledger(*init_args)
     if not init.get("ok"):
         print(json.dumps(init)); return 2
@@ -353,6 +457,7 @@ def main() -> int:
     stalls = 0
     dispatched_total = 0
     alive = heartbeat(root, run, init["items"]) if not a.dry_run else None
+    install_stop_handler()
     try:
         return main_loop(a, cfg, root, run, ceiling, billing, t_start, spent, passes, stalls, dispatched_total)
     finally:
@@ -397,9 +502,17 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
                 dispatched_total += 1
                 spent += meta["usd"]
                 rec = ledger("record", "--run", run, "--result", "-", "--tokens", str(meta["tokens"]),
-                             "--usd", str(meta["usd"]), "--model", "worker", stdin=json.dumps(result))
+                             "--usd", str(meta["usd"]), "--model", str(meta.get("model") or "worker"),
+                             "--seconds", str(meta["seconds"]),
+                             *(["--worker-log", meta["worker_log"]] if meta.get("worker_log") else []),
+                             *(["--interrupted"] if meta.get("interrupted") else []), stdin=json.dumps(result))
                 log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} -> {rec.get('status') or rec.get('reason')}"
                     f" | {meta['seconds']}s, {meta['turns']} turns, {meta['usd']:.4f} USD | {result.get('summary', '')[:90]}")
+                if rec.get("review"):
+                    log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} for review: " + "; ".join(rec["review"])[:300])
+        if STOPPING.is_set():
+            log("stopped: signal received; the pass was recorded and the run can be resumed")
+            break
         st = ledger("status", "--run", run)
         if st.get("over_budget"):
             log(f"spend {st['cost']['usd']} USD over ceiling {ceiling}; stopping")
@@ -414,6 +527,7 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
         "workers_dispatched": dispatched_total, "passes": passes,
         "usd_workers": round(spent, 4), "usd_ledger": rep["cost"]["usd"],
         "seconds": round(time.time() - t_start, 1), "billing": billing,
+        **({"stopped": "signal"} if STOPPING.is_set() else {}),
     }
     log(f"done: {counts}, {dispatched_total} workers, {spent:.4f} USD, {summary['seconds']}s -> {rep['report']}")
     print(json.dumps(summary, indent=2))

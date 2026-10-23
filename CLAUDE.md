@@ -120,7 +120,7 @@ sell, and nothing after the price runs until a person approves it.
 | analyze | worker, `analyze-model` | `source.*` | `analysis.json` | `analyze_mesh.py`: bodies, watertightness, volume, bounding box. A cheap pre-check, not a source of truth |
 | quote | worker, `quote-model` | source, analysis | `quote.json` | `quote.py`: upload, create, poll 3DAPI's quote. Named by sha256, never sliced twice, resumable |
 | preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20) |
-| research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict |
+| research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict. `meta.json` may carry the seller's `description` (`run_intake.py --description`, 2026-10-23), read as a witness beside the filename |
 | price | worker, `propose-price` | quote, comparables, viability, drafts | `price.json` | `price_candidates.py` computes the candidates and the break-even floor; the model picks one; `--check` refuses anything below the floor |
 | gate | a person | `price.json` | `price.approved.json` | The one approval. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
 | design | `product-designer`, `design-product` | source, analysis, drafts, price, approval, comparables | `design.json`, `design/` | The model names the product and writes one brief; `design_product.py` captures stills and makes four lifestyle photos and one clip on fal; the model reviews the contact sheet and rejects what misrepresents the product |
@@ -128,10 +128,34 @@ sell, and nothing after the price runs until a person approves it.
 | publish | script, no worker | listing, design, approval | `published.json`, `publish.json` | `publish_product.py`: Etsy draft, media upload, activate (0.20 USD), then every enabled social post |
 
 **Failure is a file.** A stage that ends failed or blocked gets
-`<stage>.failed.json` or `<stage>.blocked.json` in the work dir. The ledger
-will not dispatch it in any run until a person clears it (Try again on the job
-page, or `rm`). No stage asks a person a question mid-run; copy picks its own
-category when research found no comparables.
+`<stage>.failed.json` or `<stage>.blocked.json` in the work dir, carrying the
+worker's transcript path (`worker_log`, under `runs/<id>/workers/`) and the
+script's error code when it gave one. The ledger will not dispatch it in any
+run until a person clears it (Try again on the job page, or `rm`). No stage
+asks a person a question mid-run; copy picks its own category when research
+found no comparables.
+
+**A done stage can be for review (2026-10-23).** `check_outputs.py` reads
+every stage's output when the ledger records it done. A hard problem (the
+file does not parse, a field every reader needs is missing) is the attempt
+failed: the file is set aside under `.redo/` and the stage is queued again
+within its attempts. A soft problem (no comparables, a price under its own
+floor, fewer photos than the standard, three tags) leaves the stage done and
+the run going, writes `<stage>.review.json` with the problems and `review`
+on the record. Nothing waits for it. `ledger.py retry` on a done stage that
+holds a review marker (or with `--redo`) sets its outputs aside and runs it
+again, only while no later stage has used them. The checks are lax on
+purpose: review should be rare and a failed attempt rarer.
+
+**The director checks every connection first.** `run_intake.py` runs
+`integrate.py test` for what the enabled stages will need (3DAPI, the Etsy
+app key for research and the shop token when publish is live, fal for
+design, the Anthropic key when billing to it) and does not start on a
+failure, so a dead token is found before fal is paid. `--no-preflight`
+skips it. SIGTERM or SIGINT end the run cleanly: every worker's process
+group gets the signal, the ledger records them `--interrupted` (queued
+again, attempt not counted), the heartbeat file goes and the summary says
+`stopped`; a resume continues from there.
 
 **The session hears the run.** The plugin's monitor
 (`monitors/monitors.json`, `scripts/watch_run.py`) runs for the whole
@@ -208,10 +232,19 @@ Resume button picks up every work dir with a stage left and no live worker.
 - Config in `store/config.json` under `design`: four stills at 2048 px from
   the browser studio (`/studio`, headless Chrome), four lifestyle photos
   (`fal-ai/nano-banana-pro/edit`, about 0.15 USD each) from the chosen still
-  plus two other sides, one 6 s clip (`minimax/h3-max/image-to-video`, about
-  0.96 USD) animated from the lifestyle photo the brief names. A standard
-  item is about 1.56 USD against `usd_cap_per_item`. A rejected or failed
-  paid asset is remade once with the rejection in its prompt.
+  plus two other sides, one 6 s silent clip at 1080p
+  (`blackforestlabs/flux-3-max/image-to-video` since 2026-10-23; 0.29 USD/s
+  at list, so 1.74 a clip, 0.0725/s until 2026-11-07; 720p is 0.17/s and a
+  config value) animated from the lifestyle photo the brief names. A
+  standard item is about 2.34 USD at list against `usd_cap_per_item` (3.0),
+  so a clip remade after a rejection does not fit at list price. A rejected
+  or failed paid asset is remade once with the rejection in its prompt.
+  `generate_video.py i2v_payload` knows the FLUX and the MiniMax request
+  shapes, so `--endpoint minimax/h3-max/image-to-video` still works.
+- **The designer runs on Opus (2026-10-23)**, `model: opus` in
+  `agents/product-designer.md`; the catalogue worker stays on Sonnet. Design
+  is the one stage with a vision review, and the stage whose reviewer passed
+  a detached tail fin and whose worker misread its token cap as the fal cap.
 - **The studio page ships with the plugin; Blender is gone (2026-10-20).**
   `plugins/dapilot/studio/` is the built console, committed, refreshed with
   `scripts/dev/build_studio.sh` after any change to the studio code.
@@ -402,6 +435,7 @@ plugins/
       run_intake.py               the headless director: one per upload, workers are claude -p
       ledger.py                   run state: init, next, record, status, report; the only writer
       validate_result.py          the result-line contract check
+      check_outputs.py            hard and soft problems in a stage's output files; the ledger runs it at record
       dapi.py                     spec-driven client: spec, ops, describe, validate, call, upload
       analyze_mesh.py load_3mf.py make_fixtures.py quote.py strip_3mf.py assembly_3mf.py source_thumbnails.py
       preview_model.py            the preview stage script: eight WebGL drafts through capture_turntable
@@ -505,9 +539,10 @@ PRICING for intake, ORDER for order triage, a separate print-farm key for
 fulfilment.
 
 Cost per item at current caps: research 1.2, price 0.6, design 5.0, copy 0.8
-USD of worker budget, about 1.56 USD of fal assets, 0.20 USD to activate on
-Etsy. Run ceiling 15 USD. Turns per worker, not routing, is where the money
-goes.
+USD of worker budget, about 2.34 USD of fal assets at list (1.04 during the
+FLUX promotion), 0.20 USD to activate on Etsy. Run ceiling 15 USD. Turns per
+worker, not routing, is where the money goes; the designer on Opus costs
+about twice the Sonnet rate per token.
 
 ## 3MF
 

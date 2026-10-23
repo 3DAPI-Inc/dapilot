@@ -16,6 +16,11 @@ What wakes it (docs/hosting.md, "Supervisor"): one message per stage that stoppe
    "marker": "failed", "reason": "<text>", "error": "<code, optional>", "previous": "<text, optional>",
    "retries": 0, "fingerprint": "<hex>", "changed": false, "trigger": "outcome|resume|startup|config"}
 
+A `marker` of `review` (2026-10-23) is a done stage whose output a check flagged (the ledger's
+`<stage>.review.json`; `reason` is the problems joined). Triage's Review kind redoes it once for a
+plain defect through the same retry route, which the ledger honours only while nothing later has
+used the outputs, and otherwise leaves a `supervisor.left` note with the problems for the seller.
+
 What it does with one. It looks at the run first (GET /internal/dapilot/runs/<id>): a cancelled run and
 a stage that is no longer stopped are left alone whatever the message says, so a stale or repeated
 message costs one GET. Then triage.py decides, one class per kind of stop, the only question being
@@ -107,8 +112,8 @@ def handle(body: dict, backend: SupervisorBackend, queue: SelfQueue) -> dict:
         log(f"{tag}: the run is cancelled; nothing to do")
         return {"ok": True, "did": "nothing", "why": "cancelled"}
     current = next((s for s in look.get("stops", []) if s.get("item") == item and s.get("stage") == stage), None)
-    if current is None or current.get("marker") != "failed":
-        log(f"{tag}: the stage is no longer stopped; nothing to do")
+    if current is None or current.get("marker") not in ("failed", "review"):
+        log(f"{tag}: the stage is no longer stopped or under review; nothing to do")
         return {"ok": True, "did": "nothing", "why": "moved on"}
 
     # A retry that waited its delay out, or has not yet.
@@ -123,7 +128,7 @@ def handle(body: dict, backend: SupervisorBackend, queue: SelfQueue) -> dict:
     stop = Stop(
         reason=current.get("reason") or body.get("reason") or "",
         error=current.get("error") or body.get("error"),
-        marker="failed",
+        marker=current.get("marker") or "failed",
         retries=int(current.get("retries") or body.get("retries") or 0),
         previous=current.get("previous") or body.get("previous"),
         changed=bool(body.get("changed")),

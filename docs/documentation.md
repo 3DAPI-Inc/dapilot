@@ -51,7 +51,7 @@ key you mint yourself. It needs nothing private to 3DAPI.
 | Claude Code | the plugin runs inside it | docs.claude.com, the CLI or the Claude desktop app, signed in once |
 | A 3DAPI account and API key | slicing and the cost basis of every price | dapi.digital, API keys. Mint it with the PRICING scope only; add ORDER later for order work. Never use a FULL key |
 | An Etsy developer app | market research reads Etsy; publishing writes to your shop | etsy.com/developers/your-apps: the keystring and shared secret. The app must list `http://localhost:3003/oauth/redirect` as a callback |
-| A fal.ai key | the four lifestyle photos and the clip in each listing | fal.ai/dashboard/keys. About 1.56 USD per item |
+| A fal.ai key | the four lifestyle photos and the clip in each listing | fal.ai/dashboard/keys. About 2.34 USD per item at list prices |
 | Python 3.10 to 3.15, Chrome, ffmpeg | the scripts and the product renders | quickstart finds them or installs them for you |
 
 Instagram is optional and switched off until its browser adapter ships.
@@ -188,7 +188,14 @@ and reinstalls.
 
 A stage that fails or stops with a question leaves a marker file in the work
 dir, and no run touches that stage again until a person clears it: Try again
-on the console's job page, or deleting the marker.
+on the console's job page, or deleting the marker. A stage that finished but
+whose output a check found worth a look (no comparables, a price under its
+floor, fewer photos than the standard) gets a review marker instead: the run
+goes on, the report lists it under "Done, for review", and `ledger.py retry`
+runs the stage again if you want, as long as nothing later has used its
+output. Before a run starts, the director checks every connection it will
+need (3DAPI, Etsy, fal, the Anthropic key when billing to it) and stops with
+the failing one named rather than find out at publish.
 
 ### 1.9 Keeping it current
 
@@ -316,18 +323,41 @@ tab's click gets the same refusal. Try again and Continue work the same way:
 one request per stopped stage, shown as "Retry sent" until the runner has
 taken it up or refused it.
 
+What you write under the drop zone travels with the run: the research
+stage reads it as your word on what the object is and who buys it, and
+uses it to pick the product name and the Etsy aisle when the renders
+agree. It never overrides what the renders and the measurements show, and
+it is optional.
+
+Each item's card shows what the pipeline has made so far: the preview
+drafts as a small turntable (move across the picture to turn the object),
+the file's own thumbnail before the drafts exist, then the listing photos
+and the clip once design is done. Links last a quarter of an hour and the
+page renews them.
+
 ### 2.6 When something stops
 
 - **A failed stage** shows Try again. It clears the stage's marker and runs
   the item again in the same run with fresh attempts.
+- **A stage done, for review** shows what a check found in its output and a
+  Redo button. The run did not wait for you: later stages ran on that
+  output. Redo sets the output aside and runs the stage again, and is refused
+  with a reason once a later stage has used it. Under each item the card says
+  what every stage cost and how often it ran; a stage that ran twice is two
+  runs of the same stage, and the events say "run 2".
+- **Not started.** When a connection fails the check the director runs
+  before every run, the run ends at once with the connection named; reconnect
+  it on the Integrations page and start the run again.
 - **A blocked stage** (a question for a person) shows Continue, which does
   the same once you have dealt with what it asked.
 - **Cancel run** is offered on an idle run (at the gate, failed, needing an
   answer, or paused). A cancelled run is left alone by everyone, including
   the supervisor, until you **Resume** it. A queued or running run cannot be
   cancelled: its message is already in flight.
-- **The supervisor.** When a run ends with a failed stage, the backend sends
-  one message per failed stage to a supervisor that runs beside the runner.
+- **The supervisor.** When a run ends with a failed stage or a stage for
+  review, the backend sends one message per such stage to a supervisor that
+  runs beside the runner. A review it redoes once for a plain defect, else
+  it leaves a note.
   It asks one question, "could the next attempt end differently", and
   answers with a retry or leaves the stage as it is, with a note the
   dashboard shows. Its rules: a missing or refused credential is retried

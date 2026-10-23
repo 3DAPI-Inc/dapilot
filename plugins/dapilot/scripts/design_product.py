@@ -76,13 +76,14 @@ DEFAULTS = {
                          "aspect": "1:1", "usd_each": 0.15},
     # engine i2v animates a lifestyle photo (the brief's start_from); engine vace paints over our depth pass.
     "lifestyle_video": {"enabled": True, "required": True, "engine": "i2v",
-                        "i2v": {"endpoint": "minimax/h3-max/image-to-video", "resolution": "1080P", "seconds": 6,
-                                "usd_per_second": 0.16},
+                        # FLUX 3 Max (2026-10-23): list price 0.29 USD/s at 1080p, 0.17 at 720p; 75% off until 2026-11-07.
+                        "i2v": {"endpoint": "blackforestlabs/flux-3-max/image-to-video", "resolution": "1080p", "seconds": 6,
+                                "usd_per_second": 0.29},
                         "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth", "frames": 120,
                         "fps": 24, "size": 720, "resolution": "720p", "steps": 50, "guidance": 5.0,
                         "usd_per_second": 0.10, "billed_fps": 16, "drift_arc": 40},
     "redo_per_asset": 1,
-    "usd_cap_per_item": 2.0,
+    "usd_cap_per_item": 3.0,
     "deadline_s": 480,
     "etsy": {"max_photos": 10, "photo_min_px": 2000, "video_min_s": 5.0, "video_max_s": 15.0, "video_max_mb": 100},
 }

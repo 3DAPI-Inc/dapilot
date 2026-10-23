@@ -14,15 +14,17 @@ What it does, per message (docs/hosting.md, "The consumer"):
 
 Messages are ids and keys only, never files:
 
-  {"kind": "run",     "seller": "<id>", "run": "<id>", "keys": ["intake/<seller>/<run>/<file>", ...]}
+  {"kind": "run",     "seller": "<id>", "run": "<id>", "keys": ["intake/<seller>/<run>/<file>", ...],
+                      "description": "<optional: what the seller wrote about the upload; to the director as --description>"}
   {"kind": "approve", "seller": "<id>", "run": "<id>", "item": "<hash>", "price": 12.99, "by": "<name>"}
   {"kind": "retry",   "seller": "<id>", "run": "<id>", "item": "<hash>", "stage": "<stage>",
                       "reason": "<optional: why it could end differently>", "by": "<optional: who asked>"}
 
 A retry takes one stopped stage up again, failed or blocked alike (the dashboard's Try again and Continue,
-and the supervisor when it exists): `ledger.py retry` clears the marker and queues the stage in the same
-run with fresh attempts, the marker is deleted from the bucket as well (push never deletes, so a marker
-only cleared locally came back on the next pull, seen 2026-10-21), and the director continues from there.
+and the supervisor): `ledger.py retry` clears the marker and queues the stage in the same run with fresh
+attempts, and the director continues from there. A done stage with a `<stage>.review.json` marker (a
+check found something in its output, 2026-10-23) is redone the same way: the ledger sets its outputs
+aside and `push` deletes from the bucket what the root no longer holds, within the manifest rule below.
 
 The plugin is never imported, patched or reached into. It sees a directory and a command: the root
 at $DAPILOT_DATA_DIR/<seller> (store/, work/, runs/, intake/), DAPILOT_STORE_DIR and
@@ -44,6 +46,7 @@ Environment (the task definition sets these; nothing per seller is in them):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -74,6 +77,7 @@ def aws_region() -> str:
 HEARTBEAT_S = 60          # how often the message's visibility is extended while a job runs
 VISIBILITY_S = 300        # by how much; a dead container stops extending and the message reappears
 WAIT_S = 20               # SQS long poll
+MANIFEST = ".sync.json"   # at the root: every path the last sync saw on both sides, the only paths push may delete
 # What never leaves the container: the store's secrets, the plugin's locks, a director's liveness file, and
 # the intake copy of an upload (the bucket already holds it under intake/, and the work dir holds source.*).
 NEVER_SYNCED = ("store/.env", "store/etsy_token", "store/social/", "/.lock", "director.alive", ".sync.json", "intake/")
@@ -84,6 +88,9 @@ START = re.compile(r"^\[\d\d:\d\d:\d\d\] run (?P<run>\S+): (?P<items>\d+) items"
 DISPATCH = re.compile(r"^\[\d\d:\d\d:\d\d\] pass (?P<pass>\d+): dispatching (?P<n>\d+) worker\(s\): (?P<list>.*)$")
 RESULT = re.compile(r"^\[\d\d:\d\d:\d\d\] (?P<hash>[0-9a-f]{8}) (?P<stage>\w+)#(?P<attempt>\d+) -> (?P<status>\w+)"
                     r"(?: \| (?P<secs>[\d.]+)s, (?P<turns>\d+) turns, (?P<usd>[\d.]+) USD)?(?: \| (?P<summary>.*))?$")
+REVIEW = re.compile(r"^\[\d\d:\d\d:\d\d\] (?P<hash>[0-9a-f]{8}) (?P<stage>\w+)#(?P<attempt>\d+) for review: (?P<problems>.*)$")
+PREFLIGHT = re.compile(r"^\[\d\d:\d\d:\d\d\] preflight (?P<verdict>ok|failed): (?P<text>.*)$")
+STOPPED = re.compile(r"^\[\d\d:\d\d:\d\d\] (?:stopped|stopping): (?P<text>.*)$")
 DONE = re.compile(r"^\[\d\d:\d\d:\d\d\] done: (?P<counts>\{.*?\}), (?P<workers>\d+) workers, (?P<usd>[\d.]+) USD, (?P<secs>[\d.]+)s")
 
 
@@ -101,9 +108,25 @@ def excluded(rel: str) -> bool:
 
 # ------------------------------------------------------------------ the bucket
 
+def md5_of(p: Path) -> str:
+    h = hashlib.md5()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 class Bucket:
-    """The seller stores between runs. S3 in the task; a directory for a laptop test. Sync is by
-    size and name: good enough for a root that only the director writes, at job boundaries."""
+    """The seller stores between runs. S3 in the task; a directory for a laptop test. Sync is by name,
+    size and content (2026-10-23): a file of the same size on both sides is compared by its MD5 against
+    the object's ETag (S3's ETag is the MD5 for an object uploaded in one part; a multipart ETag carries
+    a dash and only the size is compared). Before that a same-sized rewrite, a state.json with one
+    status flipped, was neither pulled nor pushed.
+
+    Push deletes, within one rule: only a path the last sync saw on both sides (the root's .sync.json
+    manifest) and that is gone from the root now. The plugin removes files on purpose (a marker a retry
+    cleared, outputs a redo set aside under .redo/), and those used to come back from S3 on the next
+    pull. A path the manifest never saw is never deleted, so a half-pulled root cannot empty a prefix."""
 
     def __init__(self, name: str | None, local: Path | None):
         self.local = local
@@ -113,12 +136,13 @@ class Bucket:
             import boto3  # only the task needs it; a laptop test does not
             self.s3 = boto3.client("s3", region_name=aws_region())
 
-    # -- listing
-    def _remote(self, prefix: str) -> dict[str, int]:
+    # -- listing: rel path -> (size, etag); the etag is None where none is known
+    def _remote(self, prefix: str) -> dict[str, tuple[int, str | None]]:
         if self.local is not None:
             base = self.local / prefix
-            return {str(p.relative_to(base)): p.stat().st_size for p in base.rglob("*") if p.is_file()} if base.exists() else {}
-        out: dict[str, int] = {}
+            return ({str(p.relative_to(base)): (p.stat().st_size, md5_of(p)) for p in base.rglob("*") if p.is_file()}
+                    if base.exists() else {})
+        out: dict[str, tuple[int, str | None]] = {}
         token = None
         while True:
             kw = {"Bucket": self.name, "Prefix": prefix.rstrip("/") + "/"}
@@ -126,10 +150,35 @@ class Bucket:
                 kw["ContinuationToken"] = token
             res = self.s3.list_objects_v2(**kw)
             for o in res.get("Contents", []):
-                out[o["Key"][len(kw["Prefix"]):]] = o["Size"]
+                out[o["Key"][len(kw["Prefix"]):]] = (o["Size"], (o.get("ETag") or "").strip('"') or None)
             token = res.get("NextContinuationToken")
             if not token:
                 return out
+
+    @staticmethod
+    def _same(local: Path, remote: tuple[int, str | None]) -> bool:
+        size, etag = remote
+        if local.stat().st_size != size:
+            return False
+        if not etag or "-" in etag:          # multipart or unknown: the size is all there is to compare
+            return True
+        return md5_of(local) == etag
+
+    @staticmethod
+    def _manifest(root: Path) -> set[str]:
+        p = root / MANIFEST
+        try:
+            return set(json.loads(p.read_text()).get("paths") or [])
+        except (OSError, ValueError):
+            return set()
+
+    @staticmethod
+    def _write_manifest(root: Path, paths: set[str]) -> None:
+        (root / MANIFEST).write_text(json.dumps({"at": now(), "paths": sorted(paths)}))
+
+    @staticmethod
+    def _local(root: Path) -> dict[str, Path]:
+        return {str(p.relative_to(root)): p for p in root.rglob("*") if p.is_file() and not excluded(str(p.relative_to(root)))}
 
     def get(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -156,31 +205,38 @@ class Bucket:
             self.s3.delete_object(Bucket=self.name, Key=key)
 
     def pull(self, prefix: str, root: Path) -> int:
-        """Bring the seller's root down: files missing locally or of another size. Returns the count."""
+        """Bring the seller's root down: files missing locally or different (size, then content). Returns
+        the count. The manifest afterwards names every path now on both sides."""
         n = 0
-        for rel, size in self._remote(prefix).items():
+        remote = self._remote(prefix)
+        for rel, meta in remote.items():
             if excluded(rel):
                 continue
             dest = root / rel
-            if dest.exists() and dest.stat().st_size == size:
+            if dest.exists() and self._same(dest, meta):
                 continue
             self.get(f"{prefix.rstrip('/')}/{rel}", dest)
             n += 1
+        self._write_manifest(root, {rel for rel in remote if not excluded(rel)} & set(self._local(root)))
         return n
 
     def push(self, root: Path, prefix: str) -> int:
-        """Send the root back: files new or of another size since the last listing. Secrets never go."""
+        """Send the root back: files new or different since the last listing, and delete what the last
+        sync saw on both sides and the root no longer holds. Secrets never go. Returns pushed + deleted."""
         remote = self._remote(prefix)
+        local = self._local(root)
         n = 0
-        for p in root.rglob("*"):
-            if not p.is_file():
-                continue
-            rel = str(p.relative_to(root))
-            if excluded(rel) or remote.get(rel) == p.stat().st_size:
+        for rel, p in local.items():
+            if rel in remote and self._same(p, remote[rel]):
                 continue
             self.put(p, f"{prefix.rstrip('/')}/{rel}")
             n += 1
-        return n
+        gone = [rel for rel in self._manifest(root) if rel not in local and rel in remote and not excluded(rel)]
+        for rel in gone:
+            self.delete(f"{prefix.rstrip('/')}/{rel}")
+            log(f"deleted from the bucket, gone from the root: {rel}")
+        self._write_manifest(root, set(local))
+        return n + len(gone)
 
 
 # ------------------------------------------------------------------ the backend
@@ -256,16 +312,25 @@ def write_env(store: Path, values: dict[str, str]) -> None:
     p.chmod(0o600)
 
 
-def template_budget() -> dict:
-    """The plugin release's own `budget` block, from its config template. A seller's config.json is seeded
-    once and then persisted, so a stage budget the template raised later never reached an existing seller:
-    the design worker's 1.50 USD of 2026-10-23 was the template's old value, frozen in S3. Written under the
-    plan limits on every job, so the release's figures apply and the plan's still win."""
+def template_release() -> dict:
+    """What the plugin release owns in a seller's config: the `budget` block and the fal endpoints under
+    `design` (the lifestyle photo model and the clip model with their prices). A seller's config.json is
+    seeded once and then persisted, so a value the template changed later never reached an existing seller:
+    the design worker's 1.50 USD of 2026-10-23 was the template's old budget, frozen in S3, and the clip
+    engine switch of the same day would have been frozen the same way. Written under the plan limits on
+    every job, so the release's figures apply and the plan's still win; the seller's palette, stills and
+    caps stay theirs."""
     t = PLUGIN_DIR / "templates" / "config.example.json"
     try:
-        return {"budget": json.loads(t.read_text()).get("budget") or {}}
+        tpl = json.loads(t.read_text())
     except (OSError, ValueError):
         return {}
+    design = tpl.get("design") or {}
+    out: dict = {"budget": tpl.get("budget") or {}}
+    release_design = {k: design[k] for k in ("lifestyle_images", "lifestyle_video") if isinstance(design.get(k), dict)}
+    if release_design:
+        out["design"] = release_design
+    return out
 
 
 def write_limits(store: Path, limits: dict) -> None:
@@ -301,7 +366,7 @@ def prepare(seller: str, backend: Backend, bucket: Bucket) -> Path:
     env = {**creds, "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""), "DAPILOT_BILLING": "api",
            "DAPILOT_PYTHON": PYTHON, "CHROME": os.environ.get("CHROME", "")}
     write_env(root / "store", env)
-    limits = template_budget()
+    limits = template_release()
     for k, v in backend.limits(seller).items():
         if isinstance(v, dict) and isinstance(limits.get(k), dict):
             limits[k] = {**limits[k], **v}
@@ -393,6 +458,13 @@ class Director:
             b.event(s, r, "stage.result", item8=m["hash"], stage=m["stage"], attempt=int(m["attempt"]), status=m["status"],
                     seconds=float(m["secs"]) if m["secs"] else None, turns=int(m["turns"]) if m["turns"] else None,
                     usd=float(m["usd"]) if m["usd"] else None, summary=m["summary"])
+        elif m := REVIEW.match(line):
+            b.event(s, r, "stage.review", item8=m["hash"], stage=m["stage"], attempt=int(m["attempt"]),
+                    problems=[p.strip() for p in m["problems"].split(";") if p.strip()])
+        elif m := PREFLIGHT.match(line):
+            b.event(s, r, "run.preflight", ok=m["verdict"] == "ok", text=m["text"][-500:])
+        elif m := STOPPED.match(line):
+            b.event(s, r, "run.stopped", text=m["text"][-300:])
         elif m := DONE.match(line):
             b.event(s, r, "run.ended", counts=m["counts"], workers=int(m["workers"]), usd=float(m["usd"]), seconds=float(m["secs"]))
         else:
@@ -419,22 +491,53 @@ def _json_candidates(text: str):
     yield ""
 
 
+def media_of(root: Path, wd: Path) -> dict:
+    """What the dashboard can show of an item, as keys under the seller's prefix (the root-relative paths
+    the sync uses): the 3MF's own thumbnail, the eight preview drafts, the design photos in listing order
+    and the listing clip, each only when the file exists. Empty lists and nulls are the common case early
+    in a run. The backend presigns these for the browser; nothing here is a URL."""
+    rel = lambda p: str(p.relative_to(root))  # noqa: E731
+    doc = {"name": None, "thumbnail": None, "drafts": [], "photos": [], "video": None}
+    for cand in ("thumbnails/plate_1.png", "thumbnails/top_1.png"):
+        if (wd / cand).exists():
+            doc["thumbnail"] = rel(wd / cand)
+            break
+    doc["drafts"] = [rel(p) for p in sorted((wd / "renders").glob("draft_*.png"))] if (wd / "renders").is_dir() else []
+    design_p = wd / "design.json"
+    if design_p.exists():
+        try:
+            design = json.loads(design_p.read_text() or "{}")
+        except ValueError:
+            design = {}
+        doc["name"] = design.get("name")
+        doc["photos"] = [{"id": ph.get("id"), "kind": ph.get("kind"), "key": rel(wd / ph["file"])}
+                         for ph in design.get("photos") or [] if ph.get("file") and (wd / ph["file"]).exists()]
+        video = design.get("video") or {}
+        if video.get("file") and (wd / video["file"]).exists():
+            doc["video"] = rel(wd / video["file"])
+    return doc
+
+
 def outcome(root: Path, run: str) -> dict:
     """What the ledger and the markers say, as one document for the dashboard: per item per stage,
-    the open gates with their candidates, and anything blocked or failed with its reason."""
+    the open gates with their candidates, anything blocked or failed with its reason, and the media
+    the item has so far (`media_of`)."""
     state_p = root / "runs" / run / "state.json"
     state = json.loads(state_p.read_text()) if state_p.exists() else {}
     items = []
     for h, it in (state.get("items") or {}).items():
         wd = root / it["workdir"]
-        rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": []}
+        rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": [],
+               "media": media_of(root, wd)}
         if (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
             price = json.loads((wd / "price.json").read_text() or "{}")
             cands = (wd / "price.candidates.json")
             rec["gate"] = {"proposal": price, "candidates": json.loads(cands.read_text()) if cands.exists() else None}
-        for m in sorted(wd.glob("*.failed.json")) + sorted(wd.glob("*.blocked.json")):
+        # Failed and blocked stop the item; a review marker (2026-10-23) stops nothing: the stage is done
+        # and its file names what a check found. The backend sends it to the supervisor like a failure.
+        for m in sorted(wd.glob("*.failed.json")) + sorted(wd.glob("*.blocked.json")) + sorted(wd.glob("*.review.json")):
             doc = json.loads(m.read_text() or "{}")
-            rec["markers"].append({"file": m.name, **{k: doc.get(k) for k in ("stage", "reason", "question", "run", "attempt", "worker_log")}})
+            rec["markers"].append({"file": m.name, **{k: doc.get(k) for k in ("stage", "reason", "question", "run", "attempt", "worker_log", "error", "problems")}})
         items.append(rec)
     counts: dict[str, int] = {}
     for rec in items:                                   # the ledger keeps status per stage; the dashboard wants totals
@@ -460,7 +563,8 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
         intake.mkdir(parents=True, exist_ok=True)
         for key in body.get("keys") or []:
             bucket.get(key, intake / Path(key).name)
-        d.start([str(intake), "--run", run, *extra_args])
+        description = str(body.get("description") or "").strip()
+        d.start([str(intake), "--run", run, *(["--description", description] if description else []), *extra_args])
     elif kind == "approve":
         wd = root / "work" / body["item"]
         cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "approve_price.py"), "approve", "--workdir", str(wd), "--no-start",
@@ -470,7 +574,12 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
         verdict = next((json.loads(c) for c in _json_candidates(res.stdout) if c), {"ok": False, "reason": res.stderr[-300:]})
         backend.event(seller, run, "gate.answered", item=body["item"], ok=bool(verdict.get("ok")), detail=verdict)
         if res.returncode != 0 or not verdict.get("ok"):
-            return {"ok": False, "reason": f"approval refused: {verdict.get('reason')}", "outcome": outcome(root, run)}
+            # The outcome goes up as well as the event: the backend's lock on the gate is released by
+            # either, so a lost event no longer leaves the buttons away until the next director ends.
+            doc = outcome(root, run)
+            doc["director"] = {"exit": 0, "skipped": f"approval refused: {verdict.get('reason')}"}
+            backend.outcome(seller, run, doc)
+            return {"ok": False, "reason": f"approval refused: {verdict.get('reason')}", "outcome": doc}
         if verdict.get("cached"):
             # The price was approved by an earlier message, whose director took the item on from there.
             # This one is a repeat (a second click, a redelivery): nothing to start. The outcome goes up so
@@ -493,7 +602,10 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
             bucket.delete(f"sellers/{seller}/work/{item}/{name}")
         backend.event(seller, run, "stage.retried", item=item, stage=stage, ok=bool(verdict.get("ok")), detail=verdict)
         if res.returncode != 0 or not verdict.get("ok"):
-            return {"ok": False, "reason": f"retry refused: {verdict.get('reason')}", "outcome": outcome(root, run)}
+            doc = outcome(root, run)
+            doc["director"] = {"exit": 0, "skipped": f"retry refused: {verdict.get('reason')}"}
+            backend.outcome(seller, run, doc)
+            return {"ok": False, "reason": f"retry refused: {verdict.get('reason')}", "outcome": doc}
         d.start(["--items", item, "--run", run, *extra_args])
     else:
         return {"ok": False, "reason": f"unknown message kind {kind!r}"}
@@ -501,10 +613,12 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
     watcher = threading.Thread(target=lambda: (stop.wait(), d.stop()), daemon=True)
     watcher.start()
     summary = d.tail()
+    # Pushed before the outcome is posted: the outcome names media keys the browser will ask the
+    # backend to presign, and they must be in the bucket by the time the dashboard shows the row.
+    pushed = bucket.push(root, f"sellers/{seller}")
     doc = outcome(root, run)
     doc["director"] = summary
     backend.outcome(seller, run, doc)
-    pushed = bucket.push(root, f"sellers/{seller}")
     log(f"{seller}/{run}: director exit {summary.get('exit')}, {pushed} files pushed")
     return {"ok": summary.get("exit") in (0, 1) and not stop.is_set(), "summary": summary, "outcome": doc}
 

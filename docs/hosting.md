@@ -222,10 +222,18 @@ S3 and the backend, which is how it was tested on 2026-10-20 with a dry-run
 director (`runner/README.md` has the commands). The approve path ran against
 the staging queue on 2026-10-21. The retry path is `ledger.py retry` since
 2026-10-22: it clears the stage's marker, failed or blocked, queues the stage
-in the same run with fresh attempts and the message's reason on the record,
-and the runner deletes the marker from the bucket as well, because `push`
-never deletes and a marker cleared only locally came back on the next pull.
-Per message:
+in the same run with fresh attempts and the message's reason on the record;
+since 2026-10-23 it also redoes a done stage that holds a review marker.
+The sync compares content since 2026-10-23 (a file of the same size is
+compared by MD5 against the object's ETag; a multipart ETag falls back to
+the size), and `push` deletes within one rule: only a path the last sync
+saw on both sides (the root's `.sync.json` manifest) that the root no longer
+holds, so a marker a retry cleared or outputs a redo set aside do not come
+back from S3, and a path the manifest never saw is never deleted. A refused
+approve or retry posts the outcome as well as its event, so the backend's
+claim is released either way. The director's `preflight`, `for review` and
+`stopped` log lines become `run.preflight`, `stage.review` and
+`run.stopped` events. Per message:
 
 1. **Receive** by long poll, one message at a time.
 2. **Heartbeat.** Extend the message's visibility every minute while the job
@@ -263,10 +271,14 @@ same way, per marker. The consumer is idempotent on what reaches it
 (2026-10-23): an approval already on disk starts nothing, a retry the ledger
 refuses starts nothing, and no director is started while
 `runs/<id>/director.alive` is fresh on the root; a job waits for the live one
-to end. The runner also writes the plugin template's `budget` block under the
-plan limits on every job, so a stage budget a release raised reaches sellers
-whose config was seeded earlier (the design worker's 1.50 USD of 2026-10-23
-was the old template value, frozen in S3).
+to end. The runner also writes the plugin template's `budget` block and its
+`design.lifestyle_images` and `design.lifestyle_video` blocks (the fal
+endpoints and their prices) under the plan limits on every job
+(`template_release`), so a stage budget or a model a release changed reaches
+sellers whose config was seeded earlier (the design worker's 1.50 USD of
+2026-10-23 was the old template value, frozen in S3; the clip engine switch
+of the same day would have frozen the same way). The seller's palette,
+stills and caps are not touched.
 
 ## Supervisor (built 2026-10-22: `runner/supervisor.py` and `runner/triage.py`)
 
@@ -275,7 +287,12 @@ not FIFO, so one message can carry its own delay), wakes the supervisor: the
 backend sends one message per stage that stopped failed after it has stored
 the outcome, so the row is written first and a supervisor that is down loses
 nothing a person cannot still see. Blocked stages, a question for a person,
-are never sent. The supervisor runs inside the runner's container: when
+are never sent. A review marker (a done stage whose output
+`check_outputs.py` flagged, 2026-10-23) is sent with `marker: review`:
+triage's `Review` kind redoes it once for a plain defect (a price under its
+own floor, a design with nothing kept) through the same retry route, which
+the ledger honours only while nothing later has used the outputs, and
+otherwise leaves a note with the problems for the seller. The supervisor runs inside the runner's container: when
 `DAPILOT_SUPERVISE_QUEUE_URL` is set, `consumer.serve` starts its loop in a
 second thread, so the one Coolify resource does both and the only setup is
 that variable (`doctor.sh --supervise` runs it alone, for a laptop or for
@@ -330,17 +347,23 @@ re-express the ledger's semantics and the second would need every skill
 ported out of Claude Code. The supervisor sits outside the director's loop
 for the same reason.
 
-## Plugin work hosting needs first
+## Plugin work hosting needs first (built 2026-10-23)
 
-These go into the plugin, so local users get them too, and the consumer
+These went into the plugin, so local users get them too, and the consumer
 reads what they write:
 
-- **Schema checks on produced files** in `ledger.py`, so a wrong-shaped
-  output fails at the stage that wrote it with a reason that names the field.
-- **A SIGTERM handler in the director**, exiting cleanly after the current
-  pass so a reclaimed task pushes a consistent root.
-- **The transcript path in every failed marker**, so the triage agent and the
-  dashboard find the worker's output without searching.
+- **Checks on produced files** (`check_outputs.py`, run by `ledger.py
+  record`): a hard problem fails the attempt with the field named; a soft
+  one leaves the stage done with `<stage>.review.json`, which the outcome
+  carries and the backend sends to the supervisor as a `review` stop.
+- **A SIGTERM handler in the director**: workers' process groups get the
+  signal, their stages are recorded interrupted (attempt not counted), the
+  summary says `stopped`, and the next job on the same root resumes.
+- **The transcript path in every failed marker** (`worker_log`) and the
+  script's `error` code, so triage and the dashboard find the worker's output
+  without searching.
+- **Preflight**: the director checks every connection the enabled stages need
+  before it starts and refuses with the integration named.
 
 ## Accounts and keys
 

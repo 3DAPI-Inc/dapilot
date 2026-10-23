@@ -61,6 +61,7 @@ from store_path import store_dir as _store_dir  # noqa: E402  one rule for every
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_result import validate  # noqa: E402
 from source_thumbnails import extract as extract_thumbnails  # noqa: E402
+from check_outputs import check as check_outputs  # noqa: E402  hard and soft problems in a stage's files
 
 SUPPORTED = {".stl", ".3mf", ".obj", ".step", ".stp"}
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -174,6 +175,14 @@ def clear_stale_lock(wd: Path, max_minutes: float | None = None, notes: list | N
 
 
 MARKERS = ("failed", "blocked")
+# A third file beside the outputs, `<stage>.review.json`, written when the stage is done but check_outputs.py
+# found something to look at (2026-10-23). Not a MARKERS kind: it stops nothing, dispatch ignores it, and
+# `retry` on a done stage that holds one redoes the stage (outputs archived under .redo/) when nothing
+# later has used them. The hosted supervisor reads it from the outcome; a person reads it on the report.
+REVIEW = "review"
+# What a redo sets aside besides the stage's `produces` files: the directories a stage's script treats
+# as its cache, so the stage does run again rather than find everything already made.
+REDO_ALSO = {"design": ["design"], "copy": ["social/posts.json"], "research": ["research"]}
 
 
 def marker(wd: Path, stage: str, kind: str) -> Path:
@@ -192,17 +201,42 @@ def read_marker(wd: Path, stage: str) -> tuple[str, dict] | None:
     return None
 
 
-def write_marker(wd: Path, stage: str, kind: str, run: str, attempt: int, text: str) -> None:
+def write_marker(wd: Path, stage: str, kind: str, run: str, attempt: int, text: str, extra: dict | None = None) -> None:
+    """`extra` carries what helps a reader of the marker: the worker's transcript path (`worker_log`, the
+    runs/<run>/workers/ file the director kept, 2026-10-23) and the script's error code when it gave one."""
     clear_markers(wd, stage)
     marker(wd, stage, kind).write_text(json.dumps(
         {"stage": stage, "status": kind, "run": run, "attempt": attempt,
-         ("question" if kind == "blocked" else "reason"): text, "at": now(),
+         ("question" if kind == "blocked" else "reason"): text, "at": now(), **{k: v for k, v in (extra or {}).items() if v},
          "clear": "delete this file (or Try again in the console) to let a run dispatch the stage again"}, indent=2))
 
 
+def write_review(wd: Path, stage: str, run: str, attempt: int, problems: list[str], worker_log: str | None = None) -> None:
+    marker(wd, stage, REVIEW).write_text(json.dumps(
+        {"stage": stage, "status": REVIEW, "run": run, "attempt": attempt, "problems": problems, "at": now(),
+         **({"worker_log": worker_log} if worker_log else {}),
+         "note": "the stage is done and the run went on; a supervisor or a person decides whether to redo it "
+                 "(ledger.py retry redoes a done stage that holds this file while nothing later has used its outputs)"},
+        indent=2))
+
+
 def clear_markers(wd: Path, stage: str) -> None:
-    for kind in MARKERS:
+    for kind in (*MARKERS, REVIEW):
         marker(wd, stage, kind).unlink(missing_ok=True)
+
+
+def set_aside(wd: Path, st: dict, tag: str) -> list[str]:
+    """A stage's outputs moved under .redo/<stage>-<time>[-<tag>]/, never deleted: before a redo, and when
+    `record` found the output unusable (left in place, `refresh` would read the file as the stage done)."""
+    keep = wd / ".redo" / (f"{st['stage']}-{now().replace(':', '')}" + (f"-{tag}" if tag else ""))
+    moved: list[str] = []
+    for pattern in [*st["produces"], *REDO_ALSO.get(st["stage"], [])]:
+        for p in sorted(wd.glob(pattern)) or ([wd / pattern] if (wd / pattern).exists() else []):
+            dest = keep / p.relative_to(wd)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(p), str(dest))
+            moved.append(str(p.relative_to(wd)))
+    return moved
 
 
 def requeue(rec: dict, why: str) -> None:
@@ -295,6 +329,21 @@ def assembly(wd: Path, state: dict, original: Path | None = None) -> None:
         state.setdefault("notes", []).append(f"{now()} {wd.name[:8]}: assembly not read: {e}")
 
 
+def describe(wd: Path, text: str | None) -> None:
+    """What the seller wrote about the object when they uploaded it, into meta.json as `description`, once:
+    the first words stay (a later run of the same file without any says nothing new). Optional everywhere;
+    the research skill reads it as a witness beside the filename."""
+    text = (text or "").strip()
+    if not text:
+        return
+    p = wd / "meta.json"
+    meta = json.loads(p.read_text()) if p.exists() else {}
+    if meta.get("description"):
+        return
+    meta["description"] = text[:2000]
+    p.write_text(json.dumps(meta, indent=2))
+
+
 def cmd_init(a) -> int:
     cfg = load_config()
     stages = load_stages(a.stages)
@@ -320,6 +369,7 @@ def cmd_init(a) -> int:
         if h not in state["items"]:
             state["items"][h] = {"file": meta.get("file", h), "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
+        describe(wd, getattr(a, "description", None))
         thumbnails(wd, state)
         assembly(wd, state)
     # A folder of models, or one model file: a person drops one file far more often than a folder.
@@ -338,6 +388,7 @@ def cmd_init(a) -> int:
         if h not in state["items"]:
             state["items"][h] = {"file": f.name, "workdir": str(wd.relative_to(root())), "stages": {}}
             added.append(h)
+        describe(wd, getattr(a, "description", None))
         thumbnails(wd, state)
         assembly(wd, state, f)
     save_state(state)
@@ -478,30 +529,51 @@ def cmd_record(a) -> int:
     rec["summary"] = res["summary"]
     rec["agent"] = res["agent"]
     rec["finished"] = now()
-    if res["needs_human"]:
+    extra = {"worker_log": a.worker_log, "error": res.get("error")}
+    if a.worker_log:
+        rec["worker_log"] = a.worker_log
+    rec.pop("review", None)
+    if getattr(a, "interrupted", False):
+        # The director was told to stop (SIGTERM on a deploy) while this worker ran: not the worker's
+        # failure and not an attempt spent. Queued again where it was; the next director takes it up.
+        rec["status"] = "queued"
+        rec["attempt"] = max(0, rec["attempt"] - 1)
+        rec["previous"] = res["reason"] or "interrupted"
+        state["notes"].append(f"{now()} {res['item'][:8]} {res['stage']}: interrupted, attempt not counted")
+    elif res["needs_human"]:
         rec["status"] = "blocked"
         rec["question"] = res["needs_human"]
-        write_marker(wd, res["stage"], "blocked", a.run, rec["attempt"], res["needs_human"])
+        write_marker(wd, res["stage"], "blocked", a.run, rec["attempt"], res["needs_human"], extra)
     elif res["ok"]:
         stages = load_stages(state.get("stages_file"))
         st = next(s for s in stages["stages"] if s["stage"] == res["stage"])
         missing = [p for p in st["produces"] if not exists(wd, p)]
-        if missing:
+        checks = check_outputs(wd, res["stage"]) if not missing else {"hard": [], "soft": []}
+        if missing or checks["hard"]:
+            why = (f"claimed ok but outputs missing: {missing}" if missing
+                   else "claimed ok but the output is not usable: " + "; ".join(checks["hard"]))
             rec["status"] = "queued" if rec["attempt"] < state["budget"]["max_attempts"] else "failed"
-            rec["previous"] = f"claimed ok but outputs missing: {missing}"
-            state["notes"].append(f"{now()} {res['item'][:8]} {res['stage']}: ok claimed, outputs missing {missing}")
+            rec["previous"] = why
+            state["notes"].append(f"{now()} {res['item'][:8]} {res['stage']}: {why}")
+            if checks["hard"]:
+                set_aside(wd, st, "unusable")
             if rec["status"] == "failed":
                 rec["reason"] = rec["previous"]
-                write_marker(wd, res["stage"], "failed", a.run, rec["attempt"], rec["previous"])
+                write_marker(wd, res["stage"], "failed", a.run, rec["attempt"], rec["previous"], extra)
         else:
             rec["status"] = "done"
             rec["cached"] = res["cached"]
+            clear_markers(wd, res["stage"])
+            if checks["soft"]:
+                rec["review"] = checks["soft"]
+                write_review(wd, res["stage"], a.run, rec["attempt"], checks["soft"], a.worker_log)
+                state["notes"].append(f"{now()} {res['item'][:8]} {res['stage']}: done, for review: {'; '.join(checks['soft'])}")
     else:
         rec["previous"] = res["reason"]
         rec["status"] = "queued" if rec["attempt"] < state["budget"]["max_attempts"] else "failed"
         if rec["status"] == "failed":
             rec["reason"] = res["reason"]
-            write_marker(wd, res["stage"], "failed", a.run, rec["attempt"], res["reason"])
+            write_marker(wd, res["stage"], "failed", a.run, rec["attempt"], res["reason"], extra)
     if a.tokens or a.usd is not None:
         cfg = load_config()
         price = cfg.get("pricing_usd_per_1k_tokens", {}).get(a.model or "inherit", 0.0)
@@ -510,13 +582,24 @@ def cmd_record(a) -> int:
         c["tokens"] += a.tokens or 0
         c["usd"] = round(c["usd"] + usd, 4)
         by = c["by_agent"].setdefault(res["agent"], {"tokens": 0, "usd": 0.0, "results": 0})
-        by["tokens"] += a.tokens
+        by["tokens"] += a.tokens or 0
         by["usd"] = round(by["usd"] + usd, 4)
         by["results"] += 1
         rec["tokens"] = a.tokens or 0
         rec["usd"] = round(usd, 4)
+    if a.model:
+        rec["model"] = a.model
+    # Every attempt, kept: the stage is the unit a person is billed in, and a repeated stage is the
+    # second line of the same stage, not a hidden "turn" (2026-10-23). The dashboard sums these.
+    rec.setdefault("attempts", []).append({
+        "attempt": rec["attempt"] + (1 if getattr(a, "interrupted", False) else 0), "status": rec["status"],
+        "usd": round(float(a.usd), 4) if a.usd is not None else rec.get("usd", 0.0), "tokens": a.tokens or 0,
+        "seconds": a.seconds, "model": a.model, "finished": rec["finished"],
+        **({"worker_log": a.worker_log} if a.worker_log else {}),
+        **({"interrupted": True} if getattr(a, "interrupted", False) else {})})
     save_state(state)
-    return out({"ok": True, "item": res["item"], "stage": res["stage"], "status": rec["status"], "remaining": remaining(state)})
+    return out({"ok": True, "item": res["item"], "stage": res["stage"], "status": rec["status"],
+                **({"review": rec["review"]} if rec.get("review") else {}), "remaining": remaining(state)})
 
 
 # ---------------------------------------------------------------- status
@@ -553,10 +636,23 @@ def cmd_retry(a) -> int:
         return out({"ok": False, "reason": "a worker holds this item; retry when its stage ends"}, 1)
     rec = ((state or {}).get("items", {}).get(a.item) or {}).get("stages", {}).get(a.stage)
     was = rec["status"] if rec else None
-    if was == "done":
-        return out({"ok": False, "reason": f"{a.stage} is done on this item; delete its outputs to redo it"}, 1)
-    cleared = [marker(wd, a.stage, kind).name for kind in MARKERS if marker(wd, a.stage, kind).exists()]
-    if not cleared and was not in MARKERS:
+    archived: list[str] = []
+    st = next(s for s in stages["stages"] if s["stage"] == a.stage)
+    done_on_disk = all(exists(wd, p) for p in st["produces"])
+    if was == "done" or (was is None and done_on_disk):
+        # A done stage is redone only on purpose: a review marker says a check found something, or a
+        # person says --redo. Its outputs are set aside, never deleted, and only while no later stage
+        # has read them: a redo under a done price would leave the price resting on files that are gone.
+        if not (marker(wd, a.stage, REVIEW).exists() or getattr(a, "redo", False)):
+            return out({"ok": False, "reason": f"{a.stage} is done on this item and holds no review marker; pass --redo to redo it"}, 1)
+        later = [s["stage"] for s in stages["stages"][stages["stages"].index(st) + 1:]
+                 if s.get("enabled", True) and (all(exists(wd, p) for p in s["produces"])
+                                                or ((state or {}).get("items", {}).get(a.item, {}).get("stages", {}).get(s["stage"], {}).get("status") == "running"))]
+        if later:
+            return out({"ok": False, "reason": f"{a.stage} is done and {', '.join(later)} already used its outputs; a redo would strand them"}, 1)
+        archived = set_aside(wd, st, "")
+    cleared = [marker(wd, a.stage, kind).name for kind in (*MARKERS, REVIEW) if marker(wd, a.stage, kind).exists()]
+    if not cleared and not archived and was not in MARKERS:
         return out({"ok": False, "reason": f"nothing to retry: {a.stage} has no marker and is {was or 'not in this run'}"}, 1)
     clear_markers(wd, a.stage)
     who = f"{a.by}: " if a.by else ""
@@ -564,12 +660,15 @@ def cmd_retry(a) -> int:
     retries = None
     if rec is not None:
         requeue(rec, why)
+        rec.pop("review", None)
         retries = rec["retries"]
     if state is not None:
         state.setdefault("notes", []).append(
-            f"{now()} {a.item[:8]} {a.stage}: retried ({why}); was {was or 'unrecorded'}; cleared {cleared or 'no marker'}")
+            f"{now()} {a.item[:8]} {a.stage}: {'redone' if archived else 'retried'} ({why}); was {was or 'unrecorded'}; "
+            f"cleared {cleared or 'no marker'}" + (f"; set aside {archived}" if archived else ""))
         save_state(state)
-    return out({"ok": True, "run": a.run, "item": a.item, "stage": a.stage, "was": was, "cleared": cleared, "retries": retries})
+    return out({"ok": True, "run": a.run, "item": a.item, "stage": a.stage, "was": was, "cleared": cleared,
+                "archived": archived, "retries": retries})
 
 
 # ---------------------------------------------------------------- report
@@ -600,6 +699,11 @@ def cmd_report(a) -> int:
     if failed:
         lines += ["", "## Failed", ""]
         lines += [f"- {h[:8]} {f} at {s}: {r}" for h, f, s, r in failed]
+    review = [(h, item["file"], s, "; ".join(rec["review"])) for h, item in state["items"].items()
+              for s, rec in item["stages"].items() if rec.get("review")]
+    if review:
+        lines += ["", "## Done, for review", ""]
+        lines += [f"- {h[:8]} {f} at {s}: {r}" for h, f, s, r in review]
     if state["notes"]:
         lines += ["", "## Notes", ""] + [f"- {n}" for n in state["notes"]]
     c = state["cost"]
@@ -619,18 +723,23 @@ def main() -> int:
     s = sub.add_parser("init"); s.add_argument("--run", required=True); s.add_argument("--folder", help="a folder of model files, or one model file")
     s.add_argument("--items", help="comma-separated work-dir hashes to register, no folder needed")
     s.add_argument("--resume", action="store_true", help="register every work dir with an enabled stage still to run")
+    s.add_argument("--description", help="what the seller wrote about the object(s); into each item's meta.json, once")
     s.add_argument("--department", default="catalogue"); s.add_argument("--stages"); s.set_defaults(fn=cmd_init)
     s = sub.add_parser("next"); s.add_argument("--run", required=True); s.add_argument("--max", type=int)
     s.add_argument("--peek", action="store_true", help="show the briefs without marking them running"); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("record"); s.add_argument("--run", required=True); s.add_argument("--result", required=True)
     s.add_argument("--tokens", type=int); s.add_argument("--usd", type=float, help="exact cost if the runtime reports it; overrides the token price estimate")
-    s.add_argument("--model"); s.set_defaults(fn=cmd_record)
+    s.add_argument("--model", help="the worker's model, for the record; the price table when --usd is absent")
+    s.add_argument("--seconds", type=float, help="the attempt's wall clock"); s.add_argument("--worker-log", help="the director's transcript file for this attempt")
+    s.add_argument("--interrupted", action="store_true", help="the director was stopped while this worker ran: queued again, attempt not counted")
+    s.set_defaults(fn=cmd_record)
     s = sub.add_parser("status"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_status)
     s = sub.add_parser("report"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_report)
     s = sub.add_parser("retry", help="clear a stage's marker and queue it again in this run with fresh attempts")
     s.add_argument("--run", required=True); s.add_argument("--item", required=True, help="the work-dir hash")
     s.add_argument("--stage", required=True); s.add_argument("--reason", help="why a retry could end differently")
-    s.add_argument("--by", help="who asked: a person's name, or the supervisor"); s.set_defaults(fn=cmd_retry)
+    s.add_argument("--by", help="who asked: a person's name, or the supervisor")
+    s.add_argument("--redo", action="store_true", help="redo a done stage without a review marker: its outputs are set aside under .redo/"); s.set_defaults(fn=cmd_retry)
     a = ap.parse_args()
     try:
         return a.fn(a)

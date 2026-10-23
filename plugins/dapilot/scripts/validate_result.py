@@ -23,6 +23,8 @@ REQUIRED = {
     "agent": str, "department": str, "outputs": list, "summary": str,
 }
 NULLABLE_STR = ("needs_human", "reason")
+# Optional: a script's own code for a failure (`error`, the supervisor's tier one, 2026-10-23). Absent is fine.
+OPTIONAL_STR = ("error",)
 SUMMARY_MAX = 200
 
 
@@ -40,7 +42,10 @@ def validate(obj, expect: dict | None = None, workdir: str | None = None) -> lis
             errors.append(f"missing field: {key}")
         elif obj[key] is not None and not isinstance(obj[key], str):
             errors.append(f"{key}: expected string or null")
-    extra = set(obj) - set(REQUIRED) - set(NULLABLE_STR)
+    for key in OPTIONAL_STR:
+        if key in obj and obj[key] is not None and not isinstance(obj[key], str):
+            errors.append(f"{key}: expected string or null")
+    extra = set(obj) - set(REQUIRED) - set(NULLABLE_STR) - set(OPTIONAL_STR)
     if extra:
         errors.append(f"unknown fields: {sorted(extra)}")
     if errors:

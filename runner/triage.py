@@ -49,7 +49,7 @@ class Stop:
     """One stopped stage, as the supervise message describes it."""
     reason: str = ""
     error: str | None = None          # tier one: the script's code, when it gave one
-    marker: str = "failed"            # failed | blocked
+    marker: str = "failed"            # failed | blocked | review
     retries: int = 0                  # how often ledger.py retry already took this stage up again
     previous: str | None = None       # what it ended with the time before, from the ledger record
     changed: bool = False             # the seller's configuration fingerprint moved since the stop
@@ -122,6 +122,30 @@ class Blocked(Failure):
 
     def decide(self, stop: Stop) -> Decision:
         return self.leave(stop, "the stage asked a person; it waits for the answer", wait_for="a person")
+
+
+class Review(Failure):
+    """A done stage whose output a check found worth a look (`<stage>.review.json`, ledger.py 2026-10-23). The
+    run went on; the question is only whether a fresh attempt would plainly do better. Two problems say so,
+    a price under its own floor and a design with nothing kept, and only once; everything else is noted on
+    the dashboard and left, because a review is information for the seller, not a stop. The redo itself is
+    `ledger.py retry`, which refuses when a later stage already used the outputs, and that refusal is an
+    answer too."""
+    code = "review"
+    meaning = "a done stage whose output a check flagged; redone once for a plain defect, otherwise noted"
+    patterns = ()
+    redo_patterns = (r"under its own floor", r"no photos kept", r"no product name")
+    _redo = tuple(re.compile(p, re.IGNORECASE) for p in redo_patterns)
+
+    @classmethod
+    def matches(cls, stop: Stop) -> bool:
+        return stop.marker == "review"
+
+    def decide(self, stop: Stop) -> Decision:
+        if stop.retries == 0 and any(p.search(stop.reason or "") for p in self._redo):
+            return self.retry(stop, "a plain defect in the output; one redo while nothing later has used it")
+        return self.leave(stop, "done, with a note for the seller: " + (stop.reason or "see the review marker")[:200],
+                          wait_for="the seller's judgement; Redo on the dashboard")
 
 
 class ConfigMissing(Failure):
@@ -269,6 +293,8 @@ def classify(stop: Stop) -> Failure:
     """The kind of this stop. A known code wins outright; otherwise the first kind whose text pattern matches."""
     if stop.marker == "blocked":
         return Blocked()
+    if stop.marker == "review":
+        return Review()
     if stop.error and stop.error in BY_CODE:
         return BY_CODE[stop.error]()
     for kind in KINDS:
@@ -327,6 +353,11 @@ def selftest() -> int:
     # the code tier beats the text tier, and a blocked marker beats both
     assert classify(Stop(reason="timed out", error="content.file")).code == "content.file"
     assert classify(Stop(reason="timed out", marker="blocked")).code == "blocked"
+    # a review marker: one redo for a plain defect, a note for everything else and after the redo
+    r0 = decide(Stop(reason="price.json: the price 7.5 is under its own floor 8.99", marker="review"))
+    r1 = decide(Stop(reason="price.json: the price 7.5 is under its own floor 8.99", marker="review", retries=1))
+    r2 = decide(Stop(reason="research says not viable: the market median sits under the one-off break-even", marker="review"))
+    assert r0.action == "retry" and r0.delay_s == 0 and r1.action == "leave" and r2.action == "leave" and r2.wait_for
     # policies: a transient retries with a growing delay and then stops; a config stop waits for a change
     d0, d1, d3 = (decide(Stop(reason="timed out", retries=n)) for n in (0, 1, 3))
     assert (d0.action, d0.delay_s) == ("retry", 120) and d1.delay_s == 600 and d3.action == "leave"
@@ -344,7 +375,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("classify", help="decide one stop")
-    c.add_argument("reason"); c.add_argument("--error"); c.add_argument("--marker", default="failed", choices=("failed", "blocked"))
+    c.add_argument("reason"); c.add_argument("--error"); c.add_argument("--marker", default="failed", choices=("failed", "blocked", "review"))
     c.add_argument("--retries", type=int, default=0); c.add_argument("--previous"); c.add_argument("--changed", action="store_true")
     sub.add_parser("codes", help="the catalogue of kinds")
     sub.add_parser("selftest", help="classify the fixture reasons; exit 1 on a miss")
