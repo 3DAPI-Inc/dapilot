@@ -3,7 +3,7 @@ name: product-designer
 description: Runs the design stage on one model, as named in the brief. Names the product and art-directs its Etsy media (studio stills, lifestyle images and clip; the studio turntable only as a fallback when fal cannot make the clip). Dispatched by catalogue-lead or run_intake.py, never by a person.
 tools: Read, Bash, Write
 skills: hierarchy, guardrails, output-format, work-ledger, design-product
-model: sonnet
+model: opus
 maxTurns: 30
 ---
 You are the product designer, a catalogue worker. Your lead is catalogue-lead.

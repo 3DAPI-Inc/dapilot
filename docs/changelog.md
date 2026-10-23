@@ -5,6 +5,64 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **Preflight, output checks with a review marker, per-attempt cost, a clean
+  stop, and a bucket sync that deletes (2026-10-23).** `run_intake.py`
+  checks every connection the enabled stages need through `integrate.py
+  test` before it starts, and refuses with the integration named (`exit 2`,
+  `reason`, `error` code); the consumer posts it as `run.preflight` and the
+  platform shows it as the run's error. `check_outputs.py` is new: at
+  `record`, a hard problem in a stage's file fails the attempt (the file set
+  aside under `.redo/`), a soft one leaves the stage done with
+  `<stage>.review.json` and `review` on the record; `ledger.py retry` redoes
+  a done stage that holds a review marker (or `--redo`) while nothing later
+  used its outputs. The ledger keeps `attempts` per stage (cost, seconds,
+  model, worker log) and `--interrupted` queues a stage again without
+  counting the attempt; failed markers carry `worker_log` and `error`; the
+  result line may carry `error`. The director handles SIGTERM and SIGINT:
+  workers' process groups get the signal (they were in their own sessions
+  and outlived the director before), results are recorded interrupted, the
+  summary says `stopped`. Runner: `push` compares content (MD5 against the
+  ETag) and deletes what the last sync saw on both sides and the root no
+  longer holds (`.sync.json` manifest); refusals post the outcome as well as
+  the event; `stage.review`, `run.preflight` and `run.stopped` events;
+  review markers in the outcome. Supervisor: `Review` kind in triage, one
+  redo for a plain defect, a note otherwise. 3dapi: review stops are sent to
+  the supervisor and shown with Redo, the item card shows what each stage
+  cost and how often it ran, events say "run 2" instead of a hidden turn,
+  and a gate or retry claim the runner never acknowledged expires after 20
+  minutes with a compare-and-swap on the stale mark.
+- **The clip comes from FLUX 3 Max; the designer runs on Opus
+  (2026-10-23).** `lifestyle_video.i2v.endpoint` is
+  `blackforestlabs/flux-3-max/image-to-video` in the defaults, the template
+  and the dev store: 5 to 20 s, 720p or 1080p, a 10 s clip in about 11 s,
+  no audio when `generate_audio` is false (the ffmpeg strip stays as a
+  guard). `generate_video.py` builds the request per endpoint family in
+  `i2v_payload`, so the MiniMax engine of 2026-09-21 still runs through
+  `--endpoint`. Price at 1080p: 0.29 USD/s at list (1.74 a clip, against
+  0.96 on MiniMax), 0.0725/s until 2026-11-07; 720p is 0.17/s. The
+  standard item is 2.34 USD at list, so `design_product.py`'s own default
+  cap is 3.0 like the template's (it said 2.0). `product-designer.md` is
+  `model: opus`; the catalogue worker stays on Sonnet. The hosted runner
+  now writes the template's design endpoint blocks under the plan limits
+  every job (`template_release`, was `template_budget`), so the switch
+  reaches sellers whose config was seeded with MiniMax.
+- **The seller's description reaches research; the platform shows an
+  item's media (2026-10-23).** The dapilot web app already collected a
+  description under the drop zone and the backend carried it on the `run`
+  message; the consumer dropped it. Now `run_intake.py --description` hands
+  it to `ledger.py init`, which writes it to each item's `meta.json` once,
+  and the research-comparables skill reads it as the strongest witness for
+  what the object is and which aisle it sells in, without letting it
+  override the renders or the bounding box. Optional everywhere; the local
+  console does not collect one yet. The consumer's outcome now carries
+  `media` per item (the 3MF thumbnail, the preview drafts, the design
+  photos in listing order, the clip, as keys under the seller's prefix) and
+  pushes the root before posting it; the 3dapi backend presigns those keys
+  at `GET /dapilot/runs/:id/media` for a quarter of an hour and the run
+  card shows them: the drafts as a turntable, then the photos and the clip.
+  `preview_model.py`'s capture deadline is 600 s, from 240: a hosted
+  attempt timed out at 240 and the next took 223 on the server's CPU
+  Chrome, which is the thing to look at.
 - **Design refused its own paid step; retries locked; consumer idempotent
   (2026-10-23).** A hosted run's design worker wrote the brief, passed
   `check`, then blocked with "planned 1.56 USD exceeds remaining 1.4": it
