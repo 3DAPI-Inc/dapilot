@@ -5,6 +5,48 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **Design refused its own paid step; retries locked; consumer idempotent
+  (2026-10-23).** A hosted run's design worker wrote the brief, passed
+  `check`, then blocked with "planned 1.56 USD exceeds remaining 1.4": it
+  read Claude Code's `USD budget: $0.10/$1.50` reminder, its own token cap
+  from `budget.usd_per_stage.design`, as the fal cap, although the
+  guardrails skill says it is not. The template's design budget is now 5.0
+  (the dev store's value) so the line never reads below a plan, the
+  design-product skill says it again at the `produce` step, and the runner
+  writes the template's `budget` block under the plan limits on every job
+  so the figure reaches sellers seeded earlier. The same log showed one
+  approval and nine retry clicks: the queue's content deduplication
+  swallowed the repeats and also the one retry that was meant, sent inside
+  five minutes of the first. Messages now carry their own deduplication id;
+  the 3dapi backend locks a retry per marker as it locks the gate
+  (`retryStage`, `stopsOf` skips a marker with a retry on its way); and
+  `runner/consumer.py` starts nothing for an approval already on disk,
+  waits for a live director on the root instead of starting a second, and
+  leaves a message for redelivery if that wait runs out.
+- **The gate is answered once (2026-10-23).** On the platform the approve
+  button stayed live for the whole design-to-publish run, because the stored
+  outcome kept the open gate until the runner posted the next one, and every
+  further click sent another `approve` that `approve_price.py` answered with
+  the first price. Now the 3dapi backend (`answerGate` in
+  `backend/api/utils/dapilot-actions.ts`) writes `gate.answered` on the item
+  in the stored outcome in one conditional update before it sends the
+  message, refuses a second answer with 409, releases the mark when the queue
+  refuses or when the runner's `gate.answered` event says the price was
+  refused, and the dashboard card shows the sent price in place of the
+  buttons. Nothing in the plugin or the runner changed. Found while looking
+  into a hosted run that stopped at 1.50 USD: that figure is the design
+  worker's `budget.usd_per_stage.design` from the plugin template, seeded
+  into each seller's `config.json` on first run and persisted in S3, not the
+  15 USD run ceiling the backend's limits route sets.
+- **User documentation (2026-10-23).** `docs/documentation.md`, two parts:
+  the Claude plugin (requirements, install, quickstart, the Integrations
+  page, the eight stages, the price gate, the store, updates, limits) and
+  the platform integration at dapilot.dapi.digital (pages, sign-in, upload,
+  run states, the gate and retries on the dashboard, the supervisor, what
+  the platform holds per seller, the runner and queue underneath, routes,
+  operating it, open decisions). Written from the plugin README,
+  `docs/hosting.md`, `runner/README.md` and the 3dapi repository's
+  `frontend/dapilot`, backend dapilot routes and `docs/dapilot-platform.md`.
 - **The runner image installs the CLI as a binary (2026-10-22).**
   `runner/Dockerfile` downloads the pinned Claude Code release straight
   from Anthropic's release bucket (`ARG CLAUDE_DOWNLOADS`), verifies the

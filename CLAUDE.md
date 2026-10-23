@@ -16,6 +16,9 @@ addition has to fit it.
 
 Read before building anything:
 
+- `docs/documentation.md`  the user documentation, two parts: the Claude
+  plugin on a seller's own machine, and the platform integration at
+  dapilot.dapi.digital. Written for sellers and operators, not builders
 - `docs/agents.md`  the swarm hierarchy: roles, what each may and may not
   do, how work is handed over, and the rules that stop reruns and loops
 - `docs/skills.md`  how a skill is written, tested and judged
@@ -501,7 +504,7 @@ fall back to a default host. Use a key with only the scopes the run needs:
 PRICING for intake, ORDER for order triage, a separate print-farm key for
 fulfilment.
 
-Cost per item at current caps: research 1.2, price 0.6, design 1.5, copy 0.8
+Cost per item at current caps: research 1.2, price 0.6, design 5.0, copy 0.8
 USD of worker budget, about 1.56 USD of fal assets, 0.20 USD to activate on
 Etsy. Run ceiling 15 USD. Turns per worker, not routing, is where the money
 goes.
