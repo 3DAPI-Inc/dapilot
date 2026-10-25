@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dapilot.dapi.digital/schema/1/marker.schema.json",
+  "title": "dapilot stage marker",
+  "description": "work/<sha256>/<stage>.<status>.json, written only by the ledger. failed and blocked stop the item: no run dispatches the stage again until the marker is cleared (ledger.py retry, or a person). review stops nothing: the stage is done and a check found something to look at. The file is the fact; every run reads it the same way.",
+  "type": "object",
+  "required": ["schema_version", "stage", "status", "run", "attempt", "at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "stage": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["failed", "blocked", "review"] },
+    "run": { "type": "string", "minLength": 1, "description": "the run that wrote it" },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "at": { "type": "string", "format": "date-time" },
+    "reason": { "type": "string", "description": "failed: why" },
+    "question": { "type": "string", "description": "blocked: what the stage asked a person" },
+    "problems": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "review: what check_outputs.py found" },
+    "worker_log": { "type": "string", "description": "the director's transcript of the attempt, under runs/<run>/workers/" },
+    "error": { "type": "string", "description": "the script's own code for the failure, e.g. config.key_rejected" },
+    "clear": { "type": "string", "description": "a sentence for a person: how to let a run take the stage up again" },
+    "note": { "type": "string", "description": "a sentence for a person: what a review marker means" }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "failed" } } }, "then": { "required": ["reason"] } },
+    { "if": { "properties": { "status": { "const": "blocked" } } }, "then": { "required": ["question"] } },
+    { "if": { "properties": { "status": { "const": "review" } } }, "then": { "required": ["problems"] } }
+  ]
+}

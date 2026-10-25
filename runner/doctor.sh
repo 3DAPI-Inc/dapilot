@@ -15,6 +15,8 @@ echo "dapilot runner doctor"
 v=$(claude --version 2>/dev/null) && ok "claude $v" || fail "claude CLI"
 "$DAPILOT_PYTHON" -c 'import trimesh, scipy, networkx, numpy, jsonschema, fal_client' 2>/dev/null \
   && ok "python $("$DAPILOT_PYTHON" --version 2>&1 | cut -d' ' -f2) with the plugin's packages" || fail "python packages"
+"$DAPILOT_PYTHON" "$DAPILOT_PLUGIN_DIR/scripts/contract.py" selftest >/dev/null \
+  && ok "contract $(cat "$DAPILOT_PLUGIN_DIR/schema/VERSION"): every schema example validates" || fail "contract self-test (plugins/dapilot/schema)"
 f=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) && ok "$f" || fail "ffmpeg"
 "$CHROME" --headless=new --dump-dom about:blank >/dev/null 2>&1 && ok "chromium headless via $CHROME" || fail "chromium"
 [ -f "$DAPILOT_PLUGIN_DIR/studio/index.html" ] && ok "studio page bundled" || fail "studio page missing: run scripts/dev/build_studio.sh and rebuild"
@@ -130,6 +132,11 @@ case "${1:-}" in
     [ -n "${AWS_REGION:-}${AWS_DEFAULT_REGION:-}" ] || missing="$missing AWS_REGION"
     [ -z "$missing" ] || fail "environment not set:$missing"
     ok "consumer settings present"
+    # The platform's credentials (the Etsy app key, fal, this container's Anthropic key, the public
+    # API's address), fetched from the backend and tested against each platform before a message is
+    # taken. They are ours, not a seller's: a failure here stops the container, which Coolify shows as
+    # a failed deploy with the FAIL line in the log, instead of refusing every seller's run (2026-10-25).
+    "$DAPILOT_PYTHON" ./consumer.py preflight || fail "platform credentials: see the lines above; fix them on the backend and redeploy"
     if [ -n "${DAPILOT_SUPERVISE_QUEUE_URL:-}" ]; then
       # The consumer runs the supervisor's loop in a second thread when this is set; its judgement
       # must hold before a single decision is made.

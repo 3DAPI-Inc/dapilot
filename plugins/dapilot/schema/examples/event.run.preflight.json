@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "at": "2026-10-23T16:26:46+00:00",
+  "run": "86cd358a-d351-49c8-a767-4245450d6b31",
+  "kind": "run.preflight",
+  "data": {
+    "ok": false,
+    "text": "etsy: missing values",
+    "checked": [
+      { "integration": "dapi", "ok": true, "summary": "key accepted for dapilot, scopes PRICING, ORDER" },
+      { "integration": "etsy", "ok": false, "summary": "missing values" }
+    ],
+    "failed": ["etsy: missing values"],
+    "error": "config.env_missing"
+  }
+}

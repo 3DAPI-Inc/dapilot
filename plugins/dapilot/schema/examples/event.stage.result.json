@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "at": "2026-10-25T20:11:03+00:00",
+  "run": "911d5ba0-7a45-4b3d-888d-16440e747d29",
+  "kind": "stage.result",
+  "data": {
+    "item": "5b440216fa864ea527ade88741f4b1f55db20feb479c9d6b08c20f2b0bd72980",
+    "stage": "research",
+    "attempt": 2,
+    "status": "failed",
+    "seconds": 41.2,
+    "turns": 3,
+    "usd": 0.0412,
+    "summary": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
+    "reason": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
+    "cached": false
+  }
+}

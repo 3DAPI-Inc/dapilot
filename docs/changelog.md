@@ -5,6 +5,54 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The contract: one schema each for events, markers and outcomes; the
+  director writes events; the ledger is the only reader (2026-10-25).**
+  `plugins/dapilot/schema/` holds `event.schema.json`, `marker.schema.json`,
+  `outcome.schema.json`, `VERSION` (1.0) and examples; `scripts/contract.py`
+  validates and `selftest` runs the examples, wired into `test_phase0.sh`
+  and the runner's `doctor.sh`. `run_intake.py` writes one validated event
+  per line to `runs/<id>/events.jsonl` and every early exit is a
+  `run.refused` event with an error code. `ledger.py` validates the markers
+  it writes and gains `outcome --run <id>`: the run as one document (items,
+  stages, gates, markers, media), valid even for a run with no state. The
+  hosted runner no longer parses the stderr log with regexes nor walks
+  `state.json`, markers and `design.json` itself: it follows the events file
+  and asks the ledger. In 3dapi the backend vendors the schemas
+  (`backend/api/schemas/dapilot`, `scripts/vendor-dapilot-schemas.sh`,
+  ajv), validates every versioned event and outcome the runner posts (422
+  with the problems named), and tests that the vendored examples validate.
+  `docs/state-machine.md` is the one page of states, transitions, owners
+  and files, with seven proposals not done. Still reading work dirs
+  directly: `approve_price.py pending`, `server/app.py`, `watch_run.py`.
+
+- **An output file is whole or absent; the platform's credentials are
+  checked at deploy; runs can be deleted (2026-10-25).** `analyze_mesh.py
+  --out` writes `analysis.json` itself, to a temporary file renamed into
+  place and only on success; the skill no longer redirects stdout into the
+  file. A worker that died mid-step had left a 0-byte `analysis.json` on the
+  shark (2026-10-22), the ledger's glob took it for a done stage, research
+  failed on it in every later run and the supervisor had no rule for the
+  reason. `run_intake.py --preflight all|seller|none`: the hosted runner
+  passes `seller` (the 3DAPI key, the Etsy shop token when publish is live)
+  and tests the platform's own values once at container start,
+  `consumer.py preflight` in `doctor.sh --serve`, from the backend's new
+  `GET /internal/dapilot/platform/credentials`; a failure stops the
+  container and fails the deploy instead of refusing every seller's run.
+  The dashboard's run panel gets Delete (`DELETE /api/dapilot/runs/:id` in
+  3dapi): the row and the uploads go, the seller's store stays, queued and
+  running are refused.
+
+- **Etsy keystring is the API key, written down (2026-10-25).** Two hosted
+  runs on staging exited 2 at preflight with `etsy: missing values`. The
+  backend had the keystring under its old name `ETSY_API_KEY` and no
+  `ETSY_SHARED_SECRET`, because `docs/dapilot-platform.md` in 3dapi called
+  the secret optional. The plugin's `test_etsy` needs both. The platform
+  doc, the runner and plugin READMEs, the env template and CLAUDE.md now
+  say that keystring, `ETSY_API_KEY` and `ETSY_KEYSTRING` are one value and
+  that the pair is required. Found while reading why a director exits 2:
+  the reason is in the run row's `error` column and its `run.preflight`
+  event, never in the runner log.
+
 - **Preflight, output checks with a review marker, per-attempt cost, a clean
   stop, and a bucket sync that deletes (2026-10-23).** `run_intake.py`
   checks every connection the enabled stages need through `integrate.py

@@ -9,7 +9,7 @@ What it does, per message (docs/hosting.md, "The consumer"):
 
   receive -> heartbeat the visibility timeout -> pull the seller's prefix from the bucket to a local
   root -> write the store's env file and limits from the backend's per-seller values -> run the
-  plugin's director on that root -> post one event per director log line -> read the outcome from
+  plugin's director on that root -> forward each line of the director's events.jsonl as an event -> read the outcome from
   the ledger and the markers -> push the root back (secrets excluded) -> delete the message.
 
 Messages are ids and keys only, never files:
@@ -53,6 +53,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -65,6 +66,16 @@ HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DAPILOT_DATA_DIR") or "/data/dapilot")
 PLUGIN_DIR = Path(os.environ.get("DAPILOT_PLUGIN_DIR") or HERE.parent / "plugins" / "dapilot")
 PYTHON = os.environ.get("DAPILOT_PYTHON") or sys.executable
+
+
+def _schema_version() -> str:
+    try:
+        return (PLUGIN_DIR / "schema" / "VERSION").read_text().strip()
+    except OSError:
+        return "1.0"
+
+
+SCHEMA_VERSION = _schema_version()   # the plugin's contract version (plugins/dapilot/schema/VERSION)
 def aws_region() -> str:
     """The region for every AWS client. botocore reads only AWS_DEFAULT_REGION on its own; Coolify
     resources and the README name AWS_REGION, so both are accepted and the error names them."""
@@ -82,16 +93,11 @@ MANIFEST = ".sync.json"   # at the root: every path the last sync saw on both si
 # the intake copy of an upload (the bucket already holds it under intake/, and the work dir holds source.*).
 NEVER_SYNCED = ("store/.env", "store/etsy_token", "store/social/", "/.lock", "director.alive", ".sync.json", "intake/")
 
-# The director's own log lines, exactly as plugins/dapilot/scripts/watch_run.py reads them. Each one
-# becomes an event; the dashboard shows events, not logs.
-START = re.compile(r"^\[\d\d:\d\d:\d\d\] run (?P<run>\S+): (?P<items>\d+) items")
-DISPATCH = re.compile(r"^\[\d\d:\d\d:\d\d\] pass (?P<pass>\d+): dispatching (?P<n>\d+) worker\(s\): (?P<list>.*)$")
-RESULT = re.compile(r"^\[\d\d:\d\d:\d\d\] (?P<hash>[0-9a-f]{8}) (?P<stage>\w+)#(?P<attempt>\d+) -> (?P<status>\w+)"
-                    r"(?: \| (?P<secs>[\d.]+)s, (?P<turns>\d+) turns, (?P<usd>[\d.]+) USD)?(?: \| (?P<summary>.*))?$")
-REVIEW = re.compile(r"^\[\d\d:\d\d:\d\d\] (?P<hash>[0-9a-f]{8}) (?P<stage>\w+)#(?P<attempt>\d+) for review: (?P<problems>.*)$")
-PREFLIGHT = re.compile(r"^\[\d\d:\d\d:\d\d\] preflight (?P<verdict>ok|failed): (?P<text>.*)$")
-STOPPED = re.compile(r"^\[\d\d:\d\d:\d\d\] (?:stopped|stopping): (?P<text>.*)$")
-DONE = re.compile(r"^\[\d\d:\d\d:\d\d\] done: (?P<counts>\{.*?\}), (?P<workers>\d+) workers, (?P<usd>[\d.]+) USD, (?P<secs>[\d.]+)s")
+# What the director says to machines: runs/<run>/events.jsonl, one JSON document per line, each checked
+# against the plugin's schema/event.schema.json before it was written (2026-10-25). The runner follows
+# the file while the director runs and posts every line to the backend with `seller` added. The stderr
+# log is for people and goes into this process's own log; nothing is parsed out of it any more.
+EVENTS_FILE = "events.jsonl"
 
 
 def now() -> str:
@@ -254,6 +260,17 @@ class Backend:
             text = r.read().decode()
             return json.loads(text) if text.strip() else {}
 
+    def platform(self) -> dict[str, str]:
+        """The platform's share of every env file, with no seller: DAPI_API_URL, ETSY_KEYSTRING,
+        ETSY_SHARED_SECRET, FAL_KEY. A laptop test reads platform.json, or the same keys of credentials.json."""
+        if self.local is not None:
+            p = self.local / "platform.json"
+            if p.exists():
+                return json.loads(p.read_text())
+            creds = json.loads((self.local / "credentials.json").read_text())
+            return {k: v for k, v in creds.items() if k in PLATFORM_KEYS}
+        return self._http("GET", "/internal/dapilot/platform/credentials")
+
     def credentials(self, seller: str) -> dict[str, str]:
         """The store's env values for this seller: DAPI_API_KEY, DAPI_API_URL, ETSY_*, FAL_KEY; etsy_token when connected."""
         if self.local is not None:
@@ -267,7 +284,22 @@ class Backend:
             return json.loads(p.read_text()) if p.exists() else {}
         return self._http("GET", f"/internal/dapilot/sellers/{seller}/limits")
 
+    def event_doc(self, seller: str, doc: dict) -> None:
+        """One of the director's events, forwarded as it was written, with the seller named. The backend
+        validates it against its vendored copy of the plugin's event schema."""
+        ev = {**doc, "seller": seller}
+        if self.local is not None:
+            with (self.local / "events.jsonl").open("a") as f:
+                f.write(json.dumps(ev) + "\n")
+            return
+        try:
+            self._http("POST", f"/internal/dapilot/runs/{doc.get('run')}/events", ev)
+        except (urllib.error.URLError, OSError) as e:   # an event is telemetry; the run must not die for it
+            log(f"event not delivered ({doc.get('kind')}): {e}")
+
     def event(self, seller: str, run: str, kind: str, **data) -> None:
+        """The runner's own events (gate.answered, stage.retried, the supervisor's): not the director's,
+        so not under the plugin's schema; the backend's own schema takes them flat."""
         ev = {"at": now(), "seller": seller, "run": run, "kind": kind, **data}
         if self.local is not None:
             with (self.local / "events.jsonl").open("a") as f:
@@ -431,44 +463,64 @@ class Director:
     def start(self, args: list[str]) -> None:
         if (live := live_director(self.root)) is not None:
             raise RuntimeError(f"a director is alive on this root (run {live['run']}); not starting a second")
-        cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "run_intake.py"), *args, "--billing", "api"]
+        # --preflight seller: the director checks the seller's own key per run; the platform's values
+        # (Etsy app key, fal, Anthropic, the public API's address) were tested when this container
+        # started (preflight below), so a problem with them fails the deploy and not a seller's run.
+        cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "run_intake.py"), *args, "--billing", "api", "--preflight", "seller"]
         log(f"{self.seller}/{self.run}: {' '.join(cmd[2:])}")
         self.proc = subprocess.Popen(cmd, cwd=self.root, env=plugin_env(self.root), text=True,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 
     def tail(self) -> dict:
-        """Reads stderr line by line until exit, posting each recognised line; returns the stdout summary."""
+        """Follows runs/<run>/events.jsonl while the director runs, posting each complete line as it appears,
+        and drains stderr into this process's log in a thread so the director never blocks on a full pipe.
+        Returns the director's stdout summary with its exit code."""
         assert self.proc is not None and self.proc.stderr is not None
-        for line in self.proc.stderr:
-            line = line.rstrip("\n")
-            self._event(line)
-        out = self.proc.stdout.read() if self.proc.stdout else ""
-        self.proc.wait()
+        proc = self.proc
+        tag = f"{self.seller}/{self.run}"
+
+        def drain() -> None:
+            for line in proc.stderr:
+                log(f"{tag} | {line.rstrip(chr(10))[-300:]}")
+
+        t = threading.Thread(target=drain, daemon=True, name="director-stderr")
+        t.start()
+        events = self.root / "runs" / self.run / EVENTS_FILE
+        offset = 0
+        while proc.poll() is None:
+            offset = self._forward(events, offset)
+            time.sleep(0.5)
+        t.join(timeout=10)
+        out = proc.stdout.read() if proc.stdout else ""
+        proc.wait()
+        self._forward(events, offset)
         summary = next((json.loads(c) for c in _json_candidates(out) if c), {})
-        summary["exit"] = self.proc.returncode
+        summary["exit"] = proc.returncode
         return summary
 
-    def _event(self, line: str) -> None:
-        b, s, r = self.backend, self.seller, self.run
-        if m := START.match(line):
-            b.event(s, r, "run.started", items=int(m["items"]))
-        elif m := DISPATCH.match(line):
-            b.event(s, r, "pass.dispatched", **{"pass": int(m["pass"]), "workers": int(m["n"]), "briefs": m["list"]})
-        elif m := RESULT.match(line):
-            b.event(s, r, "stage.result", item8=m["hash"], stage=m["stage"], attempt=int(m["attempt"]), status=m["status"],
-                    seconds=float(m["secs"]) if m["secs"] else None, turns=int(m["turns"]) if m["turns"] else None,
-                    usd=float(m["usd"]) if m["usd"] else None, summary=m["summary"])
-        elif m := REVIEW.match(line):
-            b.event(s, r, "stage.review", item8=m["hash"], stage=m["stage"], attempt=int(m["attempt"]),
-                    problems=[p.strip() for p in m["problems"].split(";") if p.strip()])
-        elif m := PREFLIGHT.match(line):
-            b.event(s, r, "run.preflight", ok=m["verdict"] == "ok", text=m["text"][-500:])
-        elif m := STOPPED.match(line):
-            b.event(s, r, "run.stopped", text=m["text"][-300:])
-        elif m := DONE.match(line):
-            b.event(s, r, "run.ended", counts=m["counts"], workers=int(m["workers"]), usd=float(m["usd"]), seconds=float(m["secs"]))
-        else:
-            b.event(s, r, "log", line=line[-500:])
+    def _forward(self, events: Path, offset: int) -> int:
+        """Posts every complete line of the events file past `offset`; returns the new offset. A line
+        the director is still writing (no newline yet) waits for the next look. A line that is not
+        JSON is reported and skipped, never re-read."""
+        if not events.exists():
+            return offset
+        with events.open("rb") as fh:
+            fh.seek(offset)
+            chunk = fh.read()
+        if not chunk:
+            return offset
+        complete = chunk.rfind(b"\n") + 1
+        for raw in chunk[:complete].splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                doc = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                log(f"{self.seller}/{self.run}: events.jsonl holds a line that is not JSON; skipped: {raw[:120]!r}")
+                continue
+            self.backend.event_doc(self.seller, doc)
+        return offset + complete
 
     def stop(self) -> None:
         """SIGTERM to the director's group, as a deploy or a Spot reclaim gives us two minutes."""
@@ -491,63 +543,26 @@ def _json_candidates(text: str):
     yield ""
 
 
-def media_of(root: Path, wd: Path) -> dict:
-    """What the dashboard can show of an item, as keys under the seller's prefix (the root-relative paths
-    the sync uses): the 3MF's own thumbnail, the eight preview drafts, the design photos in listing order
-    and the listing clip, each only when the file exists. Empty lists and nulls are the common case early
-    in a run. The backend presigns these for the browser; nothing here is a URL."""
-    rel = lambda p: str(p.relative_to(root))  # noqa: E731
-    doc = {"name": None, "thumbnail": None, "drafts": [], "photos": [], "video": None}
-    for cand in ("thumbnails/plate_1.png", "thumbnails/top_1.png"):
-        if (wd / cand).exists():
-            doc["thumbnail"] = rel(wd / cand)
-            break
-    doc["drafts"] = [rel(p) for p in sorted((wd / "renders").glob("draft_*.png"))] if (wd / "renders").is_dir() else []
-    design_p = wd / "design.json"
-    if design_p.exists():
-        try:
-            design = json.loads(design_p.read_text() or "{}")
-        except ValueError:
-            design = {}
-        doc["name"] = design.get("name")
-        doc["photos"] = [{"id": ph.get("id"), "kind": ph.get("kind"), "key": rel(wd / ph["file"])}
-                         for ph in design.get("photos") or [] if ph.get("file") and (wd / ph["file"]).exists()]
-        video = design.get("video") or {}
-        if video.get("file") and (wd / video["file"]).exists():
-            doc["video"] = rel(wd / video["file"])
-    return doc
+def ledger_outcome(root: Path, run: str) -> dict:
+    """The run as one document, from the one reader of the work dirs: `ledger.py outcome` (2026-10-25).
+    Before this the runner walked state.json, the markers and design.json itself, a second set of rules
+    beside the ledger's. A run the director refused before registering anything is a valid outcome with
+    `started` false; a ledger that cannot answer at all gets the same shape with the error in `notes`."""
+    cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "ledger.py"), "outcome", "--run", run]
+    try:
+        res = subprocess.run(cmd, cwd=root, env=plugin_env(root), capture_output=True, text=True, timeout=120)
+        doc = next((json.loads(c) for c in _json_candidates(res.stdout) if c), None)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        res, doc = None, None
+        err = f"{e.__class__.__name__}: {e}"
+    else:
+        err = (res.stderr or res.stdout)[-300:].strip() or f"exit {res.returncode}"
+    if isinstance(doc, dict) and doc.get("items") is not None:
+        return doc
+    log(f"ledger outcome failed for {run}: {err}")
+    return {"schema_version": SCHEMA_VERSION, "run": run, "at": now(), "started": False, "counts": {}, "cost": None,
+            "gates_open": 0, "notes": [f"ledger outcome failed: {err}"], "items": []}
 
-
-def outcome(root: Path, run: str) -> dict:
-    """What the ledger and the markers say, as one document for the dashboard: per item per stage,
-    the open gates with their candidates, anything blocked or failed with its reason, and the media
-    the item has so far (`media_of`)."""
-    state_p = root / "runs" / run / "state.json"
-    state = json.loads(state_p.read_text()) if state_p.exists() else {}
-    items = []
-    for h, it in (state.get("items") or {}).items():
-        wd = root / it["workdir"]
-        rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": [],
-               "media": media_of(root, wd)}
-        if (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
-            price = json.loads((wd / "price.json").read_text() or "{}")
-            cands = (wd / "price.candidates.json")
-            rec["gate"] = {"proposal": price, "candidates": json.loads(cands.read_text()) if cands.exists() else None}
-        # Failed and blocked stop the item; a review marker (2026-10-23) stops nothing: the stage is done
-        # and its file names what a check found. The backend sends it to the supervisor like a failure.
-        for m in sorted(wd.glob("*.failed.json")) + sorted(wd.glob("*.blocked.json")) + sorted(wd.glob("*.review.json")):
-            doc = json.loads(m.read_text() or "{}")
-            rec["markers"].append({"file": m.name, **{k: doc.get(k) for k in ("stage", "reason", "question", "run", "attempt", "worker_log", "error", "problems")}})
-        items.append(rec)
-    counts: dict[str, int] = {}
-    for rec in items:                                   # the ledger keeps status per stage; the dashboard wants totals
-        for st in rec["stages"].values():
-            counts[st.get("status", "queued")] = counts.get(st.get("status", "queued"), 0) + 1
-    return {"run": run, "at": now(), "counts": counts, "cost": state.get("cost"),
-            "gates_open": sum(1 for r in items if r["gate"]), "notes": (state.get("notes") or [])[-20:], "items": items}
-
-
-# ------------------------------------------------------------------ the handlers
 
 def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], stop: threading.Event) -> dict:
     """One message, handled once. The handlers are idempotent against the queue's at-least-once delivery
@@ -616,11 +631,73 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
     # Pushed before the outcome is posted: the outcome names media keys the browser will ask the
     # backend to presign, and they must be in the bucket by the time the dashboard shows the row.
     pushed = bucket.push(root, f"sellers/{seller}")
-    doc = outcome(root, run)
+    doc = ledger_outcome(root, run)
     doc["director"] = summary
     backend.outcome(seller, run, doc)
-    log(f"{seller}/{run}: director exit {summary.get('exit')}, {pushed} files pushed")
+    log(f"{seller}/{run}: director exit {summary.get('exit')}"
+        + (f" ({summary.get('reason')})" if summary.get("reason") else "") + f", {pushed} files pushed")
     return {"ok": summary.get("exit") in (0, 1) and not stop.is_set(), "summary": summary, "outcome": doc}
+
+
+# ------------------------------------------------------------------ the platform's credentials, at start
+
+PLATFORM_KEYS = ("DAPI_API_URL", "ETSY_KEYSTRING", "ETSY_SHARED_SECRET", "FAL_KEY")
+PLATFORM_CHECKS = ("etsy", "fal", "claude")     # integrate.py's names; dapi is the seller's key, checked per run
+
+
+def preflight(backend: Backend) -> int:
+    """The platform's share of every seller's env file, tested against each platform before the consumer
+    takes a message (2026-10-25): the Etsy app key, the fal key, the Anthropic key this container holds,
+    and that the public API answers at its address. doctor.sh --serve runs this and exits on a failure,
+    so a value missing or refused on the backend fails the deploy, where a person is watching, instead of
+    every seller's run (staging refused every run for two days with `etsy: missing values`, 2026-10-23).
+    The director still checks the seller's own 3DAPI key per run (`--preflight seller`). One line per
+    check in doctor.sh's shape; the plugin's integrate.py does the asking against a throwaway store, so
+    the rules (what counts as ok, that an Etsy shop need not be authorized) are the plugin's. Nothing paid."""
+    try:
+        values = backend.platform()
+    except Exception as e:  # noqa: BLE001 - the backend is down or the route is missing: say which
+        print(f"FAIL  backend: platform credentials not served ({e.__class__.__name__}: {e})")
+        return 1
+    failed = 0
+    url = str(values.get("DAPI_API_URL") or "").strip().rstrip("/")
+    if not url:
+        print("FAIL  dapi: DAPI_API_URL is empty on the backend (DAPILOT_PUBLIC_API_URL)")
+        failed += 1
+    else:
+        # No seller key here, so /v1/me is expected to refuse: any HTTP answer proves the address.
+        status, err = None, None
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url + "/v1/me", headers={"Accept": "application/json"}), timeout=15) as r:
+                status = r.status
+        except urllib.error.HTTPError as e:
+            status = e.code
+        except Exception as e:  # noqa: BLE001
+            err = e
+        if status is not None:
+            print(f"ok    dapi: {url} answers (HTTP {status}; each seller's key is checked by their run)")
+        else:
+            print(f"FAIL  dapi: {url} does not answer ({err.__class__.__name__}: {err})")
+            failed += 1
+    store = Path(tempfile.mkdtemp(prefix="dapilot-preflight-"))
+    try:
+        write_env(store, {**values, "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", "")})
+        env = {**os.environ, "DAPILOT_STORE_DIR": str(store), "DAPILOT_PROJECT_DIR": str(store)}
+        for iid in PLATFORM_CHECKS:
+            try:
+                p = subprocess.run([PYTHON, str(PLUGIN_DIR / "scripts" / "integrate.py"), "test", "--integration", iid],
+                                   capture_output=True, text=True, env=env, timeout=120)
+                res = next((json.loads(c) for c in _json_candidates(p.stdout) if c), None) \
+                    or {"ok": False, "summary": (p.stderr or p.stdout)[-200:].strip() or "no answer"}
+            except (OSError, subprocess.TimeoutExpired) as e:
+                res = {"ok": False, "summary": f"{e.__class__.__name__}: {e}"}
+            # The Etsy app key passed and no shop is authorized: shops are the sellers' and come per run.
+            ok = bool(res.get("ok")) or (iid == "etsy" and res.get("action") == "authorize")
+            print(f"{'ok   ' if ok else 'FAIL '} {iid}: {res.get('summary') or ('ok' if ok else 'not ok')}")
+            failed += 0 if ok else 1
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+    return 1 if failed else 0
 
 
 # ------------------------------------------------------------------ the loop
@@ -704,13 +781,17 @@ def main() -> int:
         p.add_argument("--local-bucket", help="a directory standing in for the S3 bucket")
         p.add_argument("--local-backend", help="a directory standing in for the backend")
         p.add_argument("--director-args", default="", help="extra run_intake.py arguments, e.g. --dry-run")
+    pf = sub.add_parser("preflight", help="test the platform's credentials against each platform, one line each; exit 1 on a failure")
+    pf.add_argument("--local-backend", help="a directory standing in for the backend (platform.json or credentials.json)")
     a = ap.parse_args()
     if not (PLUGIN_DIR / "scripts" / "run_intake.py").exists():
         print(json.dumps({"ok": False, "reason": f"no plugin at {PLUGIN_DIR}; set DAPILOT_PLUGIN_DIR"})); return 2
     local_b = Path(a.local_bucket).resolve() if getattr(a, "local_bucket", None) else None
     local_k = Path(a.local_backend).resolve() if getattr(a, "local_backend", None) else None
-    bucket = Bucket(os.environ.get("DAPILOT_BUCKET"), local_b)
     backend = Backend(os.environ.get("DAPILOT_BACKEND_URL"), os.environ.get("DAPILOT_BACKEND_TOKEN"), local_k)
+    if a.cmd == "preflight":
+        return preflight(backend)
+    bucket = Bucket(os.environ.get("DAPILOT_BUCKET"), local_b)
     extra = [x for x in getattr(a, "director_args", "").split() if x]
     if a.cmd == "serve":
         return serve(backend, bucket, extra)

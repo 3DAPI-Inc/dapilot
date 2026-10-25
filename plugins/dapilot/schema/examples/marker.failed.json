@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "stage": "research",
+  "status": "failed",
+  "run": "51ea925d-6562-4188-b612-7cc645997a94",
+  "attempt": 2,
+  "reason": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
+  "at": "2026-10-22T17:21:11+00:00",
+  "worker_log": "runs/51ea925d-6562-4188-b612-7cc645997a94/workers/5b440216-research-2.log",
+  "clear": "delete this file (or Try again in the console) to let a run dispatch the stage again"
+}

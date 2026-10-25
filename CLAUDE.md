@@ -22,6 +22,8 @@ Read before building anything:
 - `docs/agents.md`  the swarm hierarchy: roles, what each may and may not
   do, how work is handed over, and the rules that stop reruns and loops
 - `docs/skills.md`  how a skill is written, tested and judged
+- `docs/state-machine.md`  every state a run, an item and a stage can be in,
+  who moves it, which file holds it; the contract's schemas encode it
 - `docs/market-research.md`  how viability and price are decided, what the
   runs showed, and the open decisions
 - `docs/changelog.md`  the dated build log, moved out of this file on
@@ -94,7 +96,8 @@ anything the pipeline produced.
   that runs the released plugin unchanged on ECS Fargate, driven by an SQS
   queue and S3, with the stack and the web app in the 3dapi repository. It
   touches the plugin only through the surface every local user has: a store
-  directory, env, the director's command line and the files it writes.
+  directory, env, the director's command line, its `events.jsonl` and
+  `ledger.py outcome`.
   Nothing in `runner/` is a dependency of the plugin.
 - **The skills will be published.** They drive 3DAPI through its documented
   public API and are meant to be usable by anyone holding a 3DAPI API key.
@@ -147,12 +150,35 @@ holds a review marker (or with `--redo`) sets its outputs aside and runs it
 again, only while no later stage has used them. The checks are lax on
 purpose: review should be rare and a failed attempt rarer.
 
+**The contract is three schemas, and the ledger is the only reader
+(2026-10-25).** `plugins/dapilot/schema/` holds `event.schema.json`,
+`marker.schema.json` and `outcome.schema.json` with a `VERSION` (major.minor,
+a reader accepts any minor of its major) and example documents;
+`scripts/contract.py` validates against them and `contract.py selftest` runs
+the examples (in `test_phase0.sh` and the runner's `doctor.sh`). The director
+writes one validated event per line to `runs/<id>/events.jsonl` (run.refused,
+run.preflight, run.started, pass.dispatched, stage.result, stage.review,
+run.stopped, run.ended, log); the stderr log says the same in words and is not
+a contract. The ledger validates every marker it writes and `ledger.py outcome
+--run <id>` emits the one document everything else reads: items, stages,
+gates, markers, media; a run with no state is a valid outcome with `started`
+false. The hosted runner forwards the events file and posts that outcome, and
+reads no work dir itself; the 3dapi backend validates both against a vendored
+copy of the schemas. `approve_price.py pending`, `server/app.py` and
+`watch_run.py` still read work dirs and the stderr log; they follow in a later
+pass. `docs/state-machine.md` is the page behind all of this.
+
 **The director checks every connection first.** `run_intake.py` runs
 `integrate.py test` for what the enabled stages will need (3DAPI, the Etsy
 app key for research and the shop token when publish is live, fal for
 design, the Anthropic key when billing to it) and does not start on a
 failure, so a dead token is found before fal is paid. `--no-preflight`
-skips it. SIGTERM or SIGINT end the run cleanly: every worker's process
+skips it. `--preflight seller` (2026-10-25) checks only what belongs to the
+seller, the 3DAPI key and the Etsy shop token when publish is live: the hosted
+runner passes it, having tested the platform's own values (the Etsy app key,
+fal, the Anthropic key, the public API's address) once at container start
+through `consumer.py preflight` in `doctor.sh --serve`, so a platform
+credential fails the deploy and never a seller's run. SIGTERM or SIGINT end the run cleanly: every worker's process
 group gets the signal, the ledger records them `--interrupted` (queued
 again, attempt not counted), the heartbeat file goes and the summary says
 `stopped`; a resume continues from there.
@@ -436,6 +462,7 @@ plugins/
       ledger.py                   run state: init, next, record, status, report; the only writer
       validate_result.py          the result-line contract check
       check_outputs.py            hard and soft problems in a stage's output files; the ledger runs it at record
+      contract.py                 validates events, markers and outcomes against schema/; `selftest` runs the examples
       dapi.py                     spec-driven client: spec, ops, describe, validate, call, upload
       analyze_mesh.py load_3mf.py make_fixtures.py quote.py strip_3mf.py assembly_3mf.py source_thumbnails.py
       preview_model.py            the preview stage script: eight WebGL drafts through capture_turntable
@@ -445,6 +472,7 @@ plugins/
       etsy_search.py etsy_auth.py market_stats.py pricing.py price_candidates.py product_record.py
       listing_copy.py etsy_listing.py publish_product.py
       social_post.py social/      Integration and Session contracts, instagram_api
+    schema/                       the contract: event, marker and outcome JSON Schemas, VERSION, examples/
 docs/
   agents.md skills.md store-plan.md market-research.md social-plan.md quickstart.md changelog.md
   hosting.md                      the hosted tier: runner, queue, storage, accounts, what is not built
@@ -528,7 +556,8 @@ DAPILOT_STORE_DIR store-private files (keys, Etsy token, config, fee schedule, p
                   quickstart, the hook) uses that rule and exports the result to what it starts.
                   On the dev Mac, ~/.claude/settings.json `env` pins it and DAPILOT_PYTHON to the
                   checkout, so a Code-tab worktree never starts a fresh store or venv.
-ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app; the OAuth token is $DAPILOT_STORE_DIR/etsy_token.json
+ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app; the keystring is Etsy's name for the API key (the 3DAPI
+                  backend holds it as ETSY_API_KEY); both required by preflight. OAuth token: $DAPILOT_STORE_DIR/etsy_token.json
 FAL_KEY (or FAL_API_KEY)             fal.ai, design stage paid assets only
 ANTHROPIC_API_KEY                    makes headless runs bill to the API instead of a subscription
 ```
