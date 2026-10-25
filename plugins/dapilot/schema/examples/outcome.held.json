@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "run": "911d5ba0-7a45-4b3d-888d-16440e747d29",
+  "at": "2026-10-25T18:58:21+00:00",
+  "started": true,
+  "counts": { "done": 3, "failed": 1, "queued": 4 },
+  "cost": { "tokens": 0, "usd": 0.0, "by_agent": {} },
+  "gates_open": 0,
+  "notes": [],
+  "items": [
+    {
+      "item": "5b440216fa864ea527ade88741f4b1f55db20feb479c9d6b08c20f2b0bd72980",
+      "file": "0-Happy_Shark_3MF.3mf",
+      "stages": {
+        "analyze": { "status": "done", "attempt": 0, "summary": "output present on disk" },
+        "quote": { "status": "done", "attempt": 0, "summary": "output present on disk" },
+        "preview": { "status": "done", "attempt": 0, "summary": "output present on disk" },
+        "research": {
+          "status": "failed",
+          "attempt": 0,
+          "reason": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
+          "summary": "failed in run 51ea925d-6562-4188-b612-7cc645997a94, held by research.failed.json"
+        },
+        "price": { "status": "queued", "attempt": 0 },
+        "design": { "status": "queued", "attempt": 0 },
+        "copy": { "status": "queued", "attempt": 0 },
+        "publish": { "status": "queued", "attempt": 0 }
+      },
+      "gate": null,
+      "markers": [
+        {
+          "file": "research.failed.json",
+          "stage": "research",
+          "reason": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
+          "question": null,
+          "run": "51ea925d-6562-4188-b612-7cc645997a94",
+          "attempt": 2,
+          "worker_log": null,
+          "error": null,
+          "problems": null
+        }
+      ],
+      "media": {
+        "name": null,
+        "thumbnail": "work/5b440216fa864ea527ade88741f4b1f55db20feb479c9d6b08c20f2b0bd72980/thumbnails/plate_1.png",
+        "drafts": [
+          "work/5b440216fa864ea527ade88741f4b1f55db20feb479c9d6b08c20f2b0bd72980/renders/draft_00.png"
+        ],
+        "photos": [],
+        "video": null
+      }
+    }
+  ],
+  "director": { "exit": 0 }
+}

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dapilot.dapi.digital/schema/1/outcome.schema.json",
+  "title": "dapilot run outcome",
+  "description": "What a run is now, as one document: per item per stage, the open gates with their candidates, every marker, and the media each item has so far. Produced only by `ledger.py outcome --run <id>`, which is the one reader of the work dirs; the hosted runner adds `director` and posts it when the director exits, the dashboard renders it, the supervisor reads its markers. Media are keys relative to the seller's root, never URLs.",
+  "type": "object",
+  "required": ["schema_version", "run", "at", "started", "counts", "gates_open", "items"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "run": { "type": "string", "minLength": 1 },
+    "at": { "type": "string", "format": "date-time" },
+    "started": { "type": "boolean", "description": "false when the run has no ledger state: the director refused before registering anything" },
+    "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "stage records by status, over every item" },
+    "cost": {
+      "type": ["object", "null"],
+      "properties": {
+        "tokens": { "type": "integer", "minimum": 0 },
+        "usd": { "type": "number", "minimum": 0 },
+        "by_agent": { "type": "object" }
+      }
+    },
+    "gates_open": { "type": "integer", "minimum": 0 },
+    "notes": { "type": "array", "items": { "type": "string" }, "description": "the ledger's last notes" },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+    "director": {
+      "type": "object",
+      "description": "added by whoever ran the director: its exit code and the summary it printed, or why it was not started",
+      "properties": {
+        "exit": { "type": ["integer", "null"] },
+        "reason": { "type": "string" },
+        "skipped": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["item", "file", "stages", "gate", "markers", "media"],
+      "properties": {
+        "item": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "file": { "type": ["string", "null"] },
+        "stages": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/stage" }
+        },
+        "gate": {
+          "type": ["object", "null"],
+          "description": "present while price.json exists and price.approved.json does not: the seller's turn",
+          "required": ["proposal", "candidates"],
+          "properties": {
+            "proposal": { "type": ["object", "null"] },
+            "candidates": { "type": ["object", "null"] },
+            "answered": { "type": ["object", "null"], "description": "written by the backend when a seller answers; never by the ledger" }
+          }
+        },
+        "markers": { "type": "array", "items": { "$ref": "#/$defs/marker" } },
+        "media": { "$ref": "#/$defs/media" }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["queued", "running", "done", "failed", "blocked"] },
+        "attempt": { "type": "integer", "minimum": 0 },
+        "summary": { "type": "string" },
+        "reason": { "type": "string" },
+        "question": { "type": "string" },
+        "previous": { "type": ["string", "null"] },
+        "review": { "type": "array", "items": { "type": "string" } },
+        "retries": { "type": "integer", "minimum": 0 },
+        "attempts": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "marker": {
+      "type": "object",
+      "description": "a marker file as the outcome shows it: its name and the fields a reader acts on",
+      "required": ["file", "stage"],
+      "properties": {
+        "file": { "type": "string", "pattern": "\\.(failed|blocked|review)\\.json$" },
+        "stage": { "type": ["string", "null"] },
+        "reason": { "type": ["string", "null"] },
+        "question": { "type": ["string", "null"] },
+        "problems": { "type": ["array", "null"], "items": { "type": "string" } },
+        "run": { "type": ["string", "null"] },
+        "attempt": { "type": ["integer", "null"] },
+        "worker_log": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] },
+        "retrying": { "type": ["object", "null"], "description": "written by the backend when a retry is requested; never by the ledger" }
+      }
+    },
+    "media": {
+      "type": "object",
+      "required": ["name", "thumbnail", "drafts", "photos", "video"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "thumbnail": { "type": ["string", "null"] },
+        "drafts": { "type": "array", "items": { "type": "string" } },
+        "photos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key"],
+            "properties": {
+              "id": { "type": ["string", "null"] },
+              "kind": { "type": ["string", "null"] },
+              "key": { "type": "string" }
+            }
+          }
+        },
+        "video": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

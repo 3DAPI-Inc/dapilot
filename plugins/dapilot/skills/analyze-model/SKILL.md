@@ -16,9 +16,11 @@ A brief with `stage: analyze`. The work dir holds `source.<ext>` and no
 ## Procedure
 1. If `analysis.json` exists, print a `cached:true` result and stop.
 2. Run
-   `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/analyze_mesh.py $WORKDIR/source.<ext> > $WORKDIR/analysis.json`.
-   Non-zero exit: delete the empty `analysis.json`, return `ok:false` with
-   the script's `reason`, stop. Never open the model file yourself.
+   `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/analyze_mesh.py $WORKDIR/source.<ext> --out $WORKDIR/analysis.json`.
+   The script writes `analysis.json` itself, atomically and only on
+   success; never redirect its output into the file. Non-zero exit: no file
+   was written, return `ok:false` with the script's `reason`, stop. Never
+   open the model file yourself.
 3. Read `analysis.json`. The one judgement here: if `bodies` > 1 and
    `largest_body_frac` < 0.9, this is an assembly. Put "multi-part, N
    bodies" in the summary so later stages expect several pieces.
@@ -27,7 +29,7 @@ A brief with `stage: analyze`. The work dir holds `source.<ext>` and no
 5. Append the log paragraph, remove `.lock`, print the result line.
 
 ## Outputs
-- `analysis.json`, exactly what the script printed. Fields: `triangles`,
+- `analysis.json`, written by the script, the same JSON it printed. Fields: `triangles`,
   `bbox_mm`, `volume_mm3`, `area_mm2`, `watertight`, `winding_consistent`,
   `bodies`, `watertight_bodies`, `largest_body_frac`.
 

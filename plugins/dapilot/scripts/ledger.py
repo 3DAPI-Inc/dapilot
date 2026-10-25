@@ -41,6 +41,13 @@ failed or blocked stayed so after the marker was removed, which made a
 retry under the same run id a no-op (seen on the hosted runner 2026-10-21).
 Now a failed or blocked record whose marker is gone is queued again on the
 next refresh, so rm still works as the marker says it does.
+
+The ledger is the only reader of the work dirs (2026-10-25). `outcome` emits
+the one document everything else reads: per item per stage, the open gates,
+every marker and the media an item has so far, validated against
+schema/outcome.schema.json. The hosted runner posts it, the dashboard renders
+it, the supervisor reads its markers; none of them opens a work dir. Markers
+are validated against schema/marker.schema.json as they are written.
 """
 from __future__ import annotations
 
@@ -62,6 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_result import validate  # noqa: E402
 from source_thumbnails import extract as extract_thumbnails  # noqa: E402
 from check_outputs import check as check_outputs  # noqa: E402  hard and soft problems in a stage's files
+from contract import check as contract_check  # noqa: E402  the marker and outcome schemas (schema/)
 
 SUPPORTED = {".stl", ".3mf", ".obj", ".step", ".stp"}
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -205,19 +213,19 @@ def write_marker(wd: Path, stage: str, kind: str, run: str, attempt: int, text: 
     """`extra` carries what helps a reader of the marker: the worker's transcript path (`worker_log`, the
     runs/<run>/workers/ file the director kept, 2026-10-23) and the script's error code when it gave one."""
     clear_markers(wd, stage)
-    marker(wd, stage, kind).write_text(json.dumps(
-        {"stage": stage, "status": kind, "run": run, "attempt": attempt,
-         ("question" if kind == "blocked" else "reason"): text, "at": now(), **{k: v for k, v in (extra or {}).items() if v},
-         "clear": "delete this file (or Try again in the console) to let a run dispatch the stage again"}, indent=2))
+    doc = {"stage": stage, "status": kind, "run": run, "attempt": attempt,
+           ("question" if kind == "blocked" else "reason"): str(text or f"{kind} with no reason given"), "at": now(),
+           **{k: str(v) for k, v in (extra or {}).items() if v},
+           "clear": "delete this file (or Try again in the console) to let a run dispatch the stage again"}
+    marker(wd, stage, kind).write_text(json.dumps(contract_check(doc, "marker"), indent=2))
 
 
 def write_review(wd: Path, stage: str, run: str, attempt: int, problems: list[str], worker_log: str | None = None) -> None:
-    marker(wd, stage, REVIEW).write_text(json.dumps(
-        {"stage": stage, "status": REVIEW, "run": run, "attempt": attempt, "problems": problems, "at": now(),
-         **({"worker_log": worker_log} if worker_log else {}),
-         "note": "the stage is done and the run went on; a supervisor or a person decides whether to redo it "
-                 "(ledger.py retry redoes a done stage that holds this file while nothing later has used its outputs)"},
-        indent=2))
+    doc = {"stage": stage, "status": REVIEW, "run": run, "attempt": attempt, "problems": [str(p) for p in problems], "at": now(),
+           **({"worker_log": str(worker_log)} if worker_log else {}),
+           "note": "the stage is done and the run went on; a supervisor or a person decides whether to redo it "
+                   "(ledger.py retry redoes a done stage that holds this file while nothing later has used its outputs)"}
+    marker(wd, stage, REVIEW).write_text(json.dumps(contract_check(doc, "marker"), indent=2))
 
 
 def clear_markers(wd: Path, stage: str) -> None:
@@ -671,6 +679,80 @@ def cmd_retry(a) -> int:
                 "archived": archived, "retries": retries})
 
 
+# ---------------------------------------------------------------- outcome
+
+def read_json(p: Path) -> dict | None:
+    """The file as an object, or None when it is missing, empty or not JSON. The one place that forgives."""
+    try:
+        doc = json.loads(p.read_text() or "null")
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def media_of(wd: Path) -> dict:
+    """What a reader can show of an item, as keys relative to the project root (the paths the hosted sync
+    uses under the seller's prefix): the 3MF's own thumbnail, the preview drafts, the design photos in
+    listing order and the listing clip, each only when the file exists. Empty lists and nulls are the
+    common case early in a run. Keys, never URLs: the backend presigns them for the browser."""
+    rel = lambda p: str(p.relative_to(root()))  # noqa: E731
+    doc: dict = {"name": None, "thumbnail": None, "drafts": [], "photos": [], "video": None}
+    for cand in ("thumbnails/plate_1.png", "thumbnails/top_1.png"):
+        if (wd / cand).exists():
+            doc["thumbnail"] = rel(wd / cand)
+            break
+    doc["drafts"] = [rel(p) for p in sorted((wd / "renders").glob("draft_*.png"))] if (wd / "renders").is_dir() else []
+    design = read_json(wd / "design.json") or {}
+    doc["name"] = design.get("name") if isinstance(design.get("name"), str) else None
+    doc["photos"] = [{"id": ph.get("id"), "kind": ph.get("kind"), "key": rel(wd / ph["file"])}
+                     for ph in design.get("photos") or [] if isinstance(ph, dict) and ph.get("file") and (wd / ph["file"]).exists()]
+    video = design.get("video") or {}
+    if isinstance(video, dict) and video.get("file") and (wd / video["file"]).exists():
+        doc["video"] = rel(wd / video["file"])
+    return doc
+
+
+MARKER_FIELDS = ("reason", "question", "run", "attempt", "worker_log", "error", "problems")
+
+
+def build_outcome(run: str) -> dict:
+    """The run as one document (schema/outcome.schema.json). A run with no state yet, a director that
+    refused before registering anything, is a valid outcome with `started` false and no items, so a
+    reader has one path. Refreshes the state in memory like `status` does and saves nothing."""
+    state_p = run_dir(run) / "state.json"
+    if not state_p.exists():
+        return contract_check({"run": run, "at": now(), "started": False, "counts": {}, "cost": None,
+                               "gates_open": 0, "notes": [], "items": []}, "outcome")
+    state = load_state(run)
+    stages = load_stages(state.get("stages_file"))
+    refresh(state, stages)
+    items = []
+    for h, it in state["items"].items():
+        wd = root() / it["workdir"]
+        rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": [],
+               "media": media_of(wd)}
+        if (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
+            rec["gate"] = {"proposal": read_json(wd / "price.json"), "candidates": read_json(wd / "price.candidates.json")}
+        # failed and blocked stop the item; review stops nothing, the stage is done and a check found something
+        for m in sorted(wd.glob("*.failed.json")) + sorted(wd.glob("*.blocked.json")) + sorted(wd.glob("*.review.json")):
+            doc = read_json(m) or {}
+            rec["markers"].append({"file": m.name, "stage": doc.get("stage") or m.name.split(".")[0],
+                                   **{k: doc.get(k) for k in MARKER_FIELDS}})
+        items.append(rec)
+    counts: dict[str, int] = {}
+    for rec in items:
+        for st in rec["stages"].values():
+            counts[st.get("status", "queued")] = counts.get(st.get("status", "queued"), 0) + 1
+    return contract_check({"run": run, "at": now(), "started": True, "counts": counts, "cost": state.get("cost"),
+                           "gates_open": sum(1 for r in items if r["gate"]),
+                           "notes": [str(n) for n in (state.get("notes") or [])[-20:]], "items": items}, "outcome")
+
+
+def cmd_outcome(a) -> int:
+    """Read-only, like status: the run as the dashboard, the runner and the supervisor read it."""
+    return out(build_outcome(a.run))
+
+
 # ---------------------------------------------------------------- report
 
 def cmd_report(a) -> int:
@@ -734,6 +816,8 @@ def main() -> int:
     s.add_argument("--interrupted", action="store_true", help="the director was stopped while this worker ran: queued again, attempt not counted")
     s.set_defaults(fn=cmd_record)
     s = sub.add_parser("status"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_status)
+    s = sub.add_parser("outcome", help="the run as one document (schema/outcome.schema.json): items, stages, gates, markers, media")
+    s.add_argument("--run", required=True); s.set_defaults(fn=cmd_outcome)
     s = sub.add_parser("report"); s.add_argument("--run", required=True); s.set_defaults(fn=cmd_report)
     s = sub.add_parser("retry", help="clear a stage's marker and queue it again in this run with fresh attempts")
     s.add_argument("--run", required=True); s.add_argument("--item", required=True, help="the work-dir hash")

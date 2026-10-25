@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dapilot.dapi.digital/schema/1/event.schema.json",
+  "title": "dapilot run event",
+  "description": "One line of runs/<run>/events.jsonl, written by the director (run_intake.py) as the run goes. The hosted runner forwards each line to the backend unchanged, with `seller` added; the dashboard renders `kind` and `data`. The human log on stderr says the same things in words and is not a contract.",
+  "type": "object",
+  "required": ["schema_version", "at", "run", "kind", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "#/$defs/version" },
+    "at": { "type": "string", "format": "date-time" },
+    "run": { "type": "string", "minLength": 1 },
+    "seller": { "type": "string", "description": "added by the hosted runner when it posts the event; absent in the file" },
+    "kind": {
+      "enum": [
+        "run.refused",
+        "run.preflight",
+        "run.started",
+        "pass.dispatched",
+        "stage.result",
+        "stage.review",
+        "run.stopped",
+        "run.ended",
+        "log"
+      ]
+    },
+    "data": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "run.refused" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "the director would not start, before any item was registered: a host problem (no claude CLI, a department missing from config) or the ledger refusing the folder",
+            "required": ["reason"],
+            "properties": {
+              "reason": { "type": "string" },
+              "error": { "type": ["string", "null"], "description": "the script's own code, e.g. config.env_missing" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "run.preflight" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["ok", "text"],
+            "properties": {
+              "ok": { "type": "boolean" },
+              "text": { "type": "string" },
+              "checked": { "type": "array", "items": { "type": "object" } },
+              "failed": { "type": "array", "items": { "type": "string" } },
+              "error": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "run.started" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["items"],
+            "properties": {
+              "items": { "type": "integer", "minimum": 0 },
+              "workers": { "type": "integer", "minimum": 1 },
+              "budget_per_worker": { "type": "number" },
+              "ceiling": { "type": ["number", "null"] },
+              "billing": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "pass.dispatched" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["pass", "workers", "briefs"],
+            "properties": {
+              "pass": { "type": "integer", "minimum": 1 },
+              "workers": { "type": "integer", "minimum": 1 },
+              "briefs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["item", "stage", "attempt"],
+                  "properties": {
+                    "item": { "$ref": "#/$defs/item" },
+                    "stage": { "type": "string" },
+                    "attempt": { "type": "integer", "minimum": 1 },
+                    "script": { "type": "boolean", "description": "a script stage, run by the director with no worker" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "stage.result" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "one attempt of one stage ended and the ledger recorded it; `status` is what the ledger made of it",
+            "required": ["item", "stage", "attempt", "status", "seconds", "turns", "usd", "summary"],
+            "properties": {
+              "item": { "$ref": "#/$defs/item" },
+              "stage": { "type": "string" },
+              "attempt": { "type": "integer", "minimum": 1 },
+              "status": { "enum": ["done", "queued", "failed", "blocked", "rejected"] },
+              "seconds": { "type": "number", "minimum": 0 },
+              "turns": { "type": "integer", "minimum": 0 },
+              "usd": { "type": "number", "minimum": 0 },
+              "summary": { "type": "string" },
+              "reason": { "type": ["string", "null"], "description": "why it is not done: the worker's reason, or the ledger's when it refused the result" },
+              "cached": { "type": "boolean" },
+              "interrupted": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "stage.review" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["item", "stage", "attempt", "problems"],
+            "properties": {
+              "item": { "$ref": "#/$defs/item" },
+              "stage": { "type": "string" },
+              "attempt": { "type": "integer", "minimum": 1 },
+              "problems": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "run.stopped" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["cause", "text"],
+            "properties": {
+              "cause": { "enum": ["signal", "budget", "stall"] },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "run.ended" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["ok", "counts", "workers", "usd", "seconds"],
+            "properties": {
+              "ok": { "type": "boolean" },
+              "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+              "workers": { "type": "integer", "minimum": 0 },
+              "usd": { "type": "number", "minimum": 0 },
+              "seconds": { "type": "number", "minimum": 0 },
+              "report": { "type": "string" },
+              "stopped": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "log" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "required": ["line"],
+            "properties": { "line": { "type": "string" } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$",
+      "description": "major.minor; a reader accepts any minor of the major it holds"
+    },
+    "item": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "the work dir: the sha256 of the model file"
+    }
+  }
+}

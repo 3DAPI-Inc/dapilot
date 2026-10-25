@@ -363,7 +363,13 @@ reads what they write:
   script's `error` code, so triage and the dashboard find the worker's output
   without searching.
 - **Preflight**: the director checks every connection the enabled stages need
-  before it starts and refuses with the integration named.
+  before it starts and refuses with the integration named. On the hosted tier
+  it is split (2026-10-25): the runner tests the platform's own credentials
+  once when its container starts (`consumer.py preflight` from `doctor.sh`,
+  values from `GET /internal/dapilot/platform/credentials`) and exits on a
+  failure, which fails the deploy; the director then runs with `--preflight
+  seller` and checks only the seller's 3DAPI key and, when publish is live,
+  their Etsy shop token.
 
 ## Accounts and keys
 
@@ -424,3 +430,14 @@ through the pipeline yet (one Etsy draft, never activated), the Instagram
 adapter is disabled, multicolour files are quoted as one filament, and there
 is no quantity variation on a listing. Before a seller pays, our own shop
 runs one model through the hosted path to a live listing and a sale.
+
+## The contract (2026-10-25)
+
+Three documents cross the plugin's boundary, each with one JSON Schema under
+`plugins/dapilot/schema/` and a `schema_version`: the director's events
+(`runs/<run>/events.jsonl`, one per line), the ledger's markers, and the
+outcome of a run (`ledger.py outcome`). The runner forwards the events file
+and posts the outcome; it reads no work dir and parses no log line. The 3dapi
+backend vendors the schemas (`backend/scripts/vendor-dapilot-schemas.sh`) and
+refuses a document that breaks them. `docs/state-machine.md` names every
+state behind the documents and who may move it.

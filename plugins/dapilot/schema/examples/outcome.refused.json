@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "run": "86cd358a-d351-49c8-a767-4245450d6b31",
+  "at": "2026-10-23T16:26:46+00:00",
+  "started": false,
+  "counts": {},
+  "cost": null,
+  "gates_open": 0,
+  "notes": [],
+  "items": [],
+  "director": {
+    "exit": 2,
+    "reason": "preflight failed: etsy: missing values"
+  }
+}

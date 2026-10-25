@@ -20,6 +20,7 @@ check "python deps present" "$PY -c 'import trimesh, scipy, networkx, jsonschema
 check "plugin manifest valid" "claude plugin validate plugins/dapilot"
 check "analyze single: 1 body" "[ \$($PY $S/analyze_mesh.py fixtures/single.stl | j \"d['bodies']\") = 1 ]"
 check "analyze multi: 8 bodies" "[ \$($PY $S/analyze_mesh.py fixtures/multi.stl | j \"d['bodies']\") = 8 ]"
+check "contract: every schema example validates" "$PY $S/contract.py selftest >/dev/null"
 check "3DAPI ops lists 35 operations" "[ \$($PY $S/dapi.py --spec $SPEC ops | j \"len(d['operations'])\") = 35 ]"
 check "3DAPI validate rejects bad body" "! $PY $S/dapi.py --spec $SPEC validate createQuote --body plugins/dapilot/skills/dapi-request/eval/bad-create-quote.json"
 check "3DAPI gated op dry-runs without --confirm" "DAPI_API_URL=http://127.0.0.1:1 DAPI_API_KEY=k $PY $S/dapi.py --spec $SPEC call updatePrintFarmOrderStatus --path orderId=X --body plugins/dapilot/skills/dapi-request/eval/status.json | j \"d['dry_run']\" | grep -q True"

@@ -21,9 +21,22 @@ its exit code and the files it writes.
 - `doctor.sh`: the image's default command, as `doctor.sh --serve`. Checks
   every tool, that the plugin is read-only, that the data directory is
   writable, renders two frames of a cube through the bundled studio page in
-  headless Chromium, and then starts the consumer. A failed check exits
-  before any message is taken. Without a flag it runs the checks and exits;
-  `--hold` keeps the container up idle after them.
+  headless Chromium, then (`--serve` only, 2026-10-25) fetches the platform's
+  credentials from the backend and tests them against each platform with
+  `consumer.py preflight` (the Etsy app key, fal, this container's Anthropic
+  key, that the public API answers), and then starts the consumer. A failed
+  check exits before any message is taken, which Coolify shows as a failed
+  deploy; before this the same failure refused every seller's run at the
+  director's preflight. The director is started with `--preflight seller`,
+  so each run still checks the seller's own 3DAPI key and nothing more.
+  Without a flag it runs the checks and exits; `--hold` keeps the container
+  up idle after them.
+- The runner reads no work dir and parses no log (2026-10-25). It follows
+  the director's `events.jsonl` while the director runs and forwards every
+  line, drains the stderr log into its own log, and asks `ledger.py outcome`
+  for the document it posts at exit. The backend validates both against its
+  vendored copy of the plugin's schemas; `docs/state-machine.md` is the page
+  behind them.
 - `consumer.py`: the queue consumer (`consumer.py serve`). Per message it
   pulls the seller's root from S3 to
   `$DAPILOT_DATA_DIR/<seller>`, seeds the store from the plugin's templates
@@ -77,10 +90,11 @@ What the backend has to serve, all under a service token:
 
 | Route | Direction | Body |
 |---|---|---|
-| `GET /internal/dapilot/sellers/{id}/credentials` | to the runner | the store's env values: `DAPI_API_KEY`, `DAPI_API_URL`, `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET`, `FAL_KEY`, optional `etsy_token` |
+| `GET /internal/dapilot/platform/credentials` | to the runner | the platform's share of every env file, no seller: `DAPI_API_URL`, `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET`, `FAL_KEY`; read once at container start by `consumer.py preflight` |
+| `GET /internal/dapilot/sellers/{id}/credentials` | to the runner | the store's env values: `DAPI_API_KEY`, `DAPI_API_URL`, `ETSY_KEYSTRING` (Etsy's name for the app's API key; the backend holds it as `ETSY_API_KEY`), `ETSY_SHARED_SECRET`, `FAL_KEY`, optional `etsy_token`. Preflight needs both Etsy values, so an empty one refuses every run |
 | `GET /internal/dapilot/sellers/{id}/limits` | to the runner | `config.json` keys the plan sets: `budget.usd_per_run`, `max_workers_per_lead`, `max_attempts` |
-| `POST /internal/dapilot/runs/{id}/events` | from the runner | `run.started`, `pass.dispatched`, `stage.result`, `gate.answered`, `stage.retried`, `run.ended`, `log` |
-| `POST /internal/dapilot/runs/{id}/outcome` | from the runner | per item per stage status, open gates with candidates, failed and blocked markers, the director's summary |
+| `POST /internal/dapilot/runs/{id}/events` | from the runner | one line of the director's `runs/<run>/events.jsonl` with `seller` added (`plugins/dapilot/schema/event.schema.json`: run.refused, run.preflight, run.started, pass.dispatched, stage.result, stage.review, run.stopped, run.ended, log), and the runner's own `gate.answered` and `stage.retried`, flat |
+| `POST /internal/dapilot/runs/{id}/outcome` | from the runner | `ledger.py outcome --run <id>` with `director` (exit code and stdout summary) added; `plugins/dapilot/schema/outcome.schema.json` |
 
 ## Trying the image
 
@@ -146,7 +160,10 @@ stack. Staging first, production the same way afterwards.
    - No port, no domain, no health check URL. "Running" is the health check,
      and the log is the report: one `ok` per check, `all checks passed`,
      then `starting the queue consumer`. A `FAIL` line names what the image
-     is missing and the container exits.
+     is missing and the container exits. The same happens for a platform
+     credential the backend serves empty or a platform refuses (an `ok` or
+     `FAIL` line each for dapi, etsy, fal and claude): fix the value on the
+     backend and redeploy; no seller sees it.
    - Environment: the table above.
    - A persistent volume at `/data/dapilot`. The container runs as uid 1000
      (`runner`); a volume created by an earlier root image needs

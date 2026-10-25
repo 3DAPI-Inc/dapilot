@@ -37,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from store_path import store_dir as _store_dir  # noqa: E402  one rule for every script
+from contract import check as contract_check  # noqa: E402  the event schema (schema/event.schema.json)
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["name"]
@@ -50,6 +51,28 @@ RUNNING: dict[int, subprocess.Popen] = {}   # pid -> every worker process alive 
 
 def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
+
+
+def emit(root: Path, run: str, kind: str, **data) -> None:
+    """One line of runs/<run>/events.jsonl (2026-10-25): what happened, as a document a machine reads.
+    The hosted runner forwards each line to the backend as it appears; the dashboard renders it. The
+    stderr log above says the same things in words for a person and is not a contract. Every event is
+    checked against schema/event.schema.json before it is written: a bad one is a bug in this file and
+    raises here, where a test finds it."""
+    doc = contract_check({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "run": run, "kind": kind,
+                          "data": {k: v for k, v in data.items() if v is not None}}, "event")
+    p = root / "runs" / run / "events.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc) + "\n")
+
+
+def refuse(root: Path, run: str, reason: str, error: str | None = None, **more) -> int:
+    """The director will not start: one run.refused event, the JSON summary on stdout, exit 2. Before this
+    the reason lived only on stdout, which the hosted runner kept and the runner's log did not show."""
+    emit(root, run, "run.refused", reason=reason, error=error)
+    print(json.dumps({"ok": False, "reason": reason, **({"error": error} if error else {}), **more}))
+    return 2
 
 
 def project_root() -> Path:
@@ -140,12 +163,17 @@ def agent_model(agent: str) -> str:
     return m.group(1) if m else "worker"
 
 
-def preflight(cfg: dict, stages_file: str | None) -> dict:
+def preflight(cfg: dict, stages_file: str | None, scope: str = "all") -> dict:
     """Every credential the enabled stages will need, checked against its platform before the run spends a
     cent (2026-10-23). `integrate.py test` does the checking, one free request each: 3DAPI for the quote,
     the Etsy app key for research, the Etsy shop token when publish is live, fal when design is enabled,
     the Anthropic key when the run bills to it. A dead Etsy token used to be found at publish, after fal
-    had been paid. Returns {"ok", "checked": [...], "failed": [...]} and decides nothing else."""
+    had been paid. Returns {"ok", "checked": [...], "failed": [...]} and decides nothing else.
+
+    `scope` is `all`, or `seller` (2026-10-25): only what belongs to the seller, the 3DAPI key and the
+    Etsy shop token when publish is live. The hosted runner passes `seller`, having tested the platform's
+    own values (the Etsy app key, fal, the Anthropic key) once when its container started; a problem with
+    those fails the deploy, where a person is watching, and not a seller's run."""
     stages_p = Path(stages_file) if stages_file else PLUGIN_ROOT / "skills" / "run-intake" / "reference" / "stages.json"
     try:
         enabled = {s["stage"] for s in json.loads(stages_p.read_text())["stages"] if s.get("enabled", True)}
@@ -159,6 +187,9 @@ def preflight(cfg: dict, stages_file: str | None) -> dict:
         needed.append(("fal", False))
     if os.environ.get("ANTHROPIC_API_KEY"):
         needed.append(("claude", False))
+    if scope == "seller":
+        # The 3DAPI key is the seller's; so is the Etsy shop. The app key, fal and Anthropic are not.
+        needed = [(iid, tok) for iid, tok in needed if iid == "dapi" or (iid == "etsy" and tok)]
     checked, failed = [], []
     for iid, want_token in needed:
         p = subprocess.run([sys.executable, str(INTEGRATE), "test", "--integration", iid],
@@ -394,18 +425,22 @@ def main() -> int:
     ap.add_argument("--description", help="what the seller wrote about the upload, optional; the ledger keeps it on each item for research")
     ap.add_argument("--dry-run", action="store_true", help="init and show the first pass of worker commands; launch nothing")
     ap.add_argument("--no-preflight", action="store_true", help="skip the credential checks before the run (they cost a few free requests)")
+    ap.add_argument("--preflight", choices=["all", "seller", "none"], default="all",
+                    help="which credentials to check first: all (default); seller, only the 3DAPI key and the Etsy shop token, "
+                         "for a host that checked the platform's own values at start; none, the same as --no-preflight")
     ap.add_argument("--billing", choices=["auto", "api", "subscription"], default=os.environ.get("DAPILOT_BILLING", "auto"),
                     help="api: require ANTHROPIC_API_KEY; subscription: hide the key from workers so they use the logged-in account; auto: whatever is set")
     a = ap.parse_args()
 
     root = project_root()
+    run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
     os.environ["DAPILOT_PROJECT_DIR"] = str(root)
     load_env(root)
     os.environ.setdefault("DAPILOT_PYTHON", sys.executable)
     cfg = load_config(root)
     dept = cfg["departments"].get(a.department)
     if not dept:
-        print(json.dumps({"ok": False, "reason": f"unknown department {a.department}"})); return 2
+        return refuse(root, run, f"unknown department {a.department}", "config.department")
     if not shutil.which("claude"):
         # Claude's installer puts it in ~/.local/bin, which a service or a fresh tmux shell may not have on PATH;
         # workers inherit whatever this finds
@@ -414,27 +449,31 @@ def main() -> int:
                 os.environ["PATH"] = f"{d}{os.pathsep}{os.environ.get('PATH', '')}"
                 break
     if not shutil.which("claude"):
-        print(json.dumps({"ok": False, "reason": f"claude CLI not on PATH ({os.environ.get('PATH')}) nor in ~/.local/bin"})); return 2
+        return refuse(root, run, f"claude CLI not on PATH ({os.environ.get('PATH')}) nor in ~/.local/bin", "runtime.tool_missing")
     if a.billing == "subscription":
         os.environ.pop("ANTHROPIC_API_KEY", None)
     if a.billing == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
-        print(json.dumps({"ok": False, "reason": "--billing api but ANTHROPIC_API_KEY is not set"})); return 2
+        return refuse(root, run, "--billing api but ANTHROPIC_API_KEY is not set", "config.env_missing")
     billing = "API key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription (logged-in account)"
     a.max_workers = a.max_workers or dept.get("max_workers") or cfg.get("max_workers_per_lead", 3)
     a.budget_per_worker = a.budget_per_worker or cfg.get("budget", {}).get("usd_per_item", 0.5)
     ceiling = cfg.get("budget", {}).get("usd_per_run")
-    run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
 
     if not (a.folder or a.items or a.resume):
-        print(json.dumps({"ok": False, "reason": "give a folder, --items or --resume"})); return 2
-    if not a.no_preflight and not a.dry_run:
-        pf = preflight(cfg, a.stages)
+        return refuse(root, run, "give a folder, --items or --resume", "usage")
+    scope = "none" if a.no_preflight else a.preflight
+    if scope != "none" and not a.dry_run:
+        pf = preflight(cfg, a.stages, scope)
         if not pf["ok"]:
-            log("preflight failed: " + "; ".join(pf["failed"]))
-            print(json.dumps({"ok": False, "reason": "preflight failed: " + "; ".join(pf["failed"]), "preflight": pf,
-                              "error": "config.key_rejected" if any("rejected" in f or "refused" in f for f in pf["failed"]) else "config.env_missing"}))
+            text = "; ".join(pf["failed"])
+            error = "config.key_rejected" if any("rejected" in f or "refused" in f for f in pf["failed"]) else "config.env_missing"
+            log("preflight failed: " + text)
+            emit(root, run, "run.preflight", ok=False, text=text, checked=pf["checked"], failed=pf["failed"], error=error)
+            print(json.dumps({"ok": False, "reason": "preflight failed: " + text, "preflight": pf, "error": error}))
             return 2
-        log("preflight ok: " + ", ".join(c["integration"] for c in pf["checked"]))
+        text = ", ".join(c["integration"] for c in pf["checked"])
+        log("preflight ok: " + text)
+        emit(root, run, "run.preflight", ok=True, text=text, checked=pf["checked"], failed=[])
     init_args = ["init", "--run", run, "--department", a.department]
     if a.folder:
         init_args += ["--folder", a.folder]
@@ -448,8 +487,10 @@ def main() -> int:
         init_args += ["--description", a.description]
     init = ledger(*init_args)
     if not init.get("ok"):
-        print(json.dumps(init)); return 2
+        return refuse(root, run, str(init.get("reason") or "the ledger refused to register the run"), "ledger.init", init=init)
     log(f"run {run}: {init['items']} items, workers<= {a.max_workers}, budget/worker {a.budget_per_worker} USD, ceiling {ceiling}, billing: {billing}")
+    emit(root, run, "run.started", items=int(init["items"]), workers=int(a.max_workers),
+         budget_per_worker=float(a.budget_per_worker), ceiling=ceiling, billing=billing)
 
     t_start = time.time()
     spent = 0.0
@@ -486,13 +527,17 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
                 break
             stalls += 1
             log(f"pass {passes}: nothing ready, work_left={st['work_left']} counts={st['counts']}")
+            emit(root, run, "log", line=f"pass {passes}: nothing ready, work_left={st['work_left']} counts={st['counts']}")
             if stalls >= 2:
                 log("two passes changed nothing; stopping")
+                emit(root, run, "run.stopped", cause="stall", text="two passes changed nothing")
                 break
             time.sleep(5)
             continue
         stalls = 0
         log(f"pass {passes}: dispatching {len(briefs)} worker(s): " + ", ".join(f"{b['item'][:8]}/{b['stage']}#{b['attempt']}" for b in briefs))
+        emit(root, run, "pass.dispatched", **{"pass": passes}, workers=len(briefs),
+             briefs=[{"item": b["item"], "stage": b["stage"], "attempt": int(b["attempt"]), "script": bool(b.get("script"))} for b in briefs])
         with ThreadPoolExecutor(max_workers=a.max_workers) as pool:
             # per worker, not per run: one stuck worker must not hold an item for the run's whole budget
             futures = {pool.submit(run_worker, b, a, cfg, root, worker_minutes(b, cfg) * 60): b for b in briefs}
@@ -508,14 +553,23 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
                              *(["--interrupted"] if meta.get("interrupted") else []), stdin=json.dumps(result))
                 log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} -> {rec.get('status') or rec.get('reason')}"
                     f" | {meta['seconds']}s, {meta['turns']} turns, {meta['usd']:.4f} USD | {result.get('summary', '')[:90]}")
+                emit(root, run, "stage.result", item=b["item"], stage=b["stage"], attempt=int(b["attempt"]),
+                     status=rec.get("status") or "rejected", seconds=float(meta["seconds"]), turns=int(meta.get("turns") or 0),
+                     usd=round(float(meta["usd"]), 4), summary=str(result.get("summary") or "")[:300],
+                     reason=(str(result.get("reason") or rec.get("reason") or "") or None),
+                     cached=bool(result.get("cached")), interrupted=bool(meta.get("interrupted")))
                 if rec.get("review"):
                     log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} for review: " + "; ".join(rec["review"])[:300])
+                    emit(root, run, "stage.review", item=b["item"], stage=b["stage"], attempt=int(b["attempt"]),
+                         problems=[str(p) for p in rec["review"]])
         if STOPPING.is_set():
             log("stopped: signal received; the pass was recorded and the run can be resumed")
+            emit(root, run, "run.stopped", cause="signal", text="signal received; the pass was recorded and the run can be resumed")
             break
         st = ledger("status", "--run", run)
         if st.get("over_budget"):
             log(f"spend {st['cost']['usd']} USD over ceiling {ceiling}; stopping")
+            emit(root, run, "run.stopped", cause="budget", text=f"spend {st['cost']['usd']} USD over ceiling {ceiling}")
             break
         if not st.get("work_left"):
             break
@@ -530,6 +584,8 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
         **({"stopped": "signal"} if STOPPING.is_set() else {}),
     }
     log(f"done: {counts}, {dispatched_total} workers, {spent:.4f} USD, {summary['seconds']}s -> {rep['report']}")
+    emit(root, run, "run.ended", ok=bool(summary["ok"]), counts={k: int(v) for k, v in counts.items()}, workers=int(dispatched_total),
+         usd=round(float(spent), 4), seconds=float(summary["seconds"]), report=str(rep["report"]), stopped=STOPPING.is_set() or None)
     print(json.dumps(summary, indent=2))
     return 0 if summary["ok"] else 1
 
