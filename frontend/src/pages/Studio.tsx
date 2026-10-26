@@ -140,7 +140,12 @@ export default function Studio() {
         if (!res.ok) throw new Error(`${res.status} fetching the model`);
         const blob = await res.blob();
         if (cancelled) return;
-        const name = decodeURIComponent(url.split('/').pop() || 'model.stl');
+        // The format comes from the name. A presigned S3 URL carries a query string after the file name and a
+        // blob: URL has no name at all, so the dashboard puts the name in the fragment ("#/model.stl") and
+        // the path is read without its query (2026-10-26).
+        const u = new URL(url, window.location.href);
+        const hinted = u.hash.replace(/^#\/?/, '');
+        const name = decodeURIComponent((hinted || u.pathname).split('/').pop() || 'model.stl');
         await open(new File([blob], name));
       } catch (e) {
         const why = e instanceof Error ? e.message : String(e);

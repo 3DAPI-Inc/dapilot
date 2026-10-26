@@ -54,6 +54,17 @@ for captures. The script fails with a one-line reason when one is missing.
    cover became "Lounging Squirrel" on a bookshelf, 2026-10-26). Only when
    `seller_says` is null do research's identity and the comparables decide.
 
+   **The seller's gate choices come first.** `context.approved.color` is the
+   filament colour the seller chose when they approved the price: when it is
+   set, `color` is that and nothing else. `context.grid`, when present, is
+   the set of stills the seller's own browser drew at that moment, in that
+   colour, from the item's display model (a painted or assembled 3MF in its
+   real colours): pick `hero_yaw` and `angles` from `grid.yaws` and
+   `elevation` from `grid.elevations`, and keep `rotate` at `0,0,0`. `check`
+   snaps a brief onto the grid and records what moved in `plan.json`; the
+   stills are then copied from the grid and no renderer runs on this machine
+   (2026-10-26). Without a grid the stills are drawn here, as before.
+
    Decide, with `reference/art-direction.md`:
    - `name`: what a buyer calls it, 2 to 5 words, in the seller's terms when
      `seller_says` names the thing; the count is the copy's job, so no "set

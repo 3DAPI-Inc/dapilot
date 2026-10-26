@@ -717,7 +717,7 @@ def media_of(wd: Path) -> dict:
     return doc
 
 
-MARKER_FIELDS = ("reason", "question", "run", "attempt", "worker_log", "error", "problems")
+MARKER_FIELDS = ("reason", "question", "run", "attempt", "at", "worker_log", "error", "problems")   # `at` since 2026-10-26: a held stop says how old it is
 
 
 # ---------------------------------------------------------------- spend
@@ -858,11 +858,43 @@ def _pick(d: dict | None, keys: tuple) -> dict:
     return {k: d.get(k) for k in keys if k in d}
 
 
+RESEARCH_LISTINGS = 40   # comparables the research report carries, heaviest first (2026-10-26)
+RESEARCH_REJECTS = 10    # the nearest misses, so the seller sees what the rules kept out and why
+
+
+def _listing_row(r: dict, total_weight: float) -> dict | None:
+    """One comparable as the dashboard lists it: the listing, its shop, what it sells for per unit, how
+    much it sells (the weight behind the band, and that weight's share of the whole), how well it fit the
+    rules, and the words that kept it out when it was rejected. Null without a link."""
+    if not isinstance(r, dict) or not isinstance(r.get("url"), str):
+        return None
+    shop = r.get("shop") if isinstance(r.get("shop"), dict) else {}
+    offer = r.get("offer") if isinstance(r.get("offer"), dict) else {}
+    est = r.get("sales_est") if isinstance(r.get("sales_est"), dict) else {}
+    w = float(r["market_weight"]) if isinstance(r.get("market_weight"), (int, float)) and not isinstance(r.get("market_weight"), bool) else None
+    excl = r.get("excluded_by")
+    return {"listing_id": r.get("listing_id"), "title": str(r.get("title") or "")[:140], "url": r["url"],
+            "price": _num(r.get("price")), "unit_price": _num(r.get("unit_price")), "currency": str(r.get("currency") or "USD"),
+            "units": offer.get("units") if isinstance(offer.get("units"), int) else None,
+            "shop": shop.get("name") if isinstance(shop.get("name"), str) else None,
+            "sold": shop.get("sold") if isinstance(shop.get("sold"), int) else None,
+            "reviews": r.get("reviews") if isinstance(r.get("reviews"), int) else None,
+            "favorers": r.get("favorers") if isinstance(r.get("favorers"), int) else None,
+            "units_per_day": round(float(est["units_per_day"]), 4) if isinstance(est.get("units_per_day"), (int, float)) else None,
+            "relevance": round(float(r["relevance"]), 3) if isinstance(r.get("relevance"), (int, float)) else None,
+            "weight": round(w, 6) if w is not None else None,
+            "weight_share": round(w / total_weight, 4) if w is not None and total_weight > 0 else None,
+            "materials": [str(m) for m in (r.get("materials") or [])[:4]],
+            "excluded_by": [str(x) for x in excl] if isinstance(excl, list) else (str(excl) if excl else None)}
+
+
 def stage_report(wd: Path, stage: str) -> dict | None:
     """What the stage made, as the dashboard shows it (2026-10-26): a small object per stage read from the
     stage's own output files, so the words and figures leave the work dir with the outcome instead of
-    staying on the runner. Null when the stage has produced nothing yet. Bounded: six comparables, the
-    scenes as written, the listing text whole (Etsy caps it at 102 and 13 and a few thousand characters)."""
+    staying on the runner. Null when the stage has produced nothing yet. Bounded: research's rules, counts
+    and up to RESEARCH_LISTINGS comparables with their weights (the whole judgement, so the seller can see
+    which market was chosen and why), the scenes as written, the listing text whole (Etsy caps it at 102
+    and 13 and a few thousand characters)."""
     if stage == "analyze":
         a = read_json(wd / "analysis.json")
         return _pick(a, ("bbox_mm", "volume_mm3", "area_mm2", "triangles", "bodies", "watertight", "watertight_bodies")) or None
@@ -885,12 +917,37 @@ def stage_report(wd: Path, stage: str) -> dict | None:
         comps, viab = comps or {}, viab or {}
         market = gate_market(wd, read_json(wd / "price.candidates.json"))
         ident = comps.get("identity") if isinstance(comps.get("identity"), dict) else {}
+        rules = comps.get("rules") if isinstance(comps.get("rules"), dict) else {}
+        vm = viab.get("market") if isinstance(viab.get("market"), dict) else {}
+        conc = vm.get("weight_concentration") if isinstance(vm.get("weight_concentration"), dict) else {}
+        demand = vm.get("demand") if isinstance(vm.get("demand"), dict) else {}
+        offer = viab.get("offer") if isinstance(viab.get("offer"), dict) else {}
+        summary = read_json(wd / "research" / "summary.json") or {}
+        pages = summary.get("pages")
+        # every comparable the rules selected, heaviest first, with its share of the weight the band rests on
+        rows = [r for r in (comps.get("comparables") or []) if isinstance(r, dict)] if isinstance(comps.get("comparables"), list) else []
+        weights = [float(r["market_weight"]) for r in rows if isinstance(r.get("market_weight"), (int, float)) and not isinstance(r.get("market_weight"), bool)]
+        total_w = sum(weights)
+        rows.sort(key=lambda r: -(float(r["market_weight"]) if isinstance(r.get("market_weight"), (int, float)) else 0.0))
+        listings = [x for x in (_listing_row(r, total_w) for r in rows[:RESEARCH_LISTINGS]) if x]
+        rejects = [x for x in (_listing_row(r, 0.0) for r in (comps.get("rejected_sample") or [])[:RESEARCH_REJECTS]) if x]
         return {"product": comps.get("product") or viab.get("product"), "queries": comps.get("queries"),
                 "taxonomy_id": comps.get("taxonomy_id"), "identity": _pick(ident, ("object", "confidence", "reason", "witnesses")),
-                "n_scored": comps.get("n_scored"), "n_selected": comps.get("n_selected"),
+                # the word rules the worker wrote (research/rules.json), the one judgement that chose the market
+                "rules": _pick(rules, ("noun", "required_any", "excluded", "materials_allowed", "materials_excluded", "notes")),
+                "search": {"fetched": summary.get("n_fetched"), "kept": summary.get("n_kept"), "dropped": summary.get("n_dropped"),
+                           "pages": len(pages) if isinstance(pages, list) else pages, "stop_reason": summary.get("stop_reason")},
+                "n_scored": comps.get("n_scored"), "n_selected": comps.get("n_selected"), "n_collapsed": comps.get("n_collapsed"),
+                "rejected_count": comps.get("rejected_count"), "min_relevance": comps.get("min_relevance"),
                 "verdict": viab.get("verdict"), "verdict_reason": viab.get("verdict_reason"),
-                "offer": _pick(viab.get("offer") if isinstance(viab.get("offer"), dict) else {}, ("units", "note")),
-                "market": {k: market.get(k) for k in ("currency", "n", "min", "p25", "median", "p75", "max", "thin")},
+                "offer": _pick(offer, ("units", "source", "note", "modal_units", "modal_share")),
+                "market": {**{k: market.get(k) for k in ("currency", "n", "min", "p25", "median", "p75", "max", "thin")},
+                           "basis": vm.get("basis"), "weight_basis": vm.get("weight_basis"), "spread_ratio": vm.get("spread_ratio"),
+                           "top_shop": conc.get("top_shop"), "top_shop_share": conc.get("top_shop_share"), "top_listing_share": conc.get("top_listing_share"),
+                           "units_per_day": demand.get("units_per_day"), "listings_with_reviews": demand.get("listings_with_reviews"),
+                           "unknown_units": len(vm["unknown_units"]) if isinstance(vm.get("unknown_units"), list) else None},
+                "listings": listings, "rejected_sample": rejects,
+                # the six heaviest with their links, as the gate shows them; readers from before `listings` take these
                 "similar": market.get("similar") or []}
     if stage == "price":
         pr = read_json(wd / "price.json")
