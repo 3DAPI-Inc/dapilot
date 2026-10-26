@@ -295,7 +295,7 @@ sellers whose config was seeded earlier (the design worker's 1.50 USD of
 of the same day would have frozen the same way). The seller's palette,
 stills and caps are not touched.
 
-## Supervisor (built 2026-10-22: `runner/supervisor.py` and `runner/triage.py`)
+## Supervisor (built 2026-10-22; a model since 2026-10-26: `runner/supervisor.py`, `agents/supervisor.md`, `skills/supervise-run`)
 
 A second queue, `<env>-dapilot-supervise` in the 3dapi CDK stack (standard,
 not FIFO, so one message can carry its own delay), wakes the supervisor: the
@@ -303,64 +303,57 @@ backend sends one message per stage that stopped failed after it has stored
 the outcome, so the row is written first and a supervisor that is down loses
 nothing a person cannot still see. Blocked stages, a question for a person,
 are never sent. A review marker (a done stage whose output
-`check_outputs.py` flagged, 2026-10-23) is sent with `marker: review`:
-triage's `Review` kind redoes it once for a plain defect (a price under its
-own floor, a design with nothing kept) through the same retry route, which
-the ledger honours only while nothing later has used the outputs, and
-otherwise leaves a note with the problems for the seller. The supervisor runs inside the runner's container: when
-`DAPILOT_SUPERVISE_QUEUE_URL` is set, `consumer.serve` starts its loop in a
-second thread, so the one Coolify resource does both and the only setup is
-that variable (`doctor.sh --supervise` runs it alone, for a laptop or for
-splitting the two later). It is read-only on the store and never sends to
-the runs queue itself. Before every decision it asks the
-backend for the run (`GET /internal/dapilot/runs/<id>`, flat: status and the
-stopped stages with the ledger's `retries` and `previous`), so a cancelled
-run and a stage that moved on are left alone whatever the message says. It
-has two answers and no third: a retry, through
-`POST /internal/dapilot/runs/<id>/retry`, which is the same message and
-event a seller's Try again sends with `by: supervisor` and the kind as the
-ledger's reason; or leave the stage as it is, as a `supervisor.left` event
-with the code, the sentence and what the stop waits for. A retry that should
-wait (a transient stop) goes back onto the supervise queue as the same body
-with `act: "retry"` and `not_before`, in hops of 900 s, the SQS ceiling,
-and the run is looked at again when the time comes. There is no escalate,
-because a stop it cannot make work is already on the dashboard exactly as
-it is.
+`check_outputs.py` flagged) is sent with `marker: review`. The supervisor
+runs inside the runner's container: when `DAPILOT_SUPERVISE_QUEUE_URL` is
+set, `consumer.serve` starts its loop in a second thread, so the one Coolify
+resource does both and the only setup is that variable. It is read-only on
+the store and never sends to the runs queue itself. Before every decision it
+asks the backend for the run (`GET /internal/dapilot/runs/<id>`: status, the
+stopped stages, and since 2026-10-26 the whole outcome), so a cancelled run
+and a stage that moved on are left alone whatever the message says.
 
-The question it answers is not "is this bad" but "could the next attempt end
-differently". `runner/triage.py` holds that judgement as one class per kind
-of stop, each with the code a script may put in its result line (tier one),
-the text patterns for results without a code (tier two), and its policy:
+**Who decides.** A model. The question is interpretation ("what would make
+the next attempt end differently, and is it mine to do"), and until
+2026-10-26 it was answered by `runner/triage.py`, 29 regular expressions over
+the failure text with a fixed policy per class and an `Unknown` class whose
+log was, by design, the backlog of patterns to add. That is the patch cycle
+this project wants to avoid, and it held the shark's item for three days on a
+marker that said in plain English what was wrong. Now the runner hands the
+stop, the item's record from the outcome (every stage's status and attempts,
+the worker's account, the stage's report, the other markers, the spend) and
+the run's status to `claude -p --agent dapilot:supervisor`, the plugin's
+`supervise-run` skill, with no tools and a two-turn, forty-cent cap (a call
+costs about ten cents, most of it the context the CLI loads), and reads one
+JSON line back: `action`, `stage`, `delay_s`, `why`, `wait_for`,
+`confidence`.
 
-- `config.*` (a value missing, a key refused): never on a timer; a retry only
-  when the seller's configuration fingerprint moved since the stop.
-- `upstream.transient`: retries spaced 2, 10 and 60 minutes apart, then left.
-- `upstream.quota`: one retry after the window, then left.
-- `content.*` (the file, the market): never; the same bytes fail the same way.
-- `worker.*` (malformed result, out of time): one retry with the reason in
-  the brief, which is the one retry the hierarchy already allows.
-- `runtime.tool_missing`: never; the image is wrong.
-- `blocked`: a question a stage asked a person; a retry is not an answer.
-- `unknown`: left and logged; the log is where new codes and patterns come from.
+**Three answers.** `retry`, through `POST /internal/dapilot/runs/<id>/retry`,
+the same message and event a seller's Try again sends, with `by: supervisor`
+and the sentence as the ledger's reason; a transient waits first, re-queued
+on the supervise queue with `act: "retry"` and `not_before` in hops of 900 s.
+`redo` (new): the stopped stage is fine and an earlier stage's output is the
+problem; the retry route is sent with `redo` and `cascade` for that earlier
+stage, and `ledger.py retry --redo --cascade` sets its outputs and every later
+stage's aside, clears every downstream marker and queues them afresh, refusing
+past a stage that cost fal assets unless a person passes `--force`. `leave`:
+a `supervisor.left` event with the sentence and what the stop waits for.
+Every event says `decided_by` (model or rules) and the call's `usd`.
 
-The ledger's `retries` count next to an unchanged `previous` is what tells it
-a retry proved nothing. `triage.py selftest` runs the fixture table of real
-reasons and must pass before a pattern or a policy changes; `doctor.sh
---supervise` runs it before the supervisor starts. The model is not in the
-first version; the `unknown` bucket's log says whether it is needed.
+**What stays code.** The caps: no more than two retries per stage, whatever
+the model says; a redo only of an earlier, done stage; never a blocked
+marker; the ledger's refusal to set a paid stage aside. And the fallback:
+when the model cannot be asked (no CLI, no key, a malformed line) `triage.py`
+decides as before, and the event says so. `triage.py`'s codes stay the facts
+a script puts in its result line; its patterns are the fallback only.
 
-The `changed` flag on a message is the backend's, not the supervisor's: the
-backend hashes what a config stop depends on (Etsy connected, the dapilot
-key, the platform keys present, the public API, its own build) and sends the
-open config stops again with the current hash when the backend starts and
-when a seller connects an integration. A change made only on the runner is
-not seen until the next backend start or a person's Try again.
-
-An agent orchestrator in place of the Python director was considered and
-dropped on 2026-10-16, and so was LangGraph on 2026-10-20: both would
-re-express the ledger's semantics and the second would need every skill
-ported out of Claude Code. The supervisor sits outside the director's loop
-for the same reason.
+**Testing it.** `plugins/dapilot/skills/supervise-run/eval/stops.jsonl` holds
+real and representative stops with the expected action, and
+`scripts/dev/test_supervisor.sh` runs each through the model against a
+directory standing in for the backend: three passes of ten on 2026-10-26, 30
+of 30 right, about 0.02 USD a decision once the context is cached. It is not
+in `test_phase0.sh` because it spends; run it after a change to the skill or
+the agent. The runner's hard cap and the rules fallback are exercised by hand
+the same way (`supervisor.py once --local-backend`).
 
 ## Plugin work hosting needs first (built 2026-10-23)
 

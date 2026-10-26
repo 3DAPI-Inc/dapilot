@@ -658,12 +658,36 @@ def cmd_retry(a) -> int:
         # has read them: a redo under a done price would leave the price resting on files that are gone.
         if not (marker(wd, a.stage, REVIEW).exists() or getattr(a, "redo", False)):
             return out({"ok": False, "reason": f"{a.stage} is done on this item and holds no review marker; pass --redo to redo it"}, 1)
-        later = [s["stage"] for s in stages["stages"][stages["stages"].index(st) + 1:]
-                 if s.get("enabled", True) and (all(exists(wd, p) for p in s["produces"])
-                                                or ((state or {}).get("items", {}).get(a.item, {}).get("stages", {}).get(s["stage"], {}).get("status") == "running"))]
-        if later:
+        later_stages = [s for s in stages["stages"][stages["stages"].index(st) + 1:]
+                        if s.get("enabled", True) and (all(exists(wd, p) for p in s["produces"])
+                                                       or ((state or {}).get("items", {}).get(a.item, {}).get("stages", {}).get(s["stage"], {}).get("status") == "running"))]
+        later = [s["stage"] for s in later_stages]
+        if later and not getattr(a, "cascade", False):
             return out({"ok": False, "reason": f"{a.stage} is done and {', '.join(later)} already used its outputs; a redo would strand them"}, 1)
-        archived = set_aside(wd, st, "")
+        if later:
+            # --cascade (2026-10-26, state-machine proposal 2): the later stages' outputs go aside with this one's,
+            # and they run again from here. A stage that cost money (design with fal assets) is set aside only
+            # with --force: that is a person's decision, and the supervisor never gives it.
+            paid = [s["stage"] for s in later_stages if s["stage"] == "design" and (stage_spend(wd, "design", {}).get("assets") or 0) > 0]
+            if paid and not getattr(a, "force", False):
+                return out({"ok": False, "reason": f"a redo of {a.stage} would set aside {', '.join(paid)}, which cost fal assets; pass --force"}, 1)
+            if any((state or {}).get("items", {}).get(a.item, {}).get("stages", {}).get(s["stage"], {}).get("status") == "running" for s in later_stages):
+                return out({"ok": False, "reason": "a later stage is running on this item; redo when it ends"}, 1)
+            # every enabled stage after this one starts over: outputs set aside where there are any, every
+            # marker cleared (the stop that asked for the redo is downstream of it), records queued afresh
+            for s in stages["stages"][stages["stages"].index(st) + 1:]:
+                if not s.get("enabled", True):
+                    continue
+                if s in later_stages:
+                    archived += set_aside(wd, s, "")
+                cleared_later = [marker(wd, s["stage"], kind).name for kind in (*MARKERS, REVIEW) if marker(wd, s["stage"], kind).exists()]
+                clear_markers(wd, s["stage"])
+                archived += [f"cleared {n}" for n in cleared_later]
+                later_rec = ((state or {}).get("items", {}).get(a.item) or {}).get("stages", {}).get(s["stage"])
+                if later_rec is not None:
+                    requeue(later_rec, f"{a.by + ': ' if a.by else ''}redo of {a.stage} ({a.reason or 'cascade'})")
+                    later_rec.pop("review", None)
+        archived += set_aside(wd, st, "")
     cleared = [marker(wd, a.stage, kind).name for kind in (*MARKERS, REVIEW) if marker(wd, a.stage, kind).exists()]
     if not cleared and not archived and was not in MARKERS:
         return out({"ok": False, "reason": f"nothing to retry: {a.stage} has no marker and is {was or 'not in this run'}"}, 1)
@@ -681,7 +705,7 @@ def cmd_retry(a) -> int:
             f"cleared {cleared or 'no marker'}" + (f"; set aside {archived}" if archived else ""))
         save_state(state)
     return out({"ok": True, "run": a.run, "item": a.item, "stage": a.stage, "was": was, "cleared": cleared,
-                "archived": archived, "retries": retries})
+                "archived": archived, "retries": retries, "cascade": bool(later) if was == "done" or (was is None and done_on_disk) else False})
 
 
 # ---------------------------------------------------------------- outcome
@@ -1129,6 +1153,8 @@ def main() -> int:
     s.add_argument("--stage", required=True); s.add_argument("--reason", help="why a retry could end differently")
     s.add_argument("--by", help="who asked: a person's name, or the supervisor")
     s.add_argument("--redo", action="store_true", help="redo a done stage without a review marker: its outputs are set aside under .redo/"); s.set_defaults(fn=cmd_retry)
+    s.add_argument("--cascade", action="store_true", help="with --redo on a done stage: set aside every later stage's outputs too and run from here (refused past a stage that cost fal assets, unless --force)")
+    s.add_argument("--force", action="store_true", help="with --cascade: set aside a paid stage too; a person's decision")
     a = ap.parse_args()
     try:
         return a.fn(a)

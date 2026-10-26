@@ -26,6 +26,8 @@ names=$("$DAPILOT_PYTHON" -m pyflakes ./consumer.py ./supervisor.py ./triage.py 
 f=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) && ok "$f" || fail "ffmpeg"
 "$CHROME" --headless=new --dump-dom about:blank >/dev/null 2>&1 && ok "chromium headless via $CHROME" || fail "chromium"
 [ -f "$DAPILOT_PLUGIN_DIR/studio/index.html" ] && ok "studio page bundled" || fail "studio page missing: run scripts/dev/build_studio.sh and rebuild"
+# the supervisor is a model (2026-10-26): its agent and skill must ship with the plugin, or the rules fallback would decide every stop
+[ -f "$DAPILOT_PLUGIN_DIR/agents/supervisor.md" ] && [ -f "$DAPILOT_PLUGIN_DIR/skills/supervise-run/SKILL.md" ] && ok "supervisor agent and skill present" || fail "supervisor agent or skill missing from the plugin"
 touch "$DAPILOT_DATA_DIR/.write-test" 2>/dev/null && rm -f "$DAPILOT_DATA_DIR/.write-test" && ok "$DAPILOT_DATA_DIR writable" || fail "$DAPILOT_DATA_DIR not writable (volume owner?)"
 [ -w "$DAPILOT_PLUGIN_DIR/scripts" ] && fail "plugin is writable by the runtime user; it must be read-only" || ok "plugin read-only for $(id -un)"
 

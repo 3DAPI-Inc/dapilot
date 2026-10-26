@@ -49,7 +49,7 @@ its exit code and the files it writes.
   The plugin sees a directory and a command, nothing else; the consumer
   never imports it.
 - `triage.py`: the supervisor's judgement, one class per kind of stop with
-  its code, its text patterns and its policy; `triage.py selftest` checks
+  its code, its text patterns and its policy; the supervisor's rules fallback; the supervisor itself is a model since 2026-10-26 (`docs/hosting.md`, Supervisor), tested with `scripts/dev/test_supervisor.sh`. `triage.py selftest` checks
   the fixture table of real reasons, `triage.py classify "<reason>"` shows
   one decision. Stdlib only.
 - `supervisor.py`: the supervisor's loop. The consumer runs it in a second
