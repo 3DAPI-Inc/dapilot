@@ -373,6 +373,24 @@ reads what they write:
 
 ## Accounts and keys
 
+A seller is any signed-in dapi.digital account, designer or integrator
+(2026-10-26). The platform's session middleware refuses integrator accounts
+on every platform route; the dapilot routes use a variant that admits them,
+and `GET /api/dapilot/me` tells the web app which kind holds the session so
+the account menu links to that account's pages. The 3DAPI key is minted the
+same way for both. Etsy is the one difference: the platform's Etsy row hangs
+off a designer profile, which an integrator does not have, so an integrator's
+runs publish in sandbox until that row has a home for them.
+
+A seller connects Etsy with their own Seller App, as on the plugin's
+Integrations page (2026-10-26): the dashboard's Integrate button opens the
+same steps and the same two fields, the platform confirms the keystring and
+shared secret with Etsy's free ping, saves them beside the shop token, runs
+the OAuth consent against that app, and the credentials route hands the
+runner those two values as `ETSY_KEYSTRING` and `ETSY_SHARED_SECRET` in
+place of the platform's. The platform's app stays the default for a seller
+who has not. Details in 3dapi `docs/dapilot-platform.md`.
+
 - **Login** is the same Supabase project as dapi.digital. A session is per
   origin (localStorage), so sharing it across the subdomain needs a cookie
   storage adapter scoped to `.dapi.digital` on both apps.

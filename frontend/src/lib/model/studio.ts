@@ -69,6 +69,18 @@ export interface StudioConfig {
   shadow: boolean;
   shadowOpacity: number;
   shadowSoftness: number;
+  /**
+   * Side of the shadow map in pixels. 2048 is the console's look; a capture
+   * on a machine with no GPU asks for 1024, since the depth pass costs as
+   * much as the frame itself when the two are the same size (2026-10-26).
+   */
+  shadowMapSize: number;
+  /**
+   * Multisampling on the drawing buffer. Read once, when the renderer is
+   * made; setConfig cannot change it. A capture turns it off: on a software
+   * renderer the four samples per pixel were most of the cost of a still.
+   */
+  antialias: boolean;
 
   /**
    * Orientation in degrees about the file's own x, y, z, applied in that order
@@ -105,6 +117,8 @@ export const STUDIO_DEFAULTS: StudioConfig = {
   environmentIntensity: 0.38,
 
   shadow: true,
+  shadowMapSize: 2048,
+  antialias: true,
   shadowOpacity: 0.28,
   shadowSoftness: 2.5,
 
@@ -221,7 +235,7 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
   let cfg: StudioConfig = { ...STUDIO_DEFAULTS, ...overrides };
   RectAreaLightUniformsLib.init();
 
-  const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  const renderer = new WebGLRenderer({ antialias: cfg.antialias, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = cfg.shadow;
   renderer.shadowMap.type = PCFSoftShadowMap;
@@ -257,7 +271,7 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
   const shadowLight = new DirectionalLight(0xffffff, 0.35);
   shadowLight.position.set(-2.5, 6, 3);
   shadowLight.castShadow = true;
-  shadowLight.shadow.mapSize.set(2048, 2048);
+  shadowLight.shadow.mapSize.set(cfg.shadowMapSize, cfg.shadowMapSize);
   shadowLight.shadow.radius = cfg.shadowSoftness;
   shadowLight.shadow.bias = -0.0012;
   const cam = shadowLight.shadow.camera;
@@ -447,7 +461,14 @@ export function createStudio(mount: HTMLElement, overrides: Partial<StudioConfig
 
   function setConfig(patch: Partial<StudioConfig>) {
     const turned = patch.rotate !== undefined && patch.rotate.join() !== cfg.rotate.join();
+    const remap = patch.shadowMapSize !== undefined && patch.shadowMapSize !== cfg.shadowMapSize;
     cfg = { ...cfg, ...patch };
+    if (remap) {
+      // three allocates the map at the size it finds on the next shadow pass
+      shadowLight.shadow.mapSize.set(cfg.shadowMapSize, cfg.shadowMapSize);
+      shadowLight.shadow.map?.dispose();
+      shadowLight.shadow.map = null;
+    }
     if (turned && pristine) show(pristine);
     productMaterial.color.set(productMaterial.vertexColors ? '#ffffff' : cfg.color);
     productMaterial.roughness = cfg.roughness;

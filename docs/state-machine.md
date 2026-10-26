@@ -139,7 +139,7 @@ the seller's configuration fingerprint changed. It never reads a work dir.
 | The run as a whole | ledger | `outcome` (computed, not stored by the plugin) | the runner (posts), the backend (stores, derives status), the dashboard, the supervisor |
 | A director is alive | director | `runs/<run>/director.alive` | the runner, `approve_price.py pending`, the monitor |
 | A worker holds an item | worker | `work/<hash>/.lock` | the ledger (dispatch), the worker |
-| The seller's turn | ledger | `price.json` without `price.approved.json` | through `outcome.items[].gate` |
+| The seller's turn | ledger | `price.json` or `price.rejected.json` without `price.approved.json` | through `outcome.items[].gate`, with `market` (the band, the cost, the floor, the verdict, similar listings) and `rejected` when no candidate was allowed |
 | A request in flight | backend | `dapilot_runs.outcome` (`answered`, `retrying`) | the backend, the dashboard |
 
 Still reading work dirs directly today, to move behind `outcome` in a later

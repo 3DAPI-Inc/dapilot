@@ -118,7 +118,10 @@ def save_state(state: dict) -> None:
 
 
 def load_stages(path: str | None) -> dict:
-    return json.loads(Path(path or DEFAULT_STAGES).read_text())
+    # The state records the stages file by absolute path; a root that moves between machines (a hosted
+    # store read on a laptop, 2026-10-26) falls back to the plugin's own table rather than failing.
+    chosen = Path(path) if path and Path(path).is_file() else DEFAULT_STAGES
+    return json.loads(chosen.read_text())
 
 
 def sha256(path: Path) -> str:
@@ -715,6 +718,70 @@ def media_of(wd: Path) -> dict:
 MARKER_FIELDS = ("reason", "question", "run", "attempt", "worker_log", "error", "problems")
 
 
+def _num(v):
+    return round(float(v), 2) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def gate_market(wd: Path, cands: dict | None) -> dict:
+    """What a person weighs at the gate besides the proposal (2026-10-26): the market band research found,
+    the cost 3DAPI quoted, the floor, the verdict in research's words, the candidates the script rejected
+    and why, and the heaviest comparable listings with their links. Read from price.candidates.json (or
+    price.rejected.json), viability.json and comparables.json; every field null when its file is missing,
+    so a gate is never withheld for want of context."""
+    cands = cands or {}
+    viab = read_json(wd / "viability.json") or {}
+    comps = read_json(wd / "comparables.json") or {}
+    market = cands.get("market") if isinstance(cands.get("market"), dict) else (viab.get("market") if isinstance(viab.get("market"), dict) else {})
+    offer = cands.get("offer") if isinstance(cands.get("offer"), dict) else {}
+    rows = [r for r in (comps.get("comparables") or []) if isinstance(r, dict)] if isinstance(comps.get("comparables"), list) else []
+    rows.sort(key=lambda r: -(float(r.get("market_weight") or 0) if isinstance(r.get("market_weight"), (int, float)) else 0))
+    similar = []
+    for r in rows:
+        price = _num(r.get("unit_price")) or _num(r.get("price"))
+        if price is None or not isinstance(r.get("url"), str):
+            continue
+        shop = r.get("shop") if isinstance(r.get("shop"), dict) else {}
+        similar.append({"title": str(r.get("title") or "")[:140], "price": price,
+                        "currency": str(r.get("currency") or cands.get("currency") or "USD"), "url": r["url"],
+                        "shop": shop.get("name") if isinstance(shop.get("name"), str) else None,
+                        "sold": shop.get("sold") if isinstance(shop.get("sold"), int) else None,
+                        "reviews": r.get("reviews") if isinstance(r.get("reviews"), int) else None})
+        if len(similar) == 6:
+            break
+    return {
+        "currency": str(cands.get("currency") or market.get("currency") or "USD"),
+        "n": market.get("n") if isinstance(market.get("n"), int) else None,
+        **{k: _num(market.get(k)) for k in ("min", "p25", "median", "p75", "max")},
+        "thin": next((bool(src["thin"]) for src in (market, viab.get("market") if isinstance(viab.get("market"), dict) else {})
+                      if isinstance(src.get("thin"), bool)), None),
+        "unit_cost": _num(cands.get("unit_cost")) or _num(cands.get("quote_unit_price")),
+        "offer_cost": _num(cands.get("offer_cost")),
+        "units": offer.get("units") if isinstance(offer.get("units"), int) else None,
+        "floor": _num(cands.get("floor")),
+        "verdict": viab.get("verdict") if isinstance(viab.get("verdict"), str) else (cands.get("verdict") if isinstance(cands.get("verdict"), str) else None),
+        "verdict_reason": viab.get("verdict_reason") if isinstance(viab.get("verdict_reason"), str) else None,
+        "rejected_candidates": [{"label": str(c.get("label") or ""), "price": _num(c.get("price")), "because": str(c.get("rejected_because") or "")}
+                                for c in (cands.get("rejected") or []) if isinstance(c, dict) and _num(c.get("price")) is not None],
+        "similar": similar,
+    }
+
+
+def gate_of(wd: Path) -> dict | None:
+    """The seller's turn: price.json (a proposal) or price.rejected.json (no candidate cleared the floor;
+    the person may still set a price above it) without price.approved.json. Before 2026-10-26 only the
+    proposal opened the gate, so a rejected item showed as a question with no way to answer it."""
+    if (wd / "price.approved.json").exists():
+        return None
+    proposal_p, rejected_p = wd / "price.json", wd / "price.rejected.json"
+    if not proposal_p.exists() and not rejected_p.exists():
+        return None
+    cands = read_json(wd / "price.candidates.json") or read_json(rejected_p)
+    rejected = read_json(rejected_p) if rejected_p.exists() and not proposal_p.exists() else None
+    return {"proposal": read_json(proposal_p) if proposal_p.exists() else None, "candidates": cands,
+            "market": gate_market(wd, cands),
+            "rejected": (str(rejected.get("reason")) if rejected and rejected.get("reason") else None)}
+
+
 def build_outcome(run: str) -> dict:
     """The run as one document (schema/outcome.schema.json). A run with no state yet, a director that
     refused before registering anything, is a valid outcome with `started` false and no items, so a
@@ -731,8 +798,7 @@ def build_outcome(run: str) -> dict:
         wd = root() / it["workdir"]
         rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": [],
                "media": media_of(wd)}
-        if (wd / "price.json").exists() and not (wd / "price.approved.json").exists():
-            rec["gate"] = {"proposal": read_json(wd / "price.json"), "candidates": read_json(wd / "price.candidates.json")}
+        rec["gate"] = gate_of(wd)
         # failed and blocked stop the item; review stops nothing, the stage is done and a check found something
         for m in sorted(wd.glob("*.failed.json")) + sorted(wd.glob("*.blocked.json")) + sorted(wd.glob("*.review.json")):
             doc = read_json(m) or {}

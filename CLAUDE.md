@@ -125,7 +125,7 @@ sell, and nothing after the price runs until a person approves it.
 | preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20) |
 | research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict. `meta.json` may carry the seller's `description` (`run_intake.py --description`, 2026-10-23), read as a witness beside the filename |
 | price | worker, `propose-price` | quote, comparables, viability, drafts | `price.json` | `price_candidates.py` computes the candidates and the break-even floor; the model picks one; `--check` refuses anything below the floor |
-| gate | a person | `price.json` | `price.approved.json` | The one approval. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
+| gate | a person | `price.json`, or `price.rejected.json` | `price.approved.json` | The one approval, also when the script rejected every candidate: the gate then has no proposal and the person sets a price at or above the floor (2026-10-26; before, a rejected item showed as a question with nothing to answer it). `ledger.py outcome` gives the gate a `market` block: the band, 3DAPI's cost, the floor, the verdict and the heaviest comparable listings. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
 | design | `product-designer`, `design-product` | source, analysis, drafts, price, approval, comparables | `design.json`, `design/` | The model names the product and writes one brief; `design_product.py` captures stills and makes four lifestyle photos and one clip on fal; the model reviews the contact sheet and rejects what misrepresents the product |
 | copy | worker, `write-listing` | design, approval, comparables, quote | `listing.json`, `social/posts.json` | One draft of Etsy title, description, tags, materials and social captions; `listing_copy.py check` validates and splits it |
 | publish | script, no worker | listing, design, approval | `published.json`, `publish.json` | `publish_product.py`: Etsy draft, media upload, activate (0.20 USD), then every enabled social post |
@@ -255,8 +255,9 @@ Resume button picks up every work dir with a stage left and no live worker.
 
 ### Design
 
-- Config in `store/config.json` under `design`: four stills at 2048 px from
-  the browser studio (`/studio`, headless Chrome), four lifestyle photos
+- Config in `store/config.json` under `design`: four stills at 1024 px from
+  the browser studio (`/studio`, headless Chrome; 2048 until 2026-10-26, see
+  the studio bullet), four lifestyle photos
   (`fal-ai/nano-banana-pro/edit`, about 0.15 USD each) from the chosen still
   plus two other sides, one 6 s silent clip at 1080p
   (`blackforestlabs/flux-3-max/image-to-video` since 2026-10-23; 0.29 USD/s
@@ -278,13 +279,31 @@ Resume button picks up every work dir with a stage left and no live worker.
   unless `--studio` or `DAPILOT_STUDIO_URL` names a running console, so an
   installed plugin renders drafts and stills with headless Chrome and
   nothing else. Every render is WebGL: the preview drafts (`--mode draft`,
-  8 frames at 512 px, about 3 s), the four 2048 px stills (about 8 s) and
-  the turntable. `render_model.py`, `render_scene.py` and
+  8 frames at 512 px, about 3 s), the four product stills (1024 px since
+  2026-10-26; 2048 before) and the turntable. `render_model.py`, `render_scene.py` and
   `render_turntable.py` stay in the tree for reference and are run by
   nothing; the Blender fallback in `design_product.py` and the
   `design.stills.blender` config are removed. Measured against Blender on
   the sphere fixture: 3 s against 48 s for the eight drafts, softer
-  highlights, the same yaws.
+  highlights, the same yaws. **The page reports while it draws
+  (2026-10-26):** a word to the driver before every frame, a heartbeat every
+  5 s during one, its reason when it fails, done at the end; the driver prints
+  `capture: frame 2/4 beauty yaw 0: drawing, 95 s` to stderr on every change
+  and gives the page up only after `--stall` seconds of silence (60), never
+  for being slow. Chromium's stderr is kept in `OUT/.chrome.log` and its tail
+  goes into a failure. Before this, a hosted still that took longer than 120 s
+  on the two-core Coolify host (no GPU, SwiftShader on the CPU, about 70x the
+  laptop) was reported as "the page stopped sending" and the Benchy's design
+  blocked three runs running. **Captures are cheap by default (2026-10-26):**
+  1024 px stills (`design.stills.size`, a release-owned key the hosted runner
+  refreshes in every seller's config), no multisampling (`aa=0` in the page
+  URL; `--antialias` turns it back on) and a 1024 px shadow map
+  (`--shadow-map`), the console keeping its 2048 and antialiasing. The stills
+  are fal's input and the listing's extras, and Etsy shows them at 1000 px
+  or less. `--software` renders on SwiftShader on any system, to measure what
+  the hosted runner will take. Blender's Workbench was considered and
+  dropped: it needs an OpenGL context, which on a server means Mesa's
+  llvmpipe, another CPU renderer, with Blender in the image for nothing.
 - The 240-frame studio turntable is a fallback only (`turntable.when`):
   rendered when fal failed to make the clip. A clip the reviewer rejected
   gets no video at all. Nothing downstream may depend on the turntable.

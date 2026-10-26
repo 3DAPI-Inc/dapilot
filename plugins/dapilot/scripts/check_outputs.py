@@ -25,7 +25,9 @@ import argparse
 import json
 from pathlib import Path
 
-VERDICTS = ("viable", "thin", "not_viable")
+# What market_stats.py emits: `unreliable` since the review-weighted band (2026-09-14), missing here until 2026-10-26,
+# which sent every unreliable item back through research once and cost a worker attempt.
+VERDICTS = ("viable", "thin", "not_viable", "unreliable")
 PLATE_MM = 256.0        # the common bed; over it is a question, not a failure (the slicer decides)
 MIN_TAGS = 5            # Etsy allows 13; under five the listing is hard to find
 TITLE_MAX = 140         # Etsy's title limit, which listing_copy.py check enforces
@@ -92,6 +94,9 @@ def check(wd: Path, stage: str) -> dict:
                 soft.append("research found no comparables; the price will rest on cost alone")
             elif v.get("verdict") == "not_viable":
                 soft.append("research says not viable: the market median sits under the one-off break-even")
+            elif v.get("verdict") == "unreliable":
+                soft.append("research says the market band is unreliable" + (f": {v.get('verdict_reason')}" if v.get("verdict_reason") else "")
+                            + "; the price rests on cost")
     elif stage == "price":
         d = load(wd, "price.json", hard)
         if d is not None:
