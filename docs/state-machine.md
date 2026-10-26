@@ -163,9 +163,12 @@ parses the stderr log and should read `events.jsonl`).
    With a triage rule for "an input is empty or unparseable", the shark
    heals itself.
 3. **Held should be explicit.** A stage adopted from another run's marker
-   is `failed` with a sentence in `summary`. A `held_by` field (run, marker
-   age) lets the dashboard say "failed three days ago in another run" and
-   offer the retry there.
+   is `failed` with a sentence in `summary`. Half done 2026-10-26: the
+   outcome's markers carry `run` and `at`, and the dashboard says "stopped
+   in an earlier run, three days ago" with Continue when the marker's run is
+   not this one (the stripe logo's second run adopted a budget question from
+   2026-10-23 and showed it as new). A `held_by` on the stage record itself
+   is still to do.
 4. **One event schema for every source.** The runner's own kinds
    (`gate.answered`, `stage.retried`) and the backend's (`run.cancelled`,
    `supervise.sent`) are outside the plugin's schema. A `source` field and

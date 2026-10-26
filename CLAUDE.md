@@ -122,7 +122,7 @@ sell, and nothing after the price runs until a person approves it.
 |---|---|---|---|---|
 | analyze | worker, `analyze-model` | `source.*` | `analysis.json` | `analyze_mesh.py`: bodies, watertightness, volume, bounding box. A cheap pre-check, not a source of truth |
 | quote | worker, `quote-model` | source, analysis | `quote.json` | `quote.py`: upload, create, poll 3DAPI's quote. Named by sha256, never sliced twice, resumable |
-| preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20) |
+| preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more, `renders/render.json` | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20). Since 2026-10-26 the seller's browser draws them first for a plain file (STL, OBJ, PLY) at upload and the script keeps a whole set from any renderer; a half set is drawn again |
 | research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict. `meta.json` may carry the seller's `description` (`run_intake.py --description`, 2026-10-23), read as a witness beside the filename |
 | price | worker, `propose-price` | quote, comparables, viability, drafts | `price.json` | `price_candidates.py` computes the candidates and the break-even floor; the model picks one; `--check` refuses anything below the floor |
 | gate | a person | `price.json`, or `price.rejected.json` | `price.approved.json` | The one approval, also when the script rejected every candidate: the gate then has no proposal and the person sets a price at or above the floor (2026-10-26; before, a rejected item showed as a question with nothing to answer it). `ledger.py outcome` gives the gate a `market` block: the band, 3DAPI's cost, the floor, the verdict and the heaviest comparable listings. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
@@ -276,6 +276,24 @@ Resume button picks up every work dir with a stage left and no live worker.
   or failed paid asset is remade once with the rejection in its prompt.
   `generate_video.py i2v_payload` knows the FLUX and the MiniMax request
   shapes, so `--endpoint minimax/h3-max/image-to-video` still works.
+- **The seller's browser is the first renderer; the runner is the fallback
+  (2026-10-26).** The dashboard opens the plugin's own studio page, vendored
+  into the web app under `/studio`, in a hidden iframe (`post=parent`: frames
+  and reports come back as window messages) and PUTs the frames into the
+  item's work dir through presigned URLs, the record last. At upload, eight
+  drafts of a plain file (`renders/`, `render.json`). At the gate, a grid of
+  stills, twelve yaws at elevations 20 and 35 at 1024 px
+  (`design/frames/grid/`, `grid.json`), drawn from `display.ply` when the
+  item has one so a painted or assembled 3MF comes in its real colours, in
+  the filament colour the seller picks from the palette, which also rides on
+  the approval (`approve_price.py --color`, `price.approved.json.color`).
+  `design_product.py context` shows the designer `approved.color` and
+  `grid`; `check` snaps the brief onto the grid, forces the seller's colour
+  and `rotate 0,0,0`, and the stills step copies the frames and draws
+  nothing. Any set counts only whole, so a closed tab leaves nothing that
+  passes and the runner draws as before. Measured: 24 grid frames of the
+  duck's painted mesh in 15 s on a laptop GPU, against two minutes a still
+  on the runner.
 - **The seller's description reaches the designer and the writer verbatim
   (2026-10-26)**, as `seller_says` in `design/context.json` and
   `copy/context.json`, and both skills say it outranks research's identity

@@ -5,6 +5,53 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The seller's browser draws the pictures (2026-10-26).** The runner's
+  headless Chromium on a CPU took two minutes for eight drafts, two minutes a
+  still, and froze on the duck's painted mesh. The studio page gains
+  `post=parent` and `progress=parent`: frames and reports go to the parent
+  window as messages, for a hidden iframe. The dashboard (3dapi) vendors the
+  built page under `/studio`, draws eight drafts of a plain file at upload
+  and a 24-frame stills grid at the gate from `display.ply` when the item has
+  one, in the colour the seller picks, and PUTs them into the work dir with
+  the record last through `POST /dapilot/runs/:id/items/:item/frames`. The
+  plugin counts a set only whole: preview's outputs include `render.json`,
+  `preview_model.py` redraws a half set and keeps a whole one from any
+  renderer, `check_outputs` wants eight non-empty frames; `design_product.py`
+  reads `design/frames/grid/grid.json`, `check` snaps the brief onto the grid
+  and the seller's colour (`price.approved.json.color`, from
+  `approve_price.py --color`, carried by the approve message), and the stills
+  step copies the frames and runs no renderer. Without a whole set the
+  runner draws, as before.
+- **Jobs side by side (2026-10-26).** The consumer worked one message at a
+  time, so the stripe logo's seller waited behind the duck. `DAPILOT_JOBS`
+  starts that many job loops in the container, each taking one message; the
+  FIFO group is the seller, so one seller's runs still run in order on their
+  own root while other sellers proceed. Log lines carry the job thread's
+  name when there is more than one. Default 1. Sizing in `docs/hosting.md`:
+  about 1.5 GB and a core per job, two at most on the shared host.
+- **A held stop says so (2026-10-26).** The stripe logo's run of today ran
+  three seconds and showed "raise the USD budget to at least 1.6": the
+  design.blocked.json of its first run, 2026-10-23, written when the design
+  budget bug was live, adopted by the new run from the shared work dir and
+  shown as a fresh question. Outcome markers now carry `at` beside `run`, and
+  the dashboard's stop card says "stopped in an earlier run, three days ago"
+  with Continue when the marker's run is not the one on the page. The
+  budget itself was fine: that seller's config carries 5.00 USD for design.
+- **Stills resume (2026-10-26).** The duck's design stage drew three of four
+  stills in its 449 s capture window on the host (a painted mesh: 217k
+  triangles with three vertices each, 12.6 MB, about two minutes a still),
+  timed out on the fourth, and the retry's capture deleted the three and
+  started again at frame 1, where the renderer then froze. The stills
+  capture now runs with `--resume` like the turntable: a deadline hit keeps
+  the frames and `produce` exits 3, and the worker's next call draws only
+  what is missing. Open: painted parts need not triple every vertex, only
+  the faces on a colour boundary; a decimated display copy for CPU hosts; a
+  heartbeat while the page loads the model.
+- **The prompt hook leaves workers alone (2026-10-26).** `on_prompt.py` saw
+  the model file's name in every headless worker's JSON brief and told the
+  worker to start quickstart; the Benchy's and the duck's designers each spent
+  a line refusing. The hook now says nothing for a brief (a JSON object with
+  run, item and stage) or when `DAPILOT_WORKER=1`, which the director sets.
 - **The outcome carries what each stage made; the dashboard reads it live
   (2026-10-26).** The octagon's Publish sheet showed the publish script's
   JSON as its summary, and the sheets for research, price, copy and publish

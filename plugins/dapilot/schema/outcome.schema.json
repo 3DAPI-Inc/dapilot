@@ -331,6 +331,13 @@
             "null"
           ],
           "description": "written by the backend when a retry is requested; never by the ledger"
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "when the marker was written; with `run`, a reader can say that a stop was adopted from an earlier run and how long ago"
         }
       }
     },

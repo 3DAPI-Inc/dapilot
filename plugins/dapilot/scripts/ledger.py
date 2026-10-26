@@ -717,7 +717,7 @@ def media_of(wd: Path) -> dict:
     return doc
 
 
-MARKER_FIELDS = ("reason", "question", "run", "attempt", "worker_log", "error", "problems")
+MARKER_FIELDS = ("reason", "question", "run", "attempt", "at", "worker_log", "error", "problems")   # `at` since 2026-10-26: a held stop says how old it is
 
 
 # ---------------------------------------------------------------- spend

@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import re
 import os
 import subprocess
 import sys
@@ -304,10 +305,14 @@ def cmd_approve(a) -> int:
                      "error": f"{price:.2f} is below the floor {floor:.2f} {currency}"}, 1)
     units = offer_units(wd)
     point = model.point("approved", price, cost)
+    color = (getattr(a, "color", None) or "").strip().upper()
+    if color and not re.fullmatch(r"#[0-9A-F]{6}", color):
+        return emit({"ok": False, "error": f"color must be '#RRGGBB', not {color!r}"}, 1)
     (wd / "price.approved.json").write_text(json.dumps(
         {"price": price, "currency": currency, "by": by, "at": now(), "source": "proposal" if same else "override",
          "floor": floor, "unit_cost": point["unit_cost"], "margin": point["margin"], "margin_pct": point["margin_pct"],
-         "offer": {"units": units, "per_unit": round(price / units, 2)}}, indent=2))
+         "offer": {"units": units, "per_unit": round(price / units, 2)},
+         **({"color": color} if color else {})}, indent=2))
     rec = subprocess.run([PY, str(HERE / "product_record.py"), "--workdir", str(wd), "--verify-key"],
                          capture_output=True, text=True, cwd=root)
     filed = rec.returncode == 0
@@ -346,6 +351,7 @@ def main() -> int:
     p.set_defaults(fn=cmd_pending)
     p = sub.add_parser("approve"); p.add_argument("--workdir", required=True); p.add_argument("--price", type=float)
     p.add_argument("--by"); p.add_argument("--reason"); p.add_argument("--no-start", action="store_true", help="write the approval, start no director")
+    p.add_argument("--color", help="the filament colour the seller chose at the gate, '#RRGGBB' (2026-10-26); design uses it for the stills and the photos")
     p.set_defaults(fn=cmd_approve)
     p = sub.add_parser("decline"); p.add_argument("--workdir", required=True); p.add_argument("--by"); p.add_argument("--reason")
     p.set_defaults(fn=cmd_decline)

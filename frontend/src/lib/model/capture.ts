@@ -105,7 +105,7 @@ const HEARTBEAT_SOURCE = `
 `;
 
 function startHeartbeat(url: string | undefined): { tell: (info: ProgressReport) => void; stop: () => void } {
-  if (!url || typeof Worker === 'undefined') return { tell: () => {}, stop: () => {} };
+  if (!url || url === 'parent' || typeof Worker === 'undefined') return { tell: () => {}, stop: () => {} };
   try {
     const blob = new Blob([HEARTBEAT_SOURCE], { type: 'text/javascript' });
     const worker = new Worker(URL.createObjectURL(blob));
@@ -126,6 +126,16 @@ function startHeartbeat(url: string | undefined): { tell: (info: ProgressReport)
  */
 export async function report(url: string | undefined, body: ProgressReport): Promise<void> {
   if (!url) return;
+  // `parent`: this page is a hidden iframe of the dashboard (2026-10-26), which reads the reports and
+  // the frames from window messages and uploads the frames itself; nothing leaves this origin.
+  if (url === 'parent') {
+    try {
+      window.parent.postMessage({ type: 'dapilot-progress', ...body }, '*');
+    } catch {
+      /* no parent */
+    }
+    return;
+  }
   try {
     await fetch(url, {
       method: 'POST',
@@ -169,7 +179,9 @@ export async function captureTurntable(
         void report(progress, current);
         studio.setYaw(yaw);
         const blob = await studio.captureBlob();
-        if (post) {
+        if (post === 'parent') {
+          window.parent.postMessage({ type: 'dapilot-frame', pass, index: i, yaw, blob }, '*');
+        } else if (post) {
           beat.tell({ ...current, phase: 'post' });
           const res = await fetch(`${post}?pass=${pass}&index=${i}`, { method: 'POST', body: blob });
           if (!res.ok) throw new Error(`frame ${i} of ${pass}: collector said ${res.status}`);

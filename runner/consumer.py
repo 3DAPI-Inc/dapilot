@@ -105,7 +105,10 @@ def now() -> str:
 
 
 def log(msg: str) -> None:
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] runner: {msg}", file=sys.stderr, flush=True)
+    # with more than one job thread (DAPILOT_JOBS), the thread's name tells the lines apart
+    who = threading.current_thread().name
+    tag = f"runner {who}" if who.startswith("job-") else "runner"
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {tag}: {msg}", file=sys.stderr, flush=True)
 
 
 def excluded(rel: str) -> bool:
@@ -599,7 +602,8 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
         wd = root / "work" / body["item"]
         cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "approve_price.py"), "approve", "--workdir", str(wd), "--no-start",
                *(["--price", str(body["price"])] if body.get("price") is not None else []),
-               *(["--by", str(body["by"])] if body.get("by") else [])]
+               *(["--by", str(body["by"])] if body.get("by") else []),
+               *(["--color", str(body["color"])] if body.get("color") else [])]
         res = subprocess.run(cmd, cwd=root, env=plugin_env(root), capture_output=True, text=True)
         verdict = next((json.loads(c) for c in _json_candidates(res.stdout) if c), {"ok": False, "reason": res.stderr[-300:]})
         backend.event(seller, run, "gate.answered", item=body["item"], ok=bool(verdict.get("ok")), detail=verdict)
@@ -772,8 +776,16 @@ def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
     """The runs queue in this thread and, when DAPILOT_SUPERVISE_QUEUE_URL is set, the supervisor's loop
     in a second one: the same container, the same credentials, one SIGTERM for both. The supervisor is
     read-only on the store and talks only to the backend, so it has nothing to share with a job beyond
-    the process. Without the variable the runner behaves as before and nothing supervises."""
+    the process. Without the variable the runner behaves as before and nothing supervises.
+
+    DAPILOT_JOBS (2026-10-26) runs that many job loops at once, each taking one message at a time, so
+    sellers do not queue behind one another: the FIFO queue groups messages by seller and never hands two
+    of one group out together, so one seller's runs stay in order on their own root while different
+    sellers proceed side by side. Each job is a director with up to three `claude -p` workers and, in the
+    preview and design stages, a headless Chromium drawing on the CPU; count about 1.5 GB and a core per
+    job when sizing the container. Default 1, as before."""
     stop = stop_on_signal()
+    jobs = max(1, int(os.environ.get("DAPILOT_JOBS") or 1))
     supervise_url = os.environ.get("DAPILOT_SUPERVISE_QUEUE_URL")
     if supervise_url:
         from supervisor import SelfQueue, SupervisorBackend, handle as supervise   # same directory, imported late: supervisor imports this module
@@ -782,8 +794,13 @@ def serve(backend: Backend, bucket: Bucket, extra_args: list[str]) -> int:
         threading.Thread(target=poll, args=(supervise_url, lambda body, _stop: supervise(body, sup_backend, sup_queue), "decision", stop),
                          name="supervisor", daemon=True).start()
         log("supervising in this container as well")
-    return poll(os.environ["DAPILOT_QUEUE_URL"],
-                lambda body, stop_: handle(body, backend, bucket, extra_args, stop_), "job", stop)
+    job = lambda body, stop_: handle(body, backend, bucket, extra_args, stop_)   # noqa: E731
+    for n in range(2, jobs + 1):
+        threading.Thread(target=poll, args=(os.environ["DAPILOT_QUEUE_URL"], job, "job", stop), name=f"job-{n}", daemon=True).start()
+    if jobs > 1:
+        threading.current_thread().name = "job-1"
+        log(f"{jobs} jobs at once; a seller's own runs still go one at a time")
+    return poll(os.environ["DAPILOT_QUEUE_URL"], job, "job", stop)
 
 
 def main() -> int:

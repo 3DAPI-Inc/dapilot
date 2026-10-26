@@ -150,6 +150,21 @@ for dapilot imports nothing from any other stack, and it is deployed with
 `--exclusively` after reading `cdk diff`. The host already pays for itself,
 so the runner's marginal cost is zero until it needs its own instance.
 
+**Throughput (2026-10-26).** A run is ten to fifteen minutes of wall clock,
+most of it waiting on Claude and fal, two to four minutes of it drawing on
+the CPU. The consumer took one message at a time, so a fifth seller waited
+an hour. `DAPILOT_JOBS` runs that many job loops in the one container; the
+FIFO queue's group id is the seller, so a seller's own runs stay in order on
+their own root while other sellers proceed, and nothing in a job is shared
+beyond the process. Each job needs about 1.5 GB (up to three `claude -p`
+workers and a Chromium) and a core while it draws, so the shared t3a.large
+carries two at most, and only with the resource's memory limit raised to
+about 5 GB. Beyond that the answer is more consumers on the same queue: the
+runner on its own instance with more jobs, or the Fargate service the stack
+still defines, scaled on the queue's depth and consuming alongside the
+Coolify runner. That is the elastic path, and the reason the design kept a
+queue between the backend and the runner.
+
 ## The AWS stack (3dapi `infrastructure/cdk/lib/dapilot-stack.ts`)
 
 A second stack in the 3dapi CDK app, `Dapilot-<env>`, standing alone. The

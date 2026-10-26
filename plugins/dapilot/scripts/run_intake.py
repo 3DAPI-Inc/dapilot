@@ -465,6 +465,7 @@ def main() -> int:
     root = project_root()
     run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
     os.environ["DAPILOT_PROJECT_DIR"] = str(root)
+    os.environ["DAPILOT_WORKER"] = "1"   # the plugin's prompt hook stays quiet for a worker's brief (on_prompt.py)
     load_env(root)
     os.environ.setdefault("DAPILOT_PYTHON", sys.executable)
     cfg = load_config(root)

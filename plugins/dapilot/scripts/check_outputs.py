@@ -81,6 +81,18 @@ def check(wd: Path, stage: str) -> dict:
                     soft.append("quote.json: metrics.model_g is not a positive weight")
                 if not (number(m.get("print_time_s")) and m["print_time_s"] > 0):
                     soft.append("quote.json: metrics.print_time_s is not a positive time")
+    elif stage == "preview":
+        # Eight frames, none empty: a browser-made set that stopped half way (the seller closed the tab)
+        # must not pass as done (2026-10-26). render.json names what drew them.
+        drafts = sorted((wd / "renders").glob("draft_*.png"))
+        if len(drafts) < 8:
+            hard.append(f"renders: {len(drafts)} draft frames, 8 expected")
+        empty = [p.name for p in drafts if p.stat().st_size == 0]
+        if empty:
+            hard.append(f"renders: empty draft frames: {', '.join(empty)}")
+        r = load(wd, "renders/render.json", hard)
+        if r is not None and not isinstance(r.get("draft"), dict):
+            hard.append("renders/render.json: no draft record")
     elif stage == "research":
         c = load(wd, "comparables.json", hard)
         v = load(wd, "viability.json", hard)

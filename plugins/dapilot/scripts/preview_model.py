@@ -40,9 +40,25 @@ def main() -> int:
         print(json.dumps({"ok": False, "reason": f"no source.<ext> in {wd}"}))
         return 1
     first = wd / "renders" / "draft_00.png"
-    if first.exists():
-        print(json.dumps({"ok": True, "cached": True, "outputs": ["renders/draft_00.png"]}))
+    renders = wd / "renders"
+    drafts = sorted(renders.glob("draft_*.png"))
+    record = renders / "render.json"
+    # Whole, or nothing (2026-10-26): the seller's browser may have drawn the drafts at upload and written
+    # render.json last. Eight non-empty frames and the record are a finished set, from whichever renderer;
+    # fewer, or an empty one, is an upload that stopped, so the frames go and this script draws them.
+    whole = len(drafts) >= a.frames and all(p.stat().st_size > 0 for p in drafts[:a.frames]) and record.exists()
+    if whole:
+        try:
+            who = (json.loads(record.read_text()).get("draft") or {}).get("renderer")
+        except (OSError, ValueError):
+            who = None
+        print(json.dumps({"ok": True, "cached": True, "outputs": ["renders/draft_00.png", "renders/render.json"], "renderer": who}))
         return 0
+    if drafts or record.exists():
+        print(json.dumps({"note": f"{len(drafts)} draft frames found without a whole set; drawing them again"}), file=sys.stderr)
+        for p_ in drafts:
+            p_.unlink(missing_ok=True)
+        record.unlink(missing_ok=True)
     cmd = [sys.executable, str(HERE / "capture_turntable.py"), "--workdir", str(wd), "--mode", "draft",
            "--frames", str(a.frames), "--size", str(a.size), "--timeout", str(a.timeout)]
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout + 60)
@@ -52,7 +68,7 @@ def main() -> int:
         reason = out.get("reason") or (p.stderr or p.stdout).strip()[-300:] or f"capture exit {p.returncode}"
         print(json.dumps({"ok": False, "reason": reason}))
         return 1
-    print(json.dumps({"ok": True, "cached": False, "outputs": ["renders/draft_00.png"], "frames": out.get("frames"),
+    print(json.dumps({"ok": True, "cached": False, "outputs": ["renders/draft_00.png", "renders/render.json"], "frames": out.get("frames"),
                       "res": out.get("res"), "wall_s": out.get("wall_s"), "studio": out.get("studio")}))
     return 0
 

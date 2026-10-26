@@ -255,6 +255,11 @@ def cmd_context(a, cfg: dict) -> int:
         # below is a reading of it; the designer gets the source too, because the squirrel light switch
         # cover was staged as a bookshelf ornament when only the reading reached it.
         "seller_says": meta.get("description") or None,
+        # The seller's choices at the gate (2026-10-26): the filament colour, and the stills their browser
+        # drew: pick the hero and the angles from these yaws and the elevation from these; they are the
+        # product in its real colours, and no server render follows when they are used.
+        "approved": {"color": (read(wd / "price.approved.json") or {}).get("color")},
+        "grid": ({k: grid[k] for k in ("yaws", "elevations", "color", "size", "renderer")} if (grid := grid_of(wd)) else None),
         "product": {"noun": rules.get("noun") or comps.get("product"), "query": (comps.get("queries") or [None])[0],
                     "taxonomy_id": rules.get("taxonomy_id") or comps.get("taxonomy_id"), "notes": rules.get("notes"),
                     "identity": comps.get("identity") or rules.get("identity")},
@@ -297,6 +302,76 @@ def cmd_context(a, cfg: dict) -> int:
 # ------------------------------------------------------------------ check
 
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+GRID_DIR = Path("design") / "frames" / "grid"
+
+
+def grid_of(wd: Path) -> dict | None:
+    """The stills the seller's browser drew at the gate (2026-10-26): design/frames/grid/grid.json names the
+    size, the colour, the yaws and elevations and one file per frame, written last by the dashboard. The
+    set counts only whole: every named frame present and non-empty, else None and the runner draws. The
+    frames show display.ply when the item has one, so a painted or assembled 3MF comes in its colours."""
+    g = read(wd / GRID_DIR / "grid.json")
+    if not isinstance(g, dict) or not isinstance(g.get("frames"), list) or not g["frames"]:
+        return None
+    for f in g["frames"]:
+        if not isinstance(f, dict) or not isinstance(f.get("file"), str):
+            return None
+        p = wd / GRID_DIR / f["file"]
+        if not p.is_file() or p.stat().st_size == 0:
+            return None
+    yaws = sorted({round(float(f["yaw"]) % 360, 3) for f in g["frames"] if isinstance(f.get("yaw"), (int, float))})
+    elevations = sorted({float(f["elevation"]) for f in g["frames"] if isinstance(f.get("elevation"), (int, float))})
+    color = g.get("color") if isinstance(g.get("color"), str) else None
+    if not yaws or not elevations:
+        return None
+    return {"yaws": yaws, "elevations": elevations, "color": color.upper() if color else None,
+            "rotate": str(g.get("rotate") or "0,0,0"), "size": g.get("size"), "renderer": g.get("renderer") or "browser",
+            "frames": g["frames"]}
+
+
+def nearest(value: float, options: list[float], wrap: float | None = None) -> float:
+    def dist(o: float) -> float:
+        d = abs(value - o)
+        return min(d, wrap - d) if wrap else d
+    return min(options, key=dist)
+
+
+def snap_to_grid(b: dict, grid: dict) -> list[str]:
+    """Move the brief's angles and elevation onto the grid's, in place, and say what moved. The hero and
+    the angles must land on distinct yaws; the colour must be the grid's, which is the seller's choice."""
+    notes: list[str] = []
+    if isinstance(b.get("hero_yaw"), (int, float)):
+        want = float(b["hero_yaw"]) % 360
+        got = nearest(want, grid["yaws"], 360)
+        if abs(got - want) > 1e-6:
+            notes.append(f"hero_yaw {want:g} -> {got:g}")
+        b["hero_yaw"] = got
+    if isinstance(b.get("angles"), list):
+        taken = {b.get("hero_yaw")}
+        out = []
+        for v in b["angles"]:
+            if not isinstance(v, (int, float)):
+                out.append(v)
+                continue
+            want = float(v) % 360
+            free = [y for y in grid["yaws"] if y not in taken] or grid["yaws"]
+            got = nearest(want, free, 360)
+            if abs(got - want) > 1e-6:
+                notes.append(f"angle {want:g} -> {got:g}")
+            taken.add(got)
+            out.append(got)
+        b["angles"] = out
+    if isinstance(b.get("elevation"), (int, float)):
+        want = float(b["elevation"])
+        got = nearest(want, grid["elevations"])
+        if abs(got - want) > 1e-6:
+            notes.append(f"elevation {want:g} -> {got:g}")
+        b["elevation"] = got
+    else:
+        b["elevation"] = nearest(18.0, grid["elevations"])
+    return notes
 
 
 def validate_brief(b: dict, cfg: dict) -> list[str]:
@@ -411,6 +486,25 @@ def cmd_check(a, cfg: dict) -> int:
     b = read(wd / "design" / "brief.json")
     if b is None:
         return fail("design/brief.json is missing or not JSON")
+    grid = grid_of(wd)
+    snapped: list[str] = []
+    if grid:
+        snapped = snap_to_grid(b, grid)
+        if grid["color"] and isinstance(b.get("color"), str) and b["color"].upper() != grid["color"]:
+            # the seller chose this colour at the gate and their browser drew the stills in it
+            snapped.append(f"color {b['color']} -> {grid['color']} (the seller's choice at the gate)")
+            b["color"] = grid["color"]
+        if str(b.get("rotate", "0,0,0")) != grid["rotate"]:
+            snapped.append(f"rotate {b.get('rotate')} -> {grid['rotate']} (the grid was drawn as exported)")
+            b["rotate"] = grid["rotate"]
+        if snapped:
+            write(wd / "design" / "brief.json", b)
+    else:
+        approved_color = (read(wd / "price.approved.json") or {}).get("color")
+        if isinstance(approved_color, str) and isinstance(b.get("color"), str) and b["color"].upper() != approved_color.upper():
+            snapped.append(f"color {b['color']} -> {approved_color.upper()} (the seller's choice at the gate)")
+            b["color"] = approved_color.upper()
+            write(wd / "design" / "brief.json", b)
     errors = validate_brief(b, cfg)
     cost = plan_cost(b, cfg)
     spent = spend(wd, cfg)
@@ -421,7 +515,8 @@ def cmd_check(a, cfg: dict) -> int:
         errors.append(f"plan costs about {total} USD against a cap of {cfg['usd_cap_per_item']}; the standard is "
                       "config, so a person raises design.usd_cap_per_item or lowers the standard")
     plan = {"ok": not errors, "errors": errors, "cost": cost, "committed_usd": spent["usd"],
-            "total_usd": total, "cap_usd": cfg["usd_cap_per_item"], "checked": now()}
+            "total_usd": total, "cap_usd": cfg["usd_cap_per_item"], "checked": now(),
+            **({"snapped": snapped} if snapped else {}), **({"grid": {k: grid[k] for k in ("yaws", "elevations", "color")}} if grid else {})}
     write(wd / "design" / "plan.json", plan)
     return emit(plan, 0 if not errors else 1)
 
@@ -494,12 +589,43 @@ def cmd_produce(a, cfg: dict) -> int:
     # 1. studio stills from the WebGL studio in headless Chrome: a few seconds for the four
     yaws = still_yaws(b)
     stills = dz / "frames" / "stills"
+    grid = grid_of(wd)
+    if grid and (frames_in(stills / "beauty") != len(yaws) or not (stills / "video.json").exists()):
+        # The seller's browser drew these at the gate (2026-10-26): the brief was snapped to the grid by
+        # `check`, so every still is there. Copy them into place and draw nothing on this machine.
+        elev = float(b.get("elevation", cfg["stills"]["elevation"]))
+        picked = []
+        for y in yaws:
+            f = next((f for f in grid["frames"] if abs(round(float(f["yaw"]) % 360, 3) - round(y % 360, 3)) < 1e-6
+                      and abs(float(f["elevation"]) - elev) < 1e-6), None)
+            if f is None:
+                picked = []
+                break
+            picked.append(f)
+        if picked:
+            (stills / "beauty").mkdir(parents=True, exist_ok=True)
+            for stale in (stills / "beauty").glob("frame_*.png"):
+                stale.unlink()
+            for i, f in enumerate(picked):
+                shutil.copyfile(wd / GRID_DIR / f["file"], stills / "beauty" / f"frame_{i:04d}.png")
+            write(stills / "video.json", {"ok": True, "frames": len(yaws), "size": grid.get("size"), "passes": ["beauty"],
+                                          "yaws": yaws, "elevation": elev, "color": grid["color"], "renderer": grid["renderer"],
+                                          "captured": {"beauty": len(yaws)}, "capture_s": 0, "from": "design/frames/grid"})
+            steps.append({"step": "stills", "renderer": grid["renderer"], "from": "grid"})
+        else:
+            steps.append({"step": "stills", "note": "the browser's grid has no frame for the brief's angles; drawing here"})
     if frames_in(stills / "beauty") != len(yaws) or not (stills / "video.json").exists():
         if left() < 60:
             return pending_exit("stills")
+        # --resume since 2026-10-26: on a CPU host a painted mesh takes two minutes a still, and the duck
+        # drew three of four inside the deadline, then the retry threw them away and started at frame 1.
+        # Now a deadline hit keeps the frames and exits 3, and the worker's next produce call draws the rest.
         code, res = run_json(capture + ["--yaws", ",".join(f"{y:g}" for y in yaws), "--size", str(cfg["stills"]["size"]),
                                         "--passes", "beauty", "--no-video", "--elevation", elevation,
-                                        "--out", str(stills), "--timeout", str(max(left(), 60))])
+                                        "--out", str(stills), "--resume", "--timeout", str(max(left(), 60))])
+        if code == 3 and res.get("partial"):
+            steps.append({"step": "stills", "frames_done": res.get("frames_done"), "frames": res.get("frames")})
+            return pending_exit(f"stills ({res.get('frames_done')}/{res.get('frames')} frames)")
         if code != 0:
             return fail(f"stills capture failed: {res.get('reason')}", step="stills")
         steps.append({"step": "stills", "renderer": "studio", "seconds": res.get("capture_s")})

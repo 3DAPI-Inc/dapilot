@@ -122,6 +122,9 @@ AWS_REGION               us-east-1 (the SDK's own name, AWS_DEFAULT_REGION, is a
 AWS_ACCESS_KEY_ID        an access key of the stack's <env>-dapilot-runner IAM user: consume the
 AWS_SECRET_ACCESS_KEY    queue, read and write the bucket, nothing else
 DAPILOT_QUEUE_URL        the dapilot FIFO queue (the stack's RunsQueueUrl output)
+DAPILOT_JOBS             optional; how many jobs this container works at once (default 1). Different
+                         sellers run side by side; one seller's runs stay in order (the FIFO group is
+                         the seller). About 1.5 GB and one core per job: 2 on a 3 GB resource is the most
 DAPILOT_BUCKET           the bucket the seller stores live in (SellersBucketName output)
 DAPILOT_BACKEND_URL      where events go and per-seller values come from; the backend's Hono app is
                          mounted under /api, so it ends in /api: https://staging-api.dapi.digital/api
