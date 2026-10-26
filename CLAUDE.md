@@ -367,7 +367,12 @@ Resume button picks up every work dir with a stage left and no live worker.
   `DAPILOT_PUBLISH_MODE` sets it for every seller through the limits route
   (2026-10-26); a live publish needs a shop token with `listings_w`, which
   the platform asks for since the same day, so a shop connected earlier must
-  be reconnected (the Integrations card says so). A sandbox `published.json` is not cached
+  be authorized again (the Integrations card says so and offers Authorize
+  shop again). Connecting is two steps on that card since 2026-10-26:
+  Integrate takes the seller's own Seller App keystring and shared secret,
+  checked with Etsy and saved; Authorize shop opens Etsy's consent in a new
+  tab that ends on `/integrations/etsy` saying it is done, with the refresh
+  token stored on the platform. A sandbox `published.json` is not cached
   once the mode is live: running `publish_product.py` again publishes.
 - The person's approval of the price is the gate for all of it.
   `publish.auto_activate` and `publish.auto_post` in config hand either half
@@ -640,7 +645,12 @@ gives every stage a `spend` of `workers` (every attempt's Claude cost),
 live and active), each item their sum, and the run's `cost` carries
 `assets_usd`, `fees_usd` and `total_usd` beside the workers' `usd`; the
 `stage.result` and `run.ended` events carry the same `spend` (contract 1.2).
-Before this every figure was workers only. Turns per
+Before this every figure was workers only. **On the hosted tier none of it
+reaches the seller (2026-10-26):** the backend stores the outcome and the
+events whole and sums the run's cost into a column for admins, and every
+seller-facing route and the live stream strip `usd`, `spend`, `cost` and
+the director's budget before answering; the seller pays in credits and the
+dashboard shows no money figure. Turns per
 worker, not routing, is where the money goes; the designer on Opus costs
 about twice the Sonnet rate per token.
 

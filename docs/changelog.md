@@ -184,6 +184,30 @@ each carries its own date.
   routes admit integrator accounts (`anyAccountAuth`), `GET /dapilot/me` says
   which kind holds the session, and the account menu links to that account's
   pages; an integrator still has no Etsy row. Both in `docs/hosting.md`.
+- **What a run cost the platform stays on the platform (2026-10-26, 3dapi,
+  same evening).** The run row's `money_spent` was already hidden from the
+  seller; the outcome and the events still carried every stage's `usd`,
+  `spend`, the run's `cost` and the director's budget to the browser.
+  `publicOutcome` and `publicEvent` in `utils/dapilot-runs.ts` strip those
+  keys on every seller route (the run, the list, the timeline, the SSE
+  stream and its event messages); the row keeps them whole for admins. The
+  dashboard's types and event folding drop the fields. One test scans the
+  three responses for any money key. Two skills wrote figures into text the
+  seller reads: the designer's summary ("6 photos, lifestyle clip, 1.11
+  USD") and log paragraph, and the supervisor's `why` and `wait_for`; both
+  now say so without the figure (`design.json` keeps the spend for the
+  ledger). The supervisor fixtures were not rerun for this wording change.
+- **Etsy connects in two steps on the dashboard (2026-10-26, 3dapi, same
+  evening).** Verify and save in the Integrate modal now only saves the
+  seller's app keys and closes; the card says "App keys saved" and offers
+  Authorize shop, which opens Etsy's consent in a new tab. The callback,
+  which already stored the access token, the refresh token and `expiresAt`,
+  lands that tab on a new page, `/integrations/etsy`, with one heading: "Etsy
+  is now integrated, you can close this tab." The page tells the Integrations
+  tab over a BroadcastChannel (localStorage as the fallback) and the card
+  turns to Connected without a reload; a blocked popup falls back to the old
+  same-tab round trip. Reconnect is now Authorize shop again. Backend
+  unchanged: the return path was already allowed by origin.
 - **The capture page reports progress; slow is no longer dead (2026-10-26).**
   The Benchy's design stage blocked three times on staging with "no frame for
   120s; the page stopped sending" and one of four 2048 px stills on disk. The

@@ -140,9 +140,12 @@ for captures. The script fails with a one-line reason when one is missing.
    Non-zero exit: `ok:false`, reason from its JSON.
 9. Append the log paragraph: name, rotate, hero yaw, angles, colour, scenes
    in a few words each, produce runs and steps, what was rejected, redone and
-   why, photo count, listing video, whether the standard was met, spend. Remove `.lock`. Print the result line
-   with outputs `["design.json"]` and a summary like
-   `"Cat Fidget Clicker: 6 photos, lifestyle clip, 1.11 USD"`.
+   why, photo count, listing video, whether the standard was met. No money
+   figure in the paragraph or the summary: `design.json` carries the spend
+   and the ledger counts it from there, and the paragraph and the summary
+   reach the seller, who pays in credits (2026-10-26). Remove `.lock`. Print
+   the result line with outputs `["design.json"]` and a summary like
+   `"Cat Fidget Clicker: 6 photos, lifestyle clip"`.
 
 ## Outputs
 - `design/brief.json`, the one file this skill writes by hand:
