@@ -5,6 +5,19 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The description goes to the designer (2026-10-26).** The squirrel light
+  switch cover's four lifestyle photos put it on a bookshelf, a desk and a
+  table. The seller's note reached research, whose identity said "squirrel
+  light switch cover, medium confidence, no cutout visible", and the
+  designer read that doubt and staged "a decorative piece"; the words
+  "light switch" were in none of the five fal prompts. `design_product.py
+  context` and `listing_copy.py context` now carry `seller_says`, the
+  description verbatim; the design skill states that it outranks research's
+  identity, the comparables and the drafts on what the product is and is
+  for, that a scene shows the stated use, and that a doubt about the
+  geometry goes into `reason` and the log paragraph for a person to see;
+  the art direction's "in use" scene is the seller's use first; the copy
+  skill says the same for the title and description.
 - **Spend in three kinds; hosted publishing can go live (2026-10-26).** The
   octagon's end-to-end run reported 0.38 USD, which was the workers only: fal
   and Etsy were never counted. `ledger.py` now gives every recorded stage a

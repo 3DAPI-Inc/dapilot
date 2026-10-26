@@ -268,6 +268,14 @@ Resume button picks up every work dir with a stage left and no live worker.
   or failed paid asset is remade once with the rejection in its prompt.
   `generate_video.py i2v_payload` knows the FLUX and the MiniMax request
   shapes, so `--endpoint minimax/h3-max/image-to-video` still works.
+- **The seller's description reaches the designer and the writer verbatim
+  (2026-10-26)**, as `seller_says` in `design/context.json` and
+  `copy/context.json`, and both skills say it outranks research's identity
+  and the geometry on what the product is and is for: a scene shows the
+  stated use, and a doubt goes into the brief's `reason`, not into a quieter
+  product. Before, only research's reading reached design, and a squirrel
+  light switch cover was staged as a bookshelf ornament because no switch
+  cutout showed in the drafts.
 - **The designer runs on Opus (2026-10-23)**, `model: opus` in
   `agents/product-designer.md`; the catalogue worker stays on Sonnet. Design
   is the one stage with a vision review, and the stage whose reviewer passed
