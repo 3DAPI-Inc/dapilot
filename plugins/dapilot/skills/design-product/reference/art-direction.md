@@ -66,8 +66,12 @@ describe everything around it. Every listing carries four (the standard, set
 in config); they are the listing's photos, and studio stills are extras. Plan
 them as a set, each answering a different buyer question:
 
-1. **In use**: where it lives. A desk, a kitchen counter, a shelf, a child's
-   room, chosen from the comparables' titles.
+1. **In use**: where it lives and what it does there, as the seller said
+   (`context.seller_says`): a switch cover on the wall over a switch, a
+   coaster under a glass, a hook holding a coat. Only when the seller said
+   nothing, a desk, a kitchen counter, a shelf, a child's room, chosen from
+   the comparables' titles. An ornament shot of a functional object is a
+   wrong picture, not a safe one.
 2. **Scale**: next to one everyday object whose size nobody doubts (a coffee
    mug, a pencil, a keyboard, a smartphone), placed so the size reads.
 3. **Mood**: the gift or the style shot, soft light, a tidy styled surface.

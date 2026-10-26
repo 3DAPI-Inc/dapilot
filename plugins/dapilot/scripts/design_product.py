@@ -251,6 +251,10 @@ def cmd_context(a, cfg: dict) -> int:
     ctx = {
         "ok": True,
         "file": meta.get("file"),
+        # What the seller wrote when they uploaded it, word for word (2026-10-26). Research's identity
+        # below is a reading of it; the designer gets the source too, because the squirrel light switch
+        # cover was staged as a bookshelf ornament when only the reading reached it.
+        "seller_says": meta.get("description") or None,
         "product": {"noun": rules.get("noun") or comps.get("product"), "query": (comps.get("queries") or [None])[0],
                     "taxonomy_id": rules.get("taxonomy_id") or comps.get("taxonomy_id"), "notes": rules.get("notes"),
                     "identity": comps.get("identity") or rules.get("identity")},

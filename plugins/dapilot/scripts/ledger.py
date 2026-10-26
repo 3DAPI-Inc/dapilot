@@ -56,6 +56,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -833,6 +834,107 @@ def gate_market(wd: Path, cands: dict | None) -> dict:
     }
 
 
+# ---------------------------------------------------------------- report and account
+
+def account_of(wd: Path, stage: str) -> str | None:
+    """The worker's own paragraph about the stage, from the work dir's log.md (output-format skill): the
+    last one for the stage, since a retry appends another. Two spellings are in the wild, "**design**
+    (product-designer): ..." and "**design (product-designer, attempt 1, failed):** ...". Capped."""
+    try:
+        text = (wd / "log.md").read_text(errors="replace")
+    except OSError:
+        return None
+    found = None
+    for para in re.split(r"\n\s*\n", text):
+        para = para.strip()
+        m = re.match(r"^\*\*" + re.escape(stage) + r"(?:\*\*)?\s*\(([^)]*)\)(?:\*\*)?:?\*?\*?:?\s*(.*)$", para, re.S)
+        if m:
+            found = re.sub(r"\s+", " ", m.group(2)).strip()
+    return found[:1500] if found else None
+
+
+def _pick(d: dict | None, keys: tuple) -> dict:
+    d = d or {}
+    return {k: d.get(k) for k in keys if k in d}
+
+
+def stage_report(wd: Path, stage: str) -> dict | None:
+    """What the stage made, as the dashboard shows it (2026-10-26): a small object per stage read from the
+    stage's own output files, so the words and figures leave the work dir with the outcome instead of
+    staying on the runner. Null when the stage has produced nothing yet. Bounded: six comparables, the
+    scenes as written, the listing text whole (Etsy caps it at 102 and 13 and a few thousand characters)."""
+    if stage == "analyze":
+        a = read_json(wd / "analysis.json")
+        return _pick(a, ("bbox_mm", "volume_mm3", "area_mm2", "triangles", "bodies", "watertight", "watertight_bodies")) or None
+    if stage == "quote":
+        q = read_json(wd / "quote.json")
+        if not q:
+            return None
+        m = q.get("metrics") if isinstance(q.get("metrics"), dict) else {}
+        return {"public_id": q.get("publicId"), "status": q.get("status"), "unit_price": _num(q.get("unit_price")),
+                "currency": "USD", **_pick(m, ("model_g", "total_g", "print_time_s", "filament_count")),
+                "error": q.get("errorMessage")}
+    if stage == "preview":
+        r = (read_json(wd / "renders" / "render.json") or {}).get("draft")
+        return _pick(r, ("frames", "res", "wall_s", "studio")) or None
+    if stage == "research":
+        comps = read_json(wd / "comparables.json")
+        viab = read_json(wd / "viability.json")
+        if not comps and not viab:
+            return None
+        comps, viab = comps or {}, viab or {}
+        market = gate_market(wd, read_json(wd / "price.candidates.json"))
+        ident = comps.get("identity") if isinstance(comps.get("identity"), dict) else {}
+        return {"product": comps.get("product") or viab.get("product"), "queries": comps.get("queries"),
+                "taxonomy_id": comps.get("taxonomy_id"), "identity": _pick(ident, ("object", "confidence", "reason", "witnesses")),
+                "n_scored": comps.get("n_scored"), "n_selected": comps.get("n_selected"),
+                "verdict": viab.get("verdict"), "verdict_reason": viab.get("verdict_reason"),
+                "offer": _pick(viab.get("offer") if isinstance(viab.get("offer"), dict) else {}, ("units", "note")),
+                "market": {k: market.get(k) for k in ("currency", "n", "min", "p25", "median", "p75", "max", "thin")},
+                "similar": market.get("similar") or []}
+    if stage == "price":
+        pr = read_json(wd / "price.json")
+        rej = read_json(wd / "price.rejected.json")
+        appr = read_json(wd / "price.approved.json")
+        cands = read_json(wd / "price.candidates.json") or {}
+        if not pr and not rej and not appr:
+            return None
+        return {**_pick(pr, ("price", "currency", "candidate", "position", "rationale", "floor", "verdict")),
+                "rejected": (rej or {}).get("reason") if rej else None,
+                "floor": _num((pr or {}).get("floor")) or _num(cands.get("floor")),
+                "unit_cost": _num(cands.get("unit_cost")) or _num(cands.get("quote_unit_price")),
+                "candidates": [{"label": c.get("label"), "price": _num(c.get("price")), "margin_pct": _num(c.get("margin_pct"))}
+                               for c in (cands.get("candidates") or []) if isinstance(c, dict)],
+                "approved": _pick(appr, ("price", "currency", "by", "at", "approved_by", "approved_at")) or None}
+    if stage == "design":
+        d = read_json(wd / "design.json")
+        b = read_json(wd / "design" / "brief.json") or {}
+        if not d and not b:
+            return None
+        d = d or {}
+        std = d.get("standard") if isinstance(d.get("standard"), dict) else {}
+        return {"name": d.get("name") or b.get("name"), "reason": d.get("reason") or b.get("reason"),
+                "color": d.get("color") or b.get("color"), "hero_yaw": d.get("hero_yaw", b.get("hero_yaw")),
+                "scenes": [str(x.get("scene") or "") for x in (b.get("lifestyle_images") or []) if isinstance(x, dict)],
+                "clip_scene": (b.get("lifestyle_video") or {}).get("scene") if isinstance(b.get("lifestyle_video"), dict) else None,
+                "standard_met": std.get("met"), "photos": len(d.get("photos") or []), "video": bool(d.get("video")),
+                "rejected": d.get("rejected") or [], "redone": d.get("redone") or [], "warnings": d.get("warnings") or [],
+                "finished": d.get("finished")}
+    if stage == "copy":
+        l = read_json(wd / "listing.json")
+        return _pick(l, ("title", "description", "tags", "materials", "taxonomy_id", "written_by")) or None
+    if stage == "publish":
+        pub = read_json(wd / "published.json")
+        if not pub:
+            return None
+        etsy = pub.get("etsy") if isinstance(pub.get("etsy"), dict) else {}
+        return {"sandbox": bool(pub.get("sandbox")), "at": pub.get("at"), "approved_by": pub.get("approved_by"),
+                "etsy": _pick(etsy, ("state", "listing_id", "url")),
+                "posted": [f"{x.get('platform')}.{x.get('format')}" if isinstance(x, dict) else str(x) for x in (pub.get("social") or pub.get("posted") or [])],
+                "skipped": pub.get("skipped") or [], "failed": pub.get("failed") or []}
+    return None
+
+
 def gate_of(wd: Path) -> dict | None:
     """The seller's turn: price.json (a proposal) or price.rejected.json (no candidate cleared the floor;
     the person may still set a price above it) without price.approved.json. Before 2026-10-26 only the
@@ -864,7 +966,19 @@ def build_outcome(run: str) -> dict:
     items = []
     for h, it in state["items"].items():
         wd = root() / it["workdir"]
-        rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": [],
+        # every stage that has run carries what it made (`report`) and the worker's own paragraph (`account`)
+        stages_out = {}
+        for stage, st_rec in it.get("stages", {}).items():
+            out_rec = dict(st_rec)
+            if out_rec.get("status") != "queued" or out_rec.get("attempts"):
+                report = stage_report(wd, stage)
+                if report:
+                    out_rec["report"] = report
+                account = account_of(wd, stage)
+                if account:
+                    out_rec["account"] = account
+            stages_out[stage] = out_rec
+        rec = {"item": h, "file": it.get("file"), "stages": stages_out, "gate": None, "markers": [],
                "media": media_of(wd), "spend": it.get("spend")}
         rec["gate"] = gate_of(wd)
         # failed and blocked stop the item; review stops nothing, the stage is done and a check found something

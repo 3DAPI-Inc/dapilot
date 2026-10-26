@@ -5,6 +5,38 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The outcome carries what each stage made; the dashboard reads it live
+  (2026-10-26).** The octagon's Publish sheet showed the publish script's
+  JSON as its summary, and the sheets for research, price, copy and publish
+  said the words stayed on the runner. `ledger.py outcome` now gives every
+  stage that has run a `report` (`stage_report`: analyze's measurements,
+  quote's 3DAPI price and metrics, research's identity, verdict, band and six
+  similar listings, price's proposal, candidates and approval, design's
+  name, scenes, standard and rejections, copy's title, description, tags
+  and materials, publish's sandbox flag, Etsy state, listing id and link,
+  posted and skipped) and an `account` (the worker's own paragraph from
+  `log.md`, the last for the stage). `run_intake.py script_summary` writes a
+  sentence for a script stage ("sandbox: nothing created on Etsy and nothing
+  posted; skipped …", "8 draft frames at 512 px in 117 s"). On the dashboard
+  the activity list starts from the row's stored events and merges the
+  stream's by id, so a reload keeps the history; the stage line follows
+  `stage.result` and `pass.dispatched` events newer than the last outcome
+  (`liveItem`), so it moves during a run instead of at the gate or the end;
+  and each stage's sheet renders its report: the listing text with its
+  tags, the Etsy link, the design scenes, research's identity and verdict.
+- **The description goes to the designer (2026-10-26).** The squirrel light
+  switch cover's four lifestyle photos put it on a bookshelf, a desk and a
+  table. The seller's note reached research, whose identity said "squirrel
+  light switch cover, medium confidence, no cutout visible", and the
+  designer read that doubt and staged "a decorative piece"; the words
+  "light switch" were in none of the five fal prompts. `design_product.py
+  context` and `listing_copy.py context` now carry `seller_says`, the
+  description verbatim; the design skill states that it outranks research's
+  identity, the comparables and the drafts on what the product is and is
+  for, that a scene shows the stated use, and that a doubt about the
+  geometry goes into `reason` and the log paragraph for a person to see;
+  the art direction's "in use" scene is the seller's use first; the copy
+  skill says the same for the title and description.
 - **Spend in three kinds; hosted publishing can go live (2026-10-26).** The
   octagon's end-to-end run reported 0.38 USD, which was the workers only: fal
   and Etsy were never counted. `ledger.py` now gives every recorded stage a

@@ -12,8 +12,9 @@ A brief with `stage: design`. The work dir has `source.<ext>`, `analysis.json`,
 and no `design.json`. Only items with a sale price get here.
 
 ## Inputs
-- `design/context.json`, written by step 2: product noun and query with
-  research's `identity` (the object and how sure it was), the top
+- `design/context.json`, written by step 2: `seller_says`, what the seller
+  wrote about the object when they uploaded it, word for word (null when they
+  wrote nothing); product noun and query with
   comparable titles, size and scale word, the drafts and their yaws, the
   3MF's own `thumbnails` when the project carried them (colour renders,
   worth a Read before naming), the
@@ -36,10 +37,27 @@ for captures. The script fails with a one-line reason when one is missing.
    captured. Rewrite it only when `check` fails or `previous` names the
    brief itself as the problem.
 3. Judge: write the brief. Read `design/context.json` and drafts 00, 02, 04
-   and 06 (the others only if those leave the front unclear). Decide, with
-   `reference/art-direction.md`:
-   - `name`: what a buyer calls it, 2 to 5 words; the count is the copy's
-     job, so no "set of" here
+   and 06 (the others only if those leave the front unclear).
+
+   **The seller's description is the authority on what the product is and
+   what it is for.** `seller_says` outranks research's `identity`, the
+   comparables and your own reading of the geometry. A "light switch cover"
+   is photographed on a wall over a light switch, a "plant pot" with a plant
+   in it, a "cable holder" holding a cable, whatever the drafts seem to show
+   and however sure research was. Your task is a good product picture, and a
+   good product picture shows the thing doing its job in the place it lives;
+   the file's shape tells you how it sits there, not what it is. When the
+   geometry seems to contradict the seller (no cutout, no hole, the wrong
+   size), stage the stated use anyway and write the doubt in `reason` and
+   in your log paragraph, so a person sees it; do not resolve it by
+   quietly making the product something else (the squirrel light switch
+   cover became "Lounging Squirrel" on a bookshelf, 2026-10-26). Only when
+   `seller_says` is null do research's identity and the comparables decide.
+
+   Decide, with `reference/art-direction.md`:
+   - `name`: what a buyer calls it, 2 to 5 words, in the seller's terms when
+     `seller_says` names the thing; the count is the copy's job, so no "set
+     of" here
    - `rotate` and `hero_yaw`: stand it the way a buyer expects, pick the side
      that reads best; yaw is the draft's yaw
    - `angles`: the other stills, each showing something the hero does not
