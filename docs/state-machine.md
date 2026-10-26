@@ -113,7 +113,11 @@ plugin. The runner posts events and the outcome; the backend derives.
 
 Order matters and is `statusFromOutcome`: gate, then blocked, then failed,
 then director exit, then paused, then done. Resume re-derives from the stored
-outcome. Delete is allowed from everything but `queued` and `running`.
+outcome. Delete is allowed from everything but `queued` and `running`, and
+since 2026-10-26 it takes the run's state and its items' work dirs out of
+the bucket too (an item another run still lists is kept), so a stop a deleted
+run left behind cannot hold the same file in the next run; the runner's pull
+removes the same paths from its volume.
 
 Two claims live on the backend's copy of the outcome and not in the ledger:
 `gate.answered` on an item and `retrying` on a marker. They stop a second

@@ -50,10 +50,25 @@
         },
         "usd": {
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "description": "the workers' Claude cost; the run's budget ceiling applies to this"
         },
         "by_agent": {
           "type": "object"
+        },
+        "assets_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "fal, every item's design stage"
+        },
+        "fees_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Etsy listing fees, every item's live publish"
+        },
+        "total_usd": {
+          "type": "number",
+          "minimum": 0
         }
       }
     },
@@ -171,6 +186,10 @@
         },
         "media": {
           "$ref": "#/$defs/media"
+        },
+        "spend": {
+          "$ref": "#/$defs/spend",
+          "description": "the item's stages' spend added up"
         }
       }
     },
@@ -223,6 +242,9 @@
           "items": {
             "type": "object"
           }
+        },
+        "spend": {
+          "$ref": "#/$defs/spend"
         }
       }
     },
@@ -526,6 +548,34 @@
               }
             }
           }
+        }
+      }
+    },
+    "spend": {
+      "type": "object",
+      "description": "money spent, in USD, in three kinds (2026-10-26): `workers` the Claude cost of every attempt, `assets` the design stage's fal spend from design.json, `fees` Etsy's listing fee when publish activated a listing (nothing for a draft or a sandbox publish); `total` their sum",
+      "required": [
+        "workers",
+        "assets",
+        "fees",
+        "total"
+      ],
+      "properties": {
+        "workers": {
+          "type": "number",
+          "minimum": 0
+        },
+        "assets": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fees": {
+          "type": "number",
+          "minimum": 0
+        },
+        "total": {
+          "type": "number",
+          "minimum": 0
         }
       }
     }

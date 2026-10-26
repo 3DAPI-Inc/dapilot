@@ -5,6 +5,33 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **Spend in three kinds; hosted publishing can go live (2026-10-26).** The
+  octagon's end-to-end run reported 0.38 USD, which was the workers only: fal
+  and Etsy were never counted. `ledger.py` now gives every recorded stage a
+  `spend` of workers, assets (design's fal spend from `design.json`, the
+  item's total, not re-added per attempt) and fees (Etsy's listing fee from
+  the store's or the plugin's fee table, only when `published.json` is live
+  and active), each item the sum, and the run's `cost` gains `assets_usd`,
+  `fees_usd` and `total_usd`; `stage.result` and `run.ended` carry the same
+  `spend`. Contract 1.2, vendored into 3dapi, whose dashboard shows the total
+  with the parts on hover. The backend's limits route serves `publish.mode`
+  from `DAPILOT_PUBLISH_MODE` (sandbox unless `live`), merged into every
+  seller's config per job; `ETSY_SCOPES` gains `listings_w`, which
+  `etsy_listing.py` needs to create and activate, and the status route's
+  `canPublish` tells a shop connected under the old scopes to reconnect.
+- **Delete takes the work with it (2026-10-26, 3dapi and runner).** The
+  shark's copy stage blocked on a missing seller taxonomy, the seller deleted
+  the run, uploaded the file again, and the new run adopted the deleted run's
+  `copy.blocked.json` from the shared work dir: a question nobody could
+  answer any more, holding the item for good. `DELETE /api/dapilot/runs/:id`
+  now removes `sellers/<seller>/runs/<run>/` and the work dir of every item
+  the run's outcome lists, keeping an item another run of the seller still
+  holds. The runner's `pull` removes from its root what the manifest saw on
+  both sides and the bucket no longer holds, the mirror of the rule `push`
+  already used, so the volume's copy does not return. Open: copy should fetch
+  `etsy_seller_taxonomy.json` itself when the store has none, as research
+  does for the buyer tree; the hosted store is seeded from the templates and
+  never had it.
 - **Runner: approve and retry crashed on a stale name (2026-10-26).** The
   contract pass of 2026-10-25 renamed the consumer's `outcome()` to
   `ledger_outcome()` and left the three callers in the approve and retry
