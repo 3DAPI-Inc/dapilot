@@ -63,7 +63,19 @@
             "assets": 0.0,
             "fees": 0.0,
             "total": 0.0
-          }
+          },
+          "report": {
+            "product": "benchy",
+            "verdict": "unreliable",
+            "verdict_reason": "one shop holds 60% of the weight",
+            "market": {
+              "currency": "USD",
+              "n": 12,
+              "median": 4.0
+            },
+            "similar": []
+          },
+          "account": "Named it a Benchy tugboat; 12 comparables in the 3D printed toys aisle; the band is not evidence."
         },
         "price": {
           "status": "done",

@@ -297,6 +297,36 @@ def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, er
     return meta["worker_log"]
 
 
+def script_summary(stage: str, out: dict) -> str:
+    """One sentence a person can read about what a script stage did (2026-10-26; before, the publish
+    stage's summary was the script's JSON, and the dashboard showed it raw)."""
+    if out.get("cached"):
+        return "already done for this file; reused"
+    if stage == "publish":
+        etsy = out.get("etsy") if isinstance(out.get("etsy"), dict) else {}
+        posted, failed, skipped = out.get("posted") or [], out.get("failed") or [], out.get("skipped") or []
+        if out.get("sandbox") or etsy.get("state") == "sandbox":
+            return "sandbox: nothing created on Etsy and nothing posted" + (f"; skipped {', '.join(map(str, skipped))}" if skipped else "")
+        parts = []
+        if etsy.get("state") == "active":
+            parts.append(f"listed on Etsy and live (listing {etsy.get('listing_id')})" if etsy.get("listing_id") else "listed on Etsy and live")
+        elif etsy.get("state"):
+            parts.append(f"Etsy listing {etsy.get('listing_id') or ''} left as {etsy['state']}".replace("  ", " "))
+        if posted:
+            parts.append("posted " + ", ".join(map(str, posted)))
+        if failed:
+            parts.append("failed " + ", ".join(map(str, failed)))
+        if skipped:
+            parts.append("skipped " + ", ".join(map(str, skipped)))
+        return "; ".join(parts) or "published"
+    if stage == "preview":
+        frames, res, wall = out.get("frames"), out.get("res"), out.get("wall_s")
+        if frames:
+            return f"{frames} draft frames at {res} px" + (f" in {wall:.0f} s" if isinstance(wall, (int, float)) else "")
+        return "draft frames rendered"
+    return str(out.get("summary") or "done")
+
+
 def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
     """A stage with no judgement in it: run its script, and write the result line a worker would have printed.
 
@@ -319,7 +349,7 @@ def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dic
     reason = "" if ok else ("director stopped while the script ran" if meta["interrupted"] else
                             f"{brief['script']} exceeded {timeout_s}s" if timed_out else
                             str(out.get("reason") or out.get("error") or (stderr or stdout)[-200:] or f"exit {rc}"))
-    summary = json.dumps({k: v for k, v in out.items() if k in ("etsy", "posted", "failed", "skipped", "cached")}) if ok else reason
+    summary = script_summary(brief["stage"], out) if ok else reason
     log(f"{tag}: script {'ok' if ok else 'failed: ' + reason[:120]}")
     return {"ok": ok, "cached": bool(out.get("cached")), "run": brief["run"], "item": brief["item"], "stage": brief["stage"],
             "agent": "run_intake", "department": brief["department"], "outputs": brief["produces"] if ok else [],

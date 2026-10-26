@@ -245,6 +245,20 @@
         },
         "spend": {
           "$ref": "#/$defs/spend"
+        },
+        "report": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "what the stage made, read by the ledger from the stage's own output files (2026-10-26): analyze the measurements, quote the 3DAPI price and metrics, research the identity, verdict, band and six similar listings, price the proposal and approval, design the name, scenes and review, copy the listing text, publish the Etsy state and link. The shape per stage is ledger.py stage_report; readers take what they know"
+        },
+        "account": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the worker's own paragraph about the stage, from the work dir's log.md; the last one when the stage ran more than once"
         }
       }
     },

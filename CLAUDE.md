@@ -166,7 +166,15 @@ false. The hosted runner forwards the events file and posts that outcome, and
 reads no work dir itself; the 3dapi backend validates both against a vendored
 copy of the schemas. `approve_price.py pending`, `server/app.py` and
 `watch_run.py` still read work dirs and the stderr log; they follow in a later
-pass. `docs/state-machine.md` is the page behind all of this.
+pass. `docs/state-machine.md` is the page behind all of this. **Since
+2026-10-26 the outcome carries what each stage made:** every stage that has
+run has a `report` (the ledger's `stage_report`, read from the stage's own
+files: measurements, the 3DAPI price and metrics, research's identity, verdict,
+band and six similar listings, the proposal and the approval, the design name,
+scenes and review, the listing text, the Etsy state and link) and an `account`
+(the worker's paragraph from the work dir's `log.md`), so the dashboard shows
+the words and figures instead of "this stays on the runner". A script stage's
+`summary` is a sentence (`script_summary`), not the script's JSON.
 
 **The director checks every connection first.** `run_intake.py` runs
 `integrate.py test` for what the enabled stages will need (3DAPI, the Etsy
