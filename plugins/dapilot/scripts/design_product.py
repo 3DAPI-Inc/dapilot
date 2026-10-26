@@ -451,6 +451,11 @@ def cmd_produce(a, cfg: dict) -> int:
     capture = [PY, str(HERE / "capture_turntable.py"), "--workdir", str(wd),
                *(["--studio", cfg["studio_url"]] if cfg.get("studio_url") else []),   # else the bundled page, served per call
                "--rotate", str(b.get("rotate", "0,0,0")), "--color", b["color"]]
+    # Whether any studio page can draw: a console named in config, or the page the plugin ships. The
+    # turntable fallback skips without one (the name was left undefined when Blender went, 2026-10-20;
+    # the branch only runs when fal gave up the clip, so it crashed nobody until pyflakes found it, 2026-10-26).
+    studio = bool(cfg.get("studio_url")) or bool(os.environ.get("DAPILOT_STUDIO_DIR")) \
+        or (Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or HERE.parent) / "studio" / "index.html").is_file()
     elevation = str(b.get("elevation", cfg["stills"]["elevation"]))
     steps: list[dict] = []
     produced = read(dz / "produced.json") or {"assets": {}}

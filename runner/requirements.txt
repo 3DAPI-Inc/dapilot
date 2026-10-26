@@ -1,3 +1,7 @@
 # The runner's own packages, installed into the same venv as the plugin's (runner/Dockerfile).
 # boto3 is the AWS SDK for Python: the queue and the bucket. The plugin does not use it.
 boto3>=1.35,<2
+# pyflakes finds an undefined name before a job does: py_compile does not, and a renamed function with
+# three callers left behind shipped that way and crashed every approve on staging (2026-10-26). doctor.sh
+# runs it over the runner and the plugin's scripts at container start.
+pyflakes>=3,<4

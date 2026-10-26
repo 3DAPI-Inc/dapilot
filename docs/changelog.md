@@ -5,6 +5,20 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **Runner: approve and retry crashed on a stale name (2026-10-26).** The
+  contract pass of 2026-10-25 renamed the consumer's `outcome()` to
+  `ledger_outcome()` and left the three callers in the approve and retry
+  handlers behind, so every Approve and Try again on staging died with
+  `NameError: name 'outcome' is not defined` after "root ready", the message
+  was redelivered every five minutes and would have ended in the dead-letter
+  queue; the run job was unaffected. Found in the staging log of the fruit
+  fly trap run (db6a5338). Fixed. The same pass found `studio` undefined in
+  `design_product.py`'s turntable fallback, left behind when Blender went on
+  2026-10-20 and reached only when fal gives the clip up; defined now from the
+  config's console or the bundled page. `py_compile` does not see an undefined
+  name, which is how both shipped: pyflakes is in the runner image and
+  `doctor.sh` fails the container on one, and `test_phase0.sh` runs the same
+  check when the venv has pyflakes.
 - **Cheap stills (2026-10-26).** 1024 px, no multisampling, 1024 px shadow
   map for every capture; the console keeps its look. `StudioConfig` gains
   `antialias` (read when the renderer is made) and `shadowMapSize`;
@@ -14,8 +28,17 @@ each carries its own date.
   script and the template, and `stills` joined the keys the hosted runner
   refreshes from the release, since a hosted seller's config.json is frozen
   at seeding and would have kept 2048. Measured on the laptop with
-  `--software` (SwiftShader, 4 cores), four Benchy stills: see the numbers in
-  the same-day note below once taken.
+  `--software` (SwiftShader, 4 cores), four Benchy stills: 2048 px with
+  antialiasing and a 2048 shadow map 147.5 s; 1024 px with both 64.3 s; 1024
+  px with neither 36.2 s; 2048 px with neither 132.2 s. At 2048 the pixels
+  dominate, at 1024 the antialiasing and the shadow pass are nearly half, so
+  the three together are the 4x. The Coolify host measured about 2.5x slower
+  than this path, so four stills there should take about 90 s, against the
+  shark's 378 and the Benchy's never. The same run showed the page's
+  heartbeat never fired during a frame: reading a frame back blocks the main
+  thread for the whole draw, so the timer waited with it. The heartbeat now
+  runs in a Web Worker told the current frame before each one; two 2048 px
+  frames passed a 20 s stall guard with lines at 29 s and 59 s.
 - **Hosted Etsy with the seller's own app; integrator accounts are sellers
   (2026-10-26, 3dapi).** dapilot's Integrate button now opens the plugin's
   own Etsy steps and two fields in a modal; the platform verifies the
