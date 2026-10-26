@@ -393,8 +393,10 @@ runs publish in sandbox until that row has a home for them.
 A seller connects Etsy with their own Seller App, as on the plugin's
 Integrations page (2026-10-26): the dashboard's Integrate button opens the
 same steps and the same two fields, the platform confirms the keystring and
-shared secret with Etsy's free ping, saves them beside the shop token, runs
-the OAuth consent against that app, and the credentials route hands the
+shared secret with Etsy's free ping and saves them beside the shop token;
+the card then offers Authorize shop, which runs the OAuth consent against
+that app in a new tab that ends on a page saying Etsy is integrated and can
+be closed, while the card turns to Connected; and the credentials route hands the
 runner those two values as `ETSY_KEYSTRING` and `ETSY_SHARED_SECRET` in
 place of the platform's. The platform's app stays the default for a seller
 who has not. Details in 3dapi `docs/dapilot-platform.md`.

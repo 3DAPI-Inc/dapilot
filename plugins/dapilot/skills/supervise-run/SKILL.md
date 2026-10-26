@@ -76,10 +76,13 @@ One line of JSON, nothing else:
   quote, preview, research, price, design, copy, publish); null otherwise.
 - `delay_s`: for `retry`, seconds to wait first; 0 for now.
 - `why`: one sentence, plain words, naming the cause and the choice. It is
-  shown on the dashboard under the failure and kept on the ledger's record.
+  shown on the dashboard under the failure and kept on the ledger's record,
+  so it carries no money figure: the spend you are given is for the money
+  rule, and the seller pays in credits and never sees what a stage cost.
 - `wait_for`: for `leave`, what has to change for a retry to be worth it
   ("ETSY_SHARED_SECRET set on the platform", "a file that fits the plate",
-  "a person's decision to redo design, 2.34 USD"); null otherwise.
+  "a person's decision to redo a paid design"); null otherwise. The same
+  rule: no figure.
 - `confidence`: `high`, `medium` or `low`; low means you would like a person
   to glance at it even if the action is a retry.
 
