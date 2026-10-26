@@ -128,10 +128,15 @@ facts about requests in flight, not plugin facts about work.
 ## 5. The supervisor
 
 Reads the outcome's markers (`failed` and `review`, never `blocked`, which is
-a person's), classifies the reason with `triage.py`, and either requests a
-retry through the same route a seller's Try again uses or leaves a note. It
-is re-sent the stops on every outcome and on resume, and otherwise only when
-the seller's configuration fingerprint changed. It never reads a work dir.
+a person's) and the item's whole record, and a model (`agents/supervisor.md`,
+the `supervise-run` skill; since 2026-10-26, `triage.py`'s rules before and as
+the fallback) chooses one of three: a retry through the same route a seller's
+Try again uses, a redo of an earlier stage whose output is the problem
+(`ledger.py retry --redo --cascade`: that stage and everything after it start
+over, never past a paid stage), or a note. The runner keeps the caps as code.
+It is re-sent the stops on every outcome and on resume, and otherwise only
+when the seller's configuration fingerprint changed. It never reads a work
+dir. Proposal 2 below (the cascading redo) is done by this.
 
 ## 6. Where each fact lives
 

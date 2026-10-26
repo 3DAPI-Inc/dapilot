@@ -513,10 +513,12 @@ plugins/
       write-listing/              Etsy text and social captions as one draft
       render-model/               retired 2026-09-13, kept for reference
       run-intake/                 director skill; reference/stages.json is the stage table
+      supervise-run/              how the supervisor decides; eval/stops.jsonl are real stops with the expected action
     agents/
       catalogue-lead.md           spawns catalogue-worker and product-designer only
       catalogue-worker.md         no Agent tool; one stage on one item
       product-designer.md         worker for the design stage; loads only design-product
+      supervisor.md               the hosted supervisor's judgement: one stopped stage in, retry, redo or leave out (2026-10-26)
     scripts/
       run_intake.py               the headless director: one per upload, workers are claude -p
       ledger.py                   run state: init, next, record, status, report; the only writer

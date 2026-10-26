@@ -628,7 +628,9 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
         item, stage = body["item"], body["stage"]
         cmd = [PYTHON, str(PLUGIN_DIR / "scripts" / "ledger.py"), "retry", "--run", run, "--item", item, "--stage", stage,
                *(["--reason", str(body["reason"])] if body.get("reason") else []),
-               *(["--by", str(body["by"])] if body.get("by") else [])]
+               *(["--by", str(body["by"])] if body.get("by") else []),
+               *(["--redo"] if body.get("redo") else []),           # the supervisor's redo of an earlier stage (2026-10-26)
+               *(["--cascade"] if body.get("cascade") else [])]
         res = subprocess.run(cmd, cwd=root, env=plugin_env(root), capture_output=True, text=True)
         verdict = next((json.loads(c) for c in _json_candidates(res.stdout) if c), {"ok": False, "reason": res.stderr[-300:]})
         # The ledger cleared the marker on disk; the bucket still has it, and push never deletes.

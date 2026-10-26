@@ -64,6 +64,8 @@ class Decision:
     delay_s: int = 0                  # for a retry: wait this long before sending it
     wait_for: str | None = None       # for a leave: the change that would make a retry worth it
     note: str = ""                    # for a retry: carried as the message's `reason`, so the ledger keeps it
+    redo_stage: str | None = None     # for a redo (the model's third answer, 2026-10-26): the earliest stage to run again
+    decided_by: str = "rules"         # rules | model; the event says which
 
 
 # ---------------------------------------------------------------------- the base class

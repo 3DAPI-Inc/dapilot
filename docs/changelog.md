@@ -5,6 +5,27 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The supervisor is a model (2026-10-26).** It was `triage.py`: 29 regular
+  expressions over the failure text, a fixed policy per class, and an
+  `Unknown` whose log was the backlog of patterns to add, the patch cycle
+  this project is trying to leave. Now `runner/supervisor.py` hands the stop,
+  the item's record from the outcome (statuses, attempts, the worker's
+  account, the report, the other markers, the spend) and the run's status to
+  `claude -p --agent dapilot:supervisor` (`agents/supervisor.md`, the new
+  `supervise-run` skill, no tools, two turns, a forty-cent cap) and reads one
+  JSON line: retry with a delay, redo an earlier stage, or leave with a
+  sentence. `redo` is new end to end: `ledger.py retry --redo --cascade` sets
+  the named stage's outputs and every later stage's aside, clears the
+  downstream markers and queues them afresh, refusing past a paid design
+  without `--force`; the backend's internal retry route takes `redo` and
+  `cascade`, its GET hands over the whole outcome, the dashboard says
+  "Supervisor: redoing analyze and everything after it". The runner keeps the
+  caps as code (two retries, earlier stages only, never blocked) and falls
+  back to the rules when the model cannot be asked; events say `decided_by`.
+  `scripts/dev/test_supervisor.sh` runs `skills/supervise-run/eval/stops.jsonl`
+  through the model: 30 of 30 over three passes, including the shark's empty
+  analysis (redo analyze), the plate-wide jig (leave), a 529 (retry), the same
+  timeout twice (leave) and a redo that would re-spend fal (leave).
 - **The research report carries the whole judgement (2026-10-26).** The
   outcome's research `report` grew from the identity, verdict, band and six
   similar listings to the word rules (`research/rules.json`), the search
