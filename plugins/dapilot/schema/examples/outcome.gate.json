@@ -1,10 +1,20 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "run": "edee9790-ad19-4b40-bfd9-6977d63aae35",
   "at": "2026-10-25T23:21:40+00:00",
   "started": true,
-  "counts": { "done": 5, "queued": 3 },
-  "cost": { "tokens": 583295, "usd": 0.3924, "by_agent": {} },
+  "counts": {
+    "done": 5,
+    "queued": 3
+  },
+  "cost": {
+    "tokens": 583295,
+    "usd": 0.3924,
+    "by_agent": {},
+    "assets_usd": 0.0,
+    "fees_usd": 0.0,
+    "total_usd": 0.3924
+  },
   "gates_open": 1,
   "notes": [],
   "items": [
@@ -12,14 +22,72 @@
       "item": "74ec6ee3dba54a4973bad319c13e4d7df20a860ef82209912adceedeb8e8e643",
       "file": "0-1791463244000-3DBenchy__2_.3mf",
       "stages": {
-        "analyze": { "status": "done", "attempt": 1, "summary": "5 bodies, 5 watertight, 15.6 cm3, bbox 60x31x48 mm" },
-        "quote": { "status": "done", "attempt": 1, "summary": "Quote dapi_4620d75c0e DONE: unit price 3.87, 1 plate" },
-        "preview": { "status": "done", "attempt": 1 },
-        "research": { "status": "done", "attempt": 2, "summary": "Benchy: median 4.00 vs break-even 6.10, verdict unreliable" },
-        "price": { "status": "done", "attempt": 1, "summary": "price 6.99 USD, cost-anchored margin candidate" },
-        "design": { "status": "queued", "attempt": 0 },
-        "copy": { "status": "queued", "attempt": 0 },
-        "publish": { "status": "queued", "attempt": 0 }
+        "analyze": {
+          "status": "done",
+          "attempt": 1,
+          "summary": "5 bodies, 5 watertight, 15.6 cm3, bbox 60x31x48 mm",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "quote": {
+          "status": "done",
+          "attempt": 1,
+          "summary": "Quote dapi_4620d75c0e DONE: unit price 3.87, 1 plate",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "preview": {
+          "status": "done",
+          "attempt": 1,
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "research": {
+          "status": "done",
+          "attempt": 2,
+          "summary": "Benchy: median 4.00 vs break-even 6.10, verdict unreliable",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "price": {
+          "status": "done",
+          "attempt": 1,
+          "summary": "price 6.99 USD, cost-anchored margin candidate",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "design": {
+          "status": "queued",
+          "attempt": 0
+        },
+        "copy": {
+          "status": "queued",
+          "attempt": 0
+        },
+        "publish": {
+          "status": "queued",
+          "attempt": 0
+        }
       },
       "gate": {
         "proposal": {
@@ -32,7 +100,13 @@
         },
         "candidates": {
           "floor": 6.99,
-          "candidates": [{ "label": "margin", "price": 6.99, "margin_pct": 0.111 }]
+          "candidates": [
+            {
+              "label": "margin",
+              "price": 6.99,
+              "margin_pct": 0.111
+            }
+          ]
         },
         "market": {
           "currency": "USD",
@@ -50,8 +124,16 @@
           "verdict": "unreliable",
           "verdict_reason": "total demand 0.064 units a day, 3 of 15 listings with any review",
           "rejected_candidates": [
-            { "label": "markup", "price": 5.99, "because": "below_floor" },
-            { "label": "median", "price": 3.99, "because": "below_floor" }
+            {
+              "label": "markup",
+              "price": 5.99,
+              "because": "below_floor"
+            },
+            {
+              "label": "median",
+              "price": 3.99,
+              "because": "below_floor"
+            }
           ],
           "similar": [
             {
@@ -74,8 +156,16 @@
         "drafts": [],
         "photos": [],
         "video": null
+      },
+      "spend": {
+        "workers": 0.3,
+        "assets": 0.0,
+        "fees": 0.0,
+        "total": 0.3
       }
     }
   ],
-  "director": { "exit": 0 }
+  "director": {
+    "exit": 0
+  }
 }

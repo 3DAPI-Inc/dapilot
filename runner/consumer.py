@@ -202,17 +202,22 @@ class Bucket:
             self.s3.upload_file(str(src), self.name, key)
 
     def delete(self, key: str) -> None:
-        """One object, gone for good. `push` never deletes, on purpose: the root is a seller's store and
-        a missing local file is more often a failed pull than a decision. The one thing that is decided
-        away is a stage marker a retry cleared, and that is the only caller."""
+        """One object, gone for good. Deletion goes both ways within one rule, the manifest: `push` removes
+        from the bucket what the last sync saw on both sides and the root no longer holds (a marker a retry
+        cleared), and `pull` removes from the root what the last sync saw on both sides and the bucket no
+        longer holds (a work dir the backend deleted with its run, 2026-10-26). A path only one side ever
+        had is never deleted: a missing file is more often a failed sync than a decision."""
         if self.local is not None:
             (self.local / key).unlink(missing_ok=True)
         else:
             self.s3.delete_object(Bucket=self.name, Key=key)
 
     def pull(self, prefix: str, root: Path) -> int:
-        """Bring the seller's root down: files missing locally or different (size, then content). Returns
-        the count. The manifest afterwards names every path now on both sides."""
+        """Bring the seller's root down: files missing locally or different (size, then content), and
+        remove from the root what the last sync saw on both sides and the bucket no longer holds (the
+        backend deleted a run's work dirs with the run; without this the volume's copy came back on the
+        next push and a deleted stop held the item again). Returns pulled + removed. The manifest
+        afterwards names every path now on both sides."""
         n = 0
         remote = self._remote(prefix)
         for rel, meta in remote.items():
@@ -223,8 +228,16 @@ class Bucket:
                 continue
             self.get(f"{prefix.rstrip('/')}/{rel}", dest)
             n += 1
+        gone = [rel for rel in self._manifest(root) if rel not in remote and (root / rel).exists() and not excluded(rel)]
+        for rel in gone:
+            (root / rel).unlink(missing_ok=True)
+            log(f"deleted from the root, gone from the bucket: {rel}")
+            parent = (root / rel).parent
+            while parent != root and parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
         self._write_manifest(root, {rel for rel in remote if not excluded(rel)} & set(self._local(root)))
-        return n
+        return n + len(gone)
 
     def push(self, root: Path, prefix: str) -> int:
         """Send the root back: files new or different since the last listing, and delete what the last

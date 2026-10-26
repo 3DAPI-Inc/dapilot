@@ -233,7 +233,7 @@ back from S3, and a path the manifest never saw is never deleted. A refused
 approve or retry posts the outcome as well as its event, so the backend's
 claim is released either way. The director's `preflight`, `for review` and
 `stopped` log lines become `run.preflight`, `stage.review` and
-`run.stopped` events. Per message:
+`run.stopped` events. Per message: Since 2026-10-26 `pull` applies the same rule the other way: a path the manifest saw on both sides that the bucket no longer holds is removed from the root, so a work dir the backend deleted with its run does not come back from the volume on the next push.
 
 1. **Receive** by long poll, one message at a time.
 2. **Heartbeat.** Extend the message's visibility every minute while the job

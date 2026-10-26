@@ -608,8 +608,9 @@ def cmd_record(a) -> int:
         "seconds": a.seconds, "model": a.model, "finished": rec["finished"],
         **({"worker_log": a.worker_log} if a.worker_log else {}),
         **({"interrupted": True} if getattr(a, "interrupted", False) else {})})
+    refresh_spend(state)
     save_state(state)
-    return out({"ok": True, "item": res["item"], "stage": res["stage"], "status": rec["status"],
+    return out({"ok": True, "item": res["item"], "stage": res["stage"], "status": rec["status"], "spend": rec.get("spend"),
                 **({"review": rec["review"]} if rec.get("review") else {}), "remaining": remaining(state)})
 
 
@@ -718,6 +719,72 @@ def media_of(wd: Path) -> dict:
 MARKER_FIELDS = ("reason", "question", "run", "attempt", "worker_log", "error", "problems")
 
 
+# ---------------------------------------------------------------- spend
+
+def listing_fee() -> float:
+    """Etsy's fee for activating a listing, from the store's fee table, else the plugin's, else 0.20 USD."""
+    store = Path(os.environ.get("DAPILOT_STORE_DIR") or (root() / "store"))
+    for p in (store / "reference" / "platform-fees.json",
+              Path(__file__).resolve().parent.parent / "skills" / "research-comparables" / "reference" / "platform-fees.json"):
+        fee = (((read_json(p) or {}).get("platforms") or {}).get("etsy") or {}).get("listing_fee")
+        if isinstance(fee, (int, float)):
+            return float(fee)
+    return 0.20
+
+
+def stage_spend(wd: Path, stage: str, rec: dict) -> dict:
+    """What one stage of one item has cost, in three kinds (2026-10-26). `workers` is every attempt's
+    Claude cost, as before. `assets` is the design stage's fal spend, read from design.json (or the
+    produce manifest of an unfinished design): the sum of the paid requests in the work dir, so it is
+    the item's total and not added up again across attempts. `fees` is Etsy's listing fee, counted for
+    the publish stage only when published.json says the listing is live and active; a draft or a sandbox
+    publish costs nothing. The ledger is the one reader of these files; everyone else sees the result."""
+    workers = round(sum(float(a.get("usd") or 0.0) for a in rec.get("attempts") or []), 4)
+    assets = fees = 0.0
+    if stage == "design":
+        design = read_json(wd / "design.json") or {}
+        for doc in (design, design.get("spend") or {}, (read_json(wd / "design" / "produced.json") or {}).get("spend") or {}):
+            v = doc.get("spend_usd", doc.get("usd"))
+            if isinstance(v, (int, float)) and v > 0:
+                assets = round(float(v), 4)
+                break
+    if stage == "publish":
+        pub = read_json(wd / "published.json") or {}
+        if not pub.get("sandbox") and ((pub.get("etsy") or {}).get("state") == "active"):
+            fees = round(listing_fee(), 4)
+    return {"workers": workers, "assets": assets, "fees": fees, "total": round(workers + assets + fees, 4)}
+
+
+def item_spend(stages: dict) -> dict:
+    """An item's spend: its stages' added up."""
+    t = {"workers": 0.0, "assets": 0.0, "fees": 0.0}
+    for rec in stages.values():
+        sp = rec.get("spend") or {}
+        for k in t:
+            t[k] += float(sp.get(k) or 0.0)
+    t = {k: round(v, 4) for k, v in t.items()}
+    return {**t, "total": round(sum(t.values()), 4)}
+
+
+def refresh_spend(state: dict) -> None:
+    """Every stage's and item's spend from disk, and the run's cost totals: `usd` stays the workers'
+    cost, as it always was; `assets_usd`, `fees_usd` and `total_usd` are the rest. Called at record and
+    when the outcome is built, so a design.json or published.json that appeared later is counted."""
+    assets = fees = 0.0
+    for it in state["items"].values():
+        wd = root() / it["workdir"]
+        for stage, rec in it.get("stages", {}).items():
+            if rec.get("attempts") or rec.get("status") == "done":
+                rec["spend"] = stage_spend(wd, stage, rec)
+        sp = item_spend(it.get("stages", {}))
+        it["spend"] = sp
+        assets += sp["assets"]
+        fees += sp["fees"]
+    c = state["cost"]
+    c["assets_usd"], c["fees_usd"] = round(assets, 4), round(fees, 4)
+    c["total_usd"] = round(float(c.get("usd") or 0.0) + assets + fees, 4)
+
+
 def _num(v):
     return round(float(v), 2) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
@@ -793,11 +860,12 @@ def build_outcome(run: str) -> dict:
     state = load_state(run)
     stages = load_stages(state.get("stages_file"))
     refresh(state, stages)
+    refresh_spend(state)
     items = []
     for h, it in state["items"].items():
         wd = root() / it["workdir"]
         rec = {"item": h, "file": it.get("file"), "stages": it.get("stages", {}), "gate": None, "markers": [],
-               "media": media_of(wd)}
+               "media": media_of(wd), "spend": it.get("spend")}
         rec["gate"] = gate_of(wd)
         # failed and blocked stop the item; review stops nothing, the stage is done and a check found something
         for m in sorted(wd.glob("*.failed.json")) + sorted(wd.glob("*.blocked.json")) + sorted(wd.glob("*.review.json")):

@@ -557,7 +557,8 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
                      status=rec.get("status") or "rejected", seconds=float(meta["seconds"]), turns=int(meta.get("turns") or 0),
                      usd=round(float(meta["usd"]), 4), summary=str(result.get("summary") or "")[:300],
                      reason=(str(result.get("reason") or rec.get("reason") or "") or None),
-                     cached=bool(result.get("cached")), interrupted=bool(meta.get("interrupted")))
+                     cached=bool(result.get("cached")), interrupted=bool(meta.get("interrupted")),
+                     **({"spend": rec["spend"]} if isinstance(rec.get("spend"), dict) else {}))
                 if rec.get("review"):
                     log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} for review: " + "; ".join(rec["review"])[:300])
                     emit(root, run, "stage.review", item=b["item"], stage=b["stage"], attempt=int(b["attempt"]),
@@ -584,8 +585,13 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
         **({"stopped": "signal"} if STOPPING.is_set() else {}),
     }
     log(f"done: {counts}, {dispatched_total} workers, {spent:.4f} USD, {summary['seconds']}s -> {rep['report']}")
+    cost = rep.get("cost") or {}
+    spend = {"workers": round(float(cost.get("usd") or spent), 4), "assets": round(float(cost.get("assets_usd") or 0.0), 4),
+             "fees": round(float(cost.get("fees_usd") or 0.0), 4)}
+    spend["total"] = round(sum(spend.values()), 4)
     emit(root, run, "run.ended", ok=bool(summary["ok"]), counts={k: int(v) for k, v in counts.items()}, workers=int(dispatched_total),
-         usd=round(float(spent), 4), seconds=float(summary["seconds"]), report=str(rep["report"]), stopped=STOPPING.is_set() or None)
+         usd=round(float(spent), 4), seconds=float(summary["seconds"]), report=str(rep["report"]), stopped=STOPPING.is_set() or None,
+         spend=spend)
     print(json.dumps(summary, indent=2))
     return 0 if summary["ok"] else 1
 

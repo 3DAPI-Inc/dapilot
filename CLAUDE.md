@@ -328,7 +328,11 @@ Resume button picks up every work dir with a stage left and no live worker.
   runs every stage but creates nothing on Etsy and posts nothing, writing
   `published.json` marked `sandbox` so the run completes. The Settings tab of
   `/dapilot:config` switches it; the template seeds new stores as sandbox, a
-  store without the key is live. A sandbox `published.json` is not cached
+  store without the key is live. On the hosted tier the backend's
+  `DAPILOT_PUBLISH_MODE` sets it for every seller through the limits route
+  (2026-10-26); a live publish needs a shop token with `listings_w`, which
+  the platform asks for since the same day, so a shop connected earlier must
+  be reconnected (the Integrations card says so). A sandbox `published.json` is not cached
   once the mode is live: running `publish_product.py` again publishes.
 - The person's approval of the price is the gate for all of it.
   `publish.auto_activate` and `publish.auto_post` in config hand either half
@@ -591,7 +595,15 @@ fulfilment.
 
 Cost per item at current caps: research 1.2, price 0.6, design 5.0, copy 0.8
 USD of worker budget, about 2.34 USD of fal assets at list (1.04 during the
-FLUX promotion), 0.20 USD to activate on Etsy. Run ceiling 15 USD. Turns per
+FLUX promotion), 0.20 USD to activate on Etsy. Run ceiling 15 USD, on the
+workers' cost. **Spend is counted in three kinds (2026-10-26):** the ledger
+gives every stage a `spend` of `workers` (every attempt's Claude cost),
+`assets` (the design stage's fal spend, from `design.json`) and `fees`
+(Etsy's listing fee, counted only when `published.json` says the listing is
+live and active), each item their sum, and the run's `cost` carries
+`assets_usd`, `fees_usd` and `total_usd` beside the workers' `usd`; the
+`stage.result` and `run.ended` events carry the same `spend` (contract 1.2).
+Before this every figure was workers only. Turns per
 worker, not routing, is where the money goes; the designer on Opus costs
 about twice the Sonnet rate per token.
 

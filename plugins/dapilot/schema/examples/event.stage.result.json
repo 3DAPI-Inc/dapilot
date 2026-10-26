@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.2",
   "at": "2026-10-25T20:11:03+00:00",
   "run": "911d5ba0-7a45-4b3d-888d-16440e747d29",
   "kind": "stage.result",
@@ -13,6 +13,12 @@
     "usd": 0.0412,
     "summary": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
     "reason": "analysis.json is empty (0 bytes); rerun the analysis stage before research",
-    "cached": false
+    "cached": false,
+    "spend": {
+      "workers": 0.0412,
+      "assets": 0.0,
+      "fees": 0.0,
+      "total": 0.0412
+    }
   }
 }
