@@ -65,7 +65,7 @@ its exit code and the files it writes.
   events and re-queued messages land in `retries.jsonl`, `events.jsonl`
   and `requeued.jsonl` there.
 - `requirements.txt`: boto3, the AWS SDK for Python, installed into the same
-  venv as the plugin's packages.
+  venv as the plugin's packages. Since 2026-10-26 `doctor.sh` also runs pyflakes over the consumer, the supervisor, the triage and every plugin script and fails on an undefined name, which `py_compile` lets through: the approve handler called a renamed function for a day before a seller's click found it.
 
 The consumer runs on a laptop with no AWS account, which is how it is tested:
 a directory stands in for the bucket and another for the backend.

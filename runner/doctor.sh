@@ -17,6 +17,12 @@ v=$(claude --version 2>/dev/null) && ok "claude $v" || fail "claude CLI"
   && ok "python $("$DAPILOT_PYTHON" --version 2>&1 | cut -d' ' -f2) with the plugin's packages" || fail "python packages"
 "$DAPILOT_PYTHON" "$DAPILOT_PLUGIN_DIR/scripts/contract.py" selftest >/dev/null \
   && ok "contract $(cat "$DAPILOT_PLUGIN_DIR/schema/VERSION"): every schema example validates" || fail "contract self-test (plugins/dapilot/schema)"
+# Undefined names, which py_compile lets through: the consumer's approve handler called a function that
+# had been renamed and crashed every approve on staging for a day (2026-10-26). Style warnings are not
+# the question here; only a name that does not exist is.
+names=$("$DAPILOT_PYTHON" -m pyflakes ./consumer.py ./supervisor.py ./triage.py "$DAPILOT_PLUGIN_DIR"/scripts/*.py 2>&1 \
+  | grep -v "imported but unused\|f-string is missing placeholders\|redefinition of unused\|assigned to but never used\|unable to detect undefined names" || true)
+[ -z "$names" ] && ok "pyflakes: no undefined names in the runner or the plugin's scripts" || fail "pyflakes: $names"
 f=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) && ok "$f" || fail "ffmpeg"
 "$CHROME" --headless=new --dump-dom about:blank >/dev/null 2>&1 && ok "chromium headless via $CHROME" || fail "chromium"
 [ -f "$DAPILOT_PLUGIN_DIR/studio/index.html" ] && ok "studio page bundled" || fail "studio page missing: run scripts/dev/build_studio.sh and rebuild"

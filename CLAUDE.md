@@ -287,7 +287,9 @@ Resume button picks up every work dir with a stage left and no live worker.
   the sphere fixture: 3 s against 48 s for the eight drafts, softer
   highlights, the same yaws. **The page reports while it draws
   (2026-10-26):** a word to the driver before every frame, a heartbeat every
-  5 s during one, its reason when it fails, done at the end; the driver prints
+  5 s during one from a Web Worker (the main thread is blocked while a frame
+  is read back, so a timer there never fired), its reason when it fails, done
+  at the end; the driver prints
   `capture: frame 2/4 beauty yaw 0: drawing, 95 s` to stderr on every change
   and gives the page up only after `--stall` seconds of silence (60), never
   for being slow. Chromium's stderr is kept in `OUT/.chrome.log` and its tail
@@ -559,7 +561,8 @@ cd frontend && npm run dev                               # :8081; starts the job
 Chrome is found at the default macOS path or via `CHROME` in `store/.env`;
 the preview and design stages need it and ffmpeg, nothing else. Measured on
 the reference laptop (4 cores): eight drafts about 3 s, four 2048 px stills
-about 8 s; slicer 18 to 40 s per file; studio-only design run 7 min and 37
+about 8 s on the GPU, four 1024 px stills 36 s on SwiftShader (`--software`;
+147 s at the old 2048 px with antialiasing); slicer 18 to 40 s per file; studio-only design run 7 min and 37
 turns.
 
 Environment every skill expects, in `store/.env` (gitignored), which

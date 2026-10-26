@@ -593,7 +593,7 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
         if res.returncode != 0 or not verdict.get("ok"):
             # The outcome goes up as well as the event: the backend's lock on the gate is released by
             # either, so a lost event no longer leaves the buttons away until the next director ends.
-            doc = outcome(root, run)
+            doc = ledger_outcome(root, run)
             doc["director"] = {"exit": 0, "skipped": f"approval refused: {verdict.get('reason')}"}
             backend.outcome(seller, run, doc)
             return {"ok": False, "reason": f"approval refused: {verdict.get('reason')}", "outcome": doc}
@@ -602,7 +602,7 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
             # This one is a repeat (a second click, a redelivery): nothing to start. The outcome goes up so
             # the dashboard shows the item as it is, and the message is done.
             log(f"{seller}/{run}: {body['item'][:8]} already approved at {verdict.get('at')} by {verdict.get('by')}; nothing started")
-            doc = outcome(root, run)
+            doc = ledger_outcome(root, run)
             doc["director"] = {"exit": 0, "skipped": "already approved"}
             backend.outcome(seller, run, doc)
             return {"ok": True, "summary": doc["director"], "outcome": doc}
@@ -619,7 +619,7 @@ def handle(body: dict, backend: Backend, bucket: Bucket, extra_args: list[str], 
             bucket.delete(f"sellers/{seller}/work/{item}/{name}")
         backend.event(seller, run, "stage.retried", item=item, stage=stage, ok=bool(verdict.get("ok")), detail=verdict)
         if res.returncode != 0 or not verdict.get("ok"):
-            doc = outcome(root, run)
+            doc = ledger_outcome(root, run)
             doc["director"] = {"exit": 0, "skipped": f"retry refused: {verdict.get('reason')}"}
             backend.outcome(seller, run, doc)
             return {"ok": False, "reason": f"retry refused: {verdict.get('reason')}", "outcome": doc}
