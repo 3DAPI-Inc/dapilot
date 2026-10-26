@@ -5,6 +5,15 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The research report carries the whole judgement (2026-10-26).** The
+  outcome's research `report` grew from the identity, verdict, band and six
+  similar listings to the word rules (`research/rules.json`), the search
+  counts (`research/summary.json`), the band's basis, spread and
+  concentration, the offer, every selected comparable up to 40 heaviest first
+  with its share of the weight and its relevance, and the ten nearest rejects
+  with the words that kept them out. Same schema minor (1.2): `report` is a
+  free object per stage. The dashboard shows it on the research sheet, so a
+  seller can see which market was chosen and why.
 - **The seller's browser draws the pictures (2026-10-26).** The runner's
   headless Chromium on a CPU took two minutes for eight drafts, two minutes a
   still, and froze on the duck's painted mesh. The studio page gains

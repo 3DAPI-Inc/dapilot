@@ -169,8 +169,9 @@ copy of the schemas. `approve_price.py pending`, `server/app.py` and
 pass. `docs/state-machine.md` is the page behind all of this. **Since
 2026-10-26 the outcome carries what each stage made:** every stage that has
 run has a `report` (the ledger's `stage_report`, read from the stage's own
-files: measurements, the 3DAPI price and metrics, research's identity, verdict,
-band and six similar listings, the proposal and the approval, the design name,
+files: measurements, the 3DAPI price and metrics, research's identity, word
+rules, search counts, verdict, band and every selected listing with its weight
+share and relevance, up to 40, plus the nearest rejects, the proposal and the approval, the design name,
 scenes and review, the listing text, the Etsy state and link) and an `account`
 (the worker's paragraph from the work dir's `log.md`), so the dashboard shows
 the words and figures instead of "this stays on the runner". A script stage's

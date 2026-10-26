@@ -251,7 +251,7 @@
             "object",
             "null"
           ],
-          "description": "what the stage made, read by the ledger from the stage's own output files (2026-10-26): analyze the measurements, quote the 3DAPI price and metrics, research the identity, verdict, band and six similar listings, price the proposal and approval, design the name, scenes and review, copy the listing text, publish the Etsy state and link. The shape per stage is ledger.py stage_report; readers take what they know"
+          "description": "what the stage made, read by the ledger from the stage's own output files (2026-10-26): analyze the measurements, quote the 3DAPI price and metrics, research the identity, the word rules, the search counts, the verdict, the band with its basis and concentration, every selected listing (up to 40, heaviest first, with weight share and relevance) and the nearest rejects, price the proposal and approval, design the name, scenes and review, copy the listing text, publish the Etsy state and link. The shape per stage is ledger.py stage_report; readers take what they know"
         },
         "account": {
           "type": [
