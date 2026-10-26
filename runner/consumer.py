@@ -350,8 +350,9 @@ def template_release() -> dict:
     seeded once and then persisted, so a value the template changed later never reached an existing seller:
     the design worker's 1.50 USD of 2026-10-23 was the template's old budget, frozen in S3, and the clip
     engine switch of the same day would have been frozen the same way. Written under the plan limits on
-    every job, so the release's figures apply and the plan's still win; the seller's palette, stills and
-    caps stay theirs."""
+    every job, so the release's figures apply and the plan's still win; the seller's palette and caps stay
+    theirs. `stills` joined the release's keys on 2026-10-26, when the size went from 2048 to 1024 for the
+    CPU-only host: a hosted seller never edits it, and the frozen 2048 would have kept the stall."""
     t = PLUGIN_DIR / "templates" / "config.example.json"
     try:
         tpl = json.loads(t.read_text())
@@ -359,7 +360,8 @@ def template_release() -> dict:
         return {}
     design = tpl.get("design") or {}
     out: dict = {"budget": tpl.get("budget") or {}}
-    release_design = {k: design[k] for k in ("lifestyle_images", "lifestyle_video") if isinstance(design.get(k), dict)}
+    release_design = {k: design[k] for k in ("lifestyle_images", "lifestyle_video", "stills")
+                      if isinstance(design.get(k), dict)}
     if release_design:
         out["design"] = release_design
     return out

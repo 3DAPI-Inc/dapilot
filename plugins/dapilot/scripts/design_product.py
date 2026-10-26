@@ -67,7 +67,9 @@ DEFAULTS = {
                 "#F2C230": "yellow", "#4E9A5B": "green", "#F08BB4": "pink", "#8A5CC7": "purple"},
     # Four WebGL stills from the studio page, a few seconds in all. Blender was the fallback renderer until
     # 2026-10-20; the page is bundled with the plugin now, so there is no case without one.
-    "stills": {"count": 4, "size": 2048, "elevation": 18},
+    # 1024 since 2026-10-26, from 2048: the stills are fal's input and the listing's extras, and on a host
+    # with no GPU a 2048 px frame took longer than the capture's stall guard. See capture_turntable.py.
+    "stills": {"count": 4, "size": 1024, "elevation": 18},
     # when "fallback" (decided 2026-09-22) the turntable is rendered only after fal failed to make the
     # lifestyle clip and its redo; "always" renders it on every item, as before. It is the listing video
     # only then, and on a server without a GPU it costs about half an hour of CPU.

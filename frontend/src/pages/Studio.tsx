@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { captureFromQuery, captureTurntable } from '@/lib/model/capture';
+import { captureFromQuery, captureTurntable, report } from '@/lib/model/capture';
 import { loadPreview } from '@/lib/model/load';
 import { STUDIO_DEFAULTS, createStudio, type Pass, type Studio as StudioScene, type StudioConfig, type StudioStats } from '@/lib/model/studio';
 import { ConsoleShell, PageHeader } from '@/components/site/ConsoleShell';
@@ -50,8 +50,12 @@ export default function Studio() {
     const backdrop = q.get('backdrop');
     const rotate = (q.get('rotate') ?? '').split(',').map(Number);
     const elevation = Number(q.get('elevation'));
+    // aa=0 and shadowMap=N are the capture driver's cost controls (capture_turntable.py)
+    const shadowMap = Number(q.get('shadowMap'));
     return {
       ...STUDIO_DEFAULTS,
+      ...(q.get('aa') === '0' ? { antialias: false } : {}),
+      ...(q.has('shadowMap') && Number.isFinite(shadowMap) && shadowMap >= 256 ? { shadowMapSize: shadowMap } : {}),
       ...(rotate.length === 3 && rotate.every(Number.isFinite) ? { rotate: rotate as [number, number, number] } : {}),
       ...(q.has('elevation') && Number.isFinite(elevation) ? { elevation } : {}),
       ...(colour ? { color: colour.startsWith('#') ? colour : `#${colour}` } : {}),
@@ -76,7 +80,7 @@ export default function Studio() {
 
   useEffect(() => {
     if (!mount.current) return;
-    const scene = createStudio(mount.current);
+    const scene = createStudio(mount.current, { antialias: cfg.antialias, shadowMapSize: cfg.shadowMapSize });
     studio.current = scene;
     return () => { scene.dispose(); studio.current = null; };
   }, []);
@@ -139,7 +143,11 @@ export default function Studio() {
         const name = decodeURIComponent(url.split('/').pop() || 'model.stl');
         await open(new File([blob], name));
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        const why = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setError(why);
+        // A model that fetched but would not load is a failure the capture
+        // loop never sees; tell the driver, which otherwise waits on a model.
+        void report(captureFromQuery(window.location.search)?.progress, { state: 'failed', reason: `the model did not load: ${why}` });
       } finally {
         if (!cancelled) setBusy(false);
       }

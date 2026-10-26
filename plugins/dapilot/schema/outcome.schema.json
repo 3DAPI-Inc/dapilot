@@ -4,111 +4,529 @@
   "title": "dapilot run outcome",
   "description": "What a run is now, as one document: per item per stage, the open gates with their candidates, every marker, and the media each item has so far. Produced only by `ledger.py outcome --run <id>`, which is the one reader of the work dirs; the hosted runner adds `director` and posts it when the director exits, the dashboard renders it, the supervisor reads its markers. Media are keys relative to the seller's root, never URLs.",
   "type": "object",
-  "required": ["schema_version", "run", "at", "started", "counts", "gates_open", "items"],
+  "required": [
+    "schema_version",
+    "run",
+    "at",
+    "started",
+    "counts",
+    "gates_open",
+    "items"
+  ],
   "properties": {
-    "schema_version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
-    "run": { "type": "string", "minLength": 1 },
-    "at": { "type": "string", "format": "date-time" },
-    "started": { "type": "boolean", "description": "false when the run has no ledger state: the director refused before registering anything" },
-    "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "stage records by status, over every item" },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "run": {
+      "type": "string",
+      "minLength": 1
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "started": {
+      "type": "boolean",
+      "description": "false when the run has no ledger state: the director refused before registering anything"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "stage records by status, over every item"
+    },
     "cost": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "properties": {
-        "tokens": { "type": "integer", "minimum": 0 },
-        "usd": { "type": "number", "minimum": 0 },
-        "by_agent": { "type": "object" }
+        "tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "by_agent": {
+          "type": "object"
+        }
       }
     },
-    "gates_open": { "type": "integer", "minimum": 0 },
-    "notes": { "type": "array", "items": { "type": "string" }, "description": "the ledger's last notes" },
-    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+    "gates_open": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "the ledger's last notes"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
     "director": {
       "type": "object",
       "description": "added by whoever ran the director: its exit code and the summary it printed, or why it was not started",
       "properties": {
-        "exit": { "type": ["integer", "null"] },
-        "reason": { "type": "string" },
-        "skipped": { "type": "string" }
+        "exit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "skipped": {
+          "type": "string"
+        }
       }
     }
   },
   "$defs": {
     "item": {
       "type": "object",
-      "required": ["item", "file", "stages", "gate", "markers", "media"],
+      "required": [
+        "item",
+        "file",
+        "stages",
+        "gate",
+        "markers",
+        "media"
+      ],
       "properties": {
-        "item": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "file": { "type": ["string", "null"] },
+        "item": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "stages": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/stage" }
-        },
-        "gate": {
-          "type": ["object", "null"],
-          "description": "present while price.json exists and price.approved.json does not: the seller's turn",
-          "required": ["proposal", "candidates"],
-          "properties": {
-            "proposal": { "type": ["object", "null"] },
-            "candidates": { "type": ["object", "null"] },
-            "answered": { "type": ["object", "null"], "description": "written by the backend when a seller answers; never by the ledger" }
+          "additionalProperties": {
+            "$ref": "#/$defs/stage"
           }
         },
-        "markers": { "type": "array", "items": { "$ref": "#/$defs/marker" } },
-        "media": { "$ref": "#/$defs/media" }
+        "gate": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "present while price.json or price.rejected.json exists and price.approved.json does not: the seller's turn. `proposal` is null when every candidate was rejected; `rejected` then says why",
+          "required": [
+            "proposal",
+            "candidates"
+          ],
+          "properties": {
+            "proposal": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "candidates": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "answered": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "written by the backend when a seller answers; never by the ledger"
+            },
+            "market": {
+              "$ref": "#/$defs/gateMarket"
+            },
+            "rejected": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "why no candidate was allowed, from price.rejected.json; a person may still set a price above the floor"
+            }
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/marker"
+          }
+        },
+        "media": {
+          "$ref": "#/$defs/media"
+        }
       }
     },
     "stage": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
-        "status": { "enum": ["queued", "running", "done", "failed", "blocked"] },
-        "attempt": { "type": "integer", "minimum": 0 },
-        "summary": { "type": "string" },
-        "reason": { "type": "string" },
-        "question": { "type": "string" },
-        "previous": { "type": ["string", "null"] },
-        "review": { "type": "array", "items": { "type": "string" } },
-        "retries": { "type": "integer", "minimum": 0 },
-        "attempts": { "type": "array", "items": { "type": "object" } }
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "done",
+            "failed",
+            "blocked"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "summary": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "previous": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "review": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
       }
     },
     "marker": {
       "type": "object",
       "description": "a marker file as the outcome shows it: its name and the fields a reader acts on",
-      "required": ["file", "stage"],
+      "required": [
+        "file",
+        "stage"
+      ],
       "properties": {
-        "file": { "type": "string", "pattern": "\\.(failed|blocked|review)\\.json$" },
-        "stage": { "type": ["string", "null"] },
-        "reason": { "type": ["string", "null"] },
-        "question": { "type": ["string", "null"] },
-        "problems": { "type": ["array", "null"], "items": { "type": "string" } },
-        "run": { "type": ["string", "null"] },
-        "attempt": { "type": ["integer", "null"] },
-        "worker_log": { "type": ["string", "null"] },
-        "error": { "type": ["string", "null"] },
-        "retrying": { "type": ["object", "null"], "description": "written by the backend when a retry is requested; never by the ledger" }
+        "file": {
+          "type": "string",
+          "pattern": "\\.(failed|blocked|review)\\.json$"
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "problems": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "worker_log": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retrying": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "written by the backend when a retry is requested; never by the ledger"
+        }
       }
     },
     "media": {
       "type": "object",
-      "required": ["name", "thumbnail", "drafts", "photos", "video"],
+      "required": [
+        "name",
+        "thumbnail",
+        "drafts",
+        "photos",
+        "video"
+      ],
       "properties": {
-        "name": { "type": ["string", "null"] },
-        "thumbnail": { "type": ["string", "null"] },
-        "drafts": { "type": "array", "items": { "type": "string" } },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thumbnail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "drafts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "photos": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["key"],
+            "required": [
+              "key"
+            ],
             "properties": {
-              "id": { "type": ["string", "null"] },
-              "kind": { "type": ["string", "null"] },
-              "key": { "type": "string" }
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "key": {
+                "type": "string"
+              }
             }
           }
         },
-        "video": { "type": ["string", "null"] }
+        "video": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "gateMarket": {
+      "type": "object",
+      "description": "what a person weighs at the gate (since 1.1): the market band, 3DAPI's cost, the floor, the verdict and the heaviest comparable listings",
+      "required": [
+        "currency",
+        "floor",
+        "similar"
+      ],
+      "properties": {
+        "currency": {
+          "type": "string"
+        },
+        "n": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "p25": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "median": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "p75": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "thin": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "unit_cost": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "3DAPI's quote for one unit at the cost basis"
+        },
+        "offer_cost": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "the quote for one sale of `units` units"
+        },
+        "units": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "floor": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "break-even: cost, fees and VAT owed; nothing below it is approved"
+        },
+        "verdict": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "viable",
+            "thin",
+            "not_viable",
+            "unreliable",
+            null
+          ]
+        },
+        "verdict_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rejected_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "price",
+              "because"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "price": {
+                "type": "number"
+              },
+              "because": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "similar": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "price",
+              "currency",
+              "url"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "price": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "shop": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sold": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "reviews": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
       }
     }
   }

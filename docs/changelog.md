@@ -5,6 +5,66 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **Cheap stills (2026-10-26).** 1024 px, no multisampling, 1024 px shadow
+  map for every capture; the console keeps its look. `StudioConfig` gains
+  `antialias` (read when the renderer is made) and `shadowMapSize`;
+  `capture_turntable.py` sends `aa=0` and `shadowMap=1024` unless
+  `--antialias` and `--shadow-map` say otherwise, and `--software` forces
+  SwiftShader on any system for measuring. `design.stills.size` is 1024 in the
+  script and the template, and `stills` joined the keys the hosted runner
+  refreshes from the release, since a hosted seller's config.json is frozen
+  at seeding and would have kept 2048. Measured on the laptop with
+  `--software` (SwiftShader, 4 cores), four Benchy stills: see the numbers in
+  the same-day note below once taken.
+- **Hosted Etsy with the seller's own app; integrator accounts are sellers
+  (2026-10-26, 3dapi).** dapilot's Integrate button now opens the plugin's
+  own Etsy steps and two fields in a modal; the platform verifies the
+  keystring and shared secret with openapi-ping as `integrate.py` does, saves
+  them on the seller's Etsy row, authorizes the shop against that app and
+  serves the runner the seller's values over the platform's. The dapilot
+  routes admit integrator accounts (`anyAccountAuth`), `GET /dapilot/me` says
+  which kind holds the session, and the account menu links to that account's
+  pages; an integrator still has no Etsy row. Both in `docs/hosting.md`.
+- **The capture page reports progress; slow is no longer dead (2026-10-26).**
+  The Benchy's design stage blocked three times on staging with "no frame for
+  120s; the page stopped sending" and one of four 2048 px stills on disk. The
+  page had not stopped: the Coolify host is a shared t3a.large with no GPU, so
+  Chromium draws through SwiftShader on about one core, the eight 512 px
+  drafts took 217 s there against 3 s on the laptop, and one 2048 px Benchy
+  still takes longer than the driver's 120 s stall guard, which killed
+  Chromium mid-frame (the first frame was exempt, hence exactly one). The
+  shark's four stills had passed at 94 s each on 2026-10-23. Now
+  `capture.ts` posts a progress report to the collector: a word before every
+  frame, a heartbeat every 5 s while one is drawn, the failure reason, done.
+  `capture_turntable.py` takes `/progress`, prints `capture: frame i/n pass
+  yaw: drawing, N s` to stderr on every change and every 30 s, gives the page
+  up after `--stall` seconds of silence (60) and never for a long frame, turns
+  the page's own failure into the reason (before, it lived only in the tab
+  title), keeps the old 120 s rule for a page that never reports, writes
+  Chromium's stderr to `OUT/.chrome.log` and puts its tail in a failure.
+  Studio page rebuilt into `plugins/dapilot/studio`. Still to do: the stills
+  run without `--resume`, so a produce deadline mid-stills restarts at frame
+  0; the frame itself should be cheaper on a CPU (antialias and the 2048
+  shadow map), and the host needs a core of its own.
+- **The gate opens on a rejected price too, and shows the market
+  (2026-10-26).** `ledger.py outcome` opens an item's gate on `price.json` or
+  `price.rejected.json` without an approval; with no proposal the person sets
+  a price at or above the floor, which `approve_price.py` already took. The
+  gate carries a `market` block (`gate_market`): the band, 3DAPI's unit cost,
+  the floor, research's verdict and reason, the candidates the script
+  rejected and why, and up to six comparable listings with links. Schema
+  1.1, vendored into 3dapi. The dashboard shows them, hides the price stage's
+  own question when the gate is open, labels the state "set a price" when
+  there is nothing to approve, and refuses a typed price under the floor.
+  `check_outputs.py` accepts the verdict `unreliable`, which `market_stats.py`
+  emits and the checker refused, costing the Benchy run a second research
+  attempt and a blocked marker (run edee9790, 2026-10-25). `load_stages`
+  falls back to the plugin's table when a state names a path from another
+  machine. Dashboard: a green breathing dot before every running state and
+  stage, "This might take a minute" with moving dots under it (the sentence
+  names the stage), and a turning ring instead of "Reading <file>" wherever
+  a model is fetched or read.
+
 - **The contract: one schema each for events, markers and outcomes; the
   director writes events; the ledger is the only reader (2026-10-25).**
   `plugins/dapilot/schema/` holds `event.schema.json`, `marker.schema.json`,
