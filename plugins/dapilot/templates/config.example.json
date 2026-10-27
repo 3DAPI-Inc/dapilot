@@ -10,7 +10,7 @@
   "usd_per_stage": {
    "research": 1.2,
    "price": 0.6,
-   "design": 1.5,
+   "design": 5.0,
    "copy": 0.8
   }
  },
@@ -71,7 +71,7 @@
   },
   "stills": {
    "count": 4,
-   "size": 2048,
+   "size": 1024,
    "elevation": 18
   },
   "turntable": {
@@ -102,10 +102,10 @@
    "drift_arc": 40,
    "engine": "i2v",
    "i2v": {
-    "endpoint": "minimax/h3-max/image-to-video",
-    "resolution": "1080P",
+    "endpoint": "blackforestlabs/flux-3-max/image-to-video",
+    "resolution": "1080p",
     "seconds": 6,
-    "usd_per_second": 0.16
+    "usd_per_second": 0.29
    }
   },
   "usd_cap_per_item": 3.0,

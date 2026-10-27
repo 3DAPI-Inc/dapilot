@@ -28,8 +28,9 @@ DAPILOT_STORE_DIR   store-private files: the env file with the keys, the Etsy to
                     reference/, products, social sessions. Optional: without it a checkout
                     uses its own store/ and anything else uses ~/.dapilot, one store per
                     machine (scripts/store_path.py), so updates and new sessions keep the setup.
-ETSY_KEYSTRING      Etsy Open API v3 app credentials, for research-comparables only
-ETSY_SHARED_SECRET
+ETSY_KEYSTRING      Etsy Open API v3 app credentials, for research-comparables and publish. The
+ETSY_SHARED_SECRET  keystring is Etsy's name for the app's API key; both are shown on the app's page
+                    at etsy.com/developers/your-apps and both must be set, preflight refuses otherwise
 FAL_KEY             fal.ai key (FAL_API_KEY also accepted), for design-product's paid assets only
 DAPILOT_STUDIO_URL  optional, the browser studio page for captures (default design.studio_url in config)
 CHROME              optional, path to Chrome or Chromium for headless captures

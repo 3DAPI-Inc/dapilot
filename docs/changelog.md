@@ -5,6 +5,409 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **The supervisor is a model (2026-10-26).** It was `triage.py`: 29 regular
+  expressions over the failure text, a fixed policy per class, and an
+  `Unknown` whose log was the backlog of patterns to add, the patch cycle
+  this project is trying to leave. Now `runner/supervisor.py` hands the stop,
+  the item's record from the outcome (statuses, attempts, the worker's
+  account, the report, the other markers, the spend) and the run's status to
+  `claude -p --agent dapilot:supervisor` (`agents/supervisor.md`, the new
+  `supervise-run` skill, no tools, two turns, a forty-cent cap) and reads one
+  JSON line: retry with a delay, redo an earlier stage, or leave with a
+  sentence. `redo` is new end to end: `ledger.py retry --redo --cascade` sets
+  the named stage's outputs and every later stage's aside, clears the
+  downstream markers and queues them afresh, refusing past a paid design
+  without `--force`; the backend's internal retry route takes `redo` and
+  `cascade`, its GET hands over the whole outcome, the dashboard says
+  "Supervisor: redoing analyze and everything after it". The runner keeps the
+  caps as code (two retries, earlier stages only, never blocked) and falls
+  back to the rules when the model cannot be asked; events say `decided_by`.
+  `scripts/dev/test_supervisor.sh` runs `skills/supervise-run/eval/stops.jsonl`
+  through the model: 30 of 30 over three passes, including the shark's empty
+  analysis (redo analyze), the plate-wide jig (leave), a 529 (retry), the same
+  timeout twice (leave) and a redo that would re-spend fal (leave).
+- **The research report carries the whole judgement (2026-10-26).** The
+  outcome's research `report` grew from the identity, verdict, band and six
+  similar listings to the word rules (`research/rules.json`), the search
+  counts (`research/summary.json`), the band's basis, spread and
+  concentration, the offer, every selected comparable up to 40 heaviest first
+  with its share of the weight and its relevance, and the ten nearest rejects
+  with the words that kept them out. Same schema minor (1.2): `report` is a
+  free object per stage. The dashboard shows it on the research sheet, so a
+  seller can see which market was chosen and why.
+- **The seller's browser draws the pictures (2026-10-26).** The runner's
+  headless Chromium on a CPU took two minutes for eight drafts, two minutes a
+  still, and froze on the duck's painted mesh. The studio page gains
+  `post=parent` and `progress=parent`: frames and reports go to the parent
+  window as messages, for a hidden iframe. The dashboard (3dapi) vendors the
+  built page under `/studio`, draws eight drafts of a plain file at upload
+  and a 24-frame stills grid at the gate from `display.ply` when the item has
+  one, in the colour the seller picks, and PUTs them into the work dir with
+  the record last through `POST /dapilot/runs/:id/items/:item/frames`. The
+  plugin counts a set only whole: preview's outputs include `render.json`,
+  `preview_model.py` redraws a half set and keeps a whole one from any
+  renderer, `check_outputs` wants eight non-empty frames; `design_product.py`
+  reads `design/frames/grid/grid.json`, `check` snaps the brief onto the grid
+  and the seller's colour (`price.approved.json.color`, from
+  `approve_price.py --color`, carried by the approve message), and the stills
+  step copies the frames and runs no renderer. Without a whole set the
+  runner draws, as before.
+- **Jobs side by side (2026-10-26).** The consumer worked one message at a
+  time, so the stripe logo's seller waited behind the duck. `DAPILOT_JOBS`
+  starts that many job loops in the container, each taking one message; the
+  FIFO group is the seller, so one seller's runs still run in order on their
+  own root while other sellers proceed. Log lines carry the job thread's
+  name when there is more than one. Default 1. Sizing in `docs/hosting.md`:
+  about 1.5 GB and a core per job, two at most on the shared host.
+- **A held stop says so (2026-10-26).** The stripe logo's run of today ran
+  three seconds and showed "raise the USD budget to at least 1.6": the
+  design.blocked.json of its first run, 2026-10-23, written when the design
+  budget bug was live, adopted by the new run from the shared work dir and
+  shown as a fresh question. Outcome markers now carry `at` beside `run`, and
+  the dashboard's stop card says "stopped in an earlier run, three days ago"
+  with Continue when the marker's run is not the one on the page. The
+  budget itself was fine: that seller's config carries 5.00 USD for design.
+- **Stills resume (2026-10-26).** The duck's design stage drew three of four
+  stills in its 449 s capture window on the host (a painted mesh: 217k
+  triangles with three vertices each, 12.6 MB, about two minutes a still),
+  timed out on the fourth, and the retry's capture deleted the three and
+  started again at frame 1, where the renderer then froze. The stills
+  capture now runs with `--resume` like the turntable: a deadline hit keeps
+  the frames and `produce` exits 3, and the worker's next call draws only
+  what is missing. Open: painted parts need not triple every vertex, only
+  the faces on a colour boundary; a decimated display copy for CPU hosts; a
+  heartbeat while the page loads the model.
+- **The prompt hook leaves workers alone (2026-10-26).** `on_prompt.py` saw
+  the model file's name in every headless worker's JSON brief and told the
+  worker to start quickstart; the Benchy's and the duck's designers each spent
+  a line refusing. The hook now says nothing for a brief (a JSON object with
+  run, item and stage) or when `DAPILOT_WORKER=1`, which the director sets.
+- **The outcome carries what each stage made; the dashboard reads it live
+  (2026-10-26).** The octagon's Publish sheet showed the publish script's
+  JSON as its summary, and the sheets for research, price, copy and publish
+  said the words stayed on the runner. `ledger.py outcome` now gives every
+  stage that has run a `report` (`stage_report`: analyze's measurements,
+  quote's 3DAPI price and metrics, research's identity, verdict, band and six
+  similar listings, price's proposal, candidates and approval, design's
+  name, scenes, standard and rejections, copy's title, description, tags
+  and materials, publish's sandbox flag, Etsy state, listing id and link,
+  posted and skipped) and an `account` (the worker's own paragraph from
+  `log.md`, the last for the stage). `run_intake.py script_summary` writes a
+  sentence for a script stage ("sandbox: nothing created on Etsy and nothing
+  posted; skipped …", "8 draft frames at 512 px in 117 s"). On the dashboard
+  the activity list starts from the row's stored events and merges the
+  stream's by id, so a reload keeps the history; the stage line follows
+  `stage.result` and `pass.dispatched` events newer than the last outcome
+  (`liveItem`), so it moves during a run instead of at the gate or the end;
+  and each stage's sheet renders its report: the listing text with its
+  tags, the Etsy link, the design scenes, research's identity and verdict.
+- **The description goes to the designer (2026-10-26).** The squirrel light
+  switch cover's four lifestyle photos put it on a bookshelf, a desk and a
+  table. The seller's note reached research, whose identity said "squirrel
+  light switch cover, medium confidence, no cutout visible", and the
+  designer read that doubt and staged "a decorative piece"; the words
+  "light switch" were in none of the five fal prompts. `design_product.py
+  context` and `listing_copy.py context` now carry `seller_says`, the
+  description verbatim; the design skill states that it outranks research's
+  identity, the comparables and the drafts on what the product is and is
+  for, that a scene shows the stated use, and that a doubt about the
+  geometry goes into `reason` and the log paragraph for a person to see;
+  the art direction's "in use" scene is the seller's use first; the copy
+  skill says the same for the title and description.
+- **Spend in three kinds; hosted publishing can go live (2026-10-26).** The
+  octagon's end-to-end run reported 0.38 USD, which was the workers only: fal
+  and Etsy were never counted. `ledger.py` now gives every recorded stage a
+  `spend` of workers, assets (design's fal spend from `design.json`, the
+  item's total, not re-added per attempt) and fees (Etsy's listing fee from
+  the store's or the plugin's fee table, only when `published.json` is live
+  and active), each item the sum, and the run's `cost` gains `assets_usd`,
+  `fees_usd` and `total_usd`; `stage.result` and `run.ended` carry the same
+  `spend`. Contract 1.2, vendored into 3dapi, whose dashboard shows the total
+  with the parts on hover. The backend's limits route serves `publish.mode`
+  from `DAPILOT_PUBLISH_MODE` (sandbox unless `live`), merged into every
+  seller's config per job; `ETSY_SCOPES` gains `listings_w`, which
+  `etsy_listing.py` needs to create and activate, and the status route's
+  `canPublish` tells a shop connected under the old scopes to reconnect.
+- **Delete takes the work with it (2026-10-26, 3dapi and runner).** The
+  shark's copy stage blocked on a missing seller taxonomy, the seller deleted
+  the run, uploaded the file again, and the new run adopted the deleted run's
+  `copy.blocked.json` from the shared work dir: a question nobody could
+  answer any more, holding the item for good. `DELETE /api/dapilot/runs/:id`
+  now removes `sellers/<seller>/runs/<run>/` and the work dir of every item
+  the run's outcome lists, keeping an item another run of the seller still
+  holds. The runner's `pull` removes from its root what the manifest saw on
+  both sides and the bucket no longer holds, the mirror of the rule `push`
+  already used, so the volume's copy does not return. Open: copy should fetch
+  `etsy_seller_taxonomy.json` itself when the store has none, as research
+  does for the buyer tree; the hosted store is seeded from the templates and
+  never had it.
+- **Runner: approve and retry crashed on a stale name (2026-10-26).** The
+  contract pass of 2026-10-25 renamed the consumer's `outcome()` to
+  `ledger_outcome()` and left the three callers in the approve and retry
+  handlers behind, so every Approve and Try again on staging died with
+  `NameError: name 'outcome' is not defined` after "root ready", the message
+  was redelivered every five minutes and would have ended in the dead-letter
+  queue; the run job was unaffected. Found in the staging log of the fruit
+  fly trap run (db6a5338). Fixed. The same pass found `studio` undefined in
+  `design_product.py`'s turntable fallback, left behind when Blender went on
+  2026-10-20 and reached only when fal gives the clip up; defined now from the
+  config's console or the bundled page. `py_compile` does not see an undefined
+  name, which is how both shipped: pyflakes is in the runner image and
+  `doctor.sh` fails the container on one, and `test_phase0.sh` runs the same
+  check when the venv has pyflakes.
+- **Cheap stills (2026-10-26).** 1024 px, no multisampling, 1024 px shadow
+  map for every capture; the console keeps its look. `StudioConfig` gains
+  `antialias` (read when the renderer is made) and `shadowMapSize`;
+  `capture_turntable.py` sends `aa=0` and `shadowMap=1024` unless
+  `--antialias` and `--shadow-map` say otherwise, and `--software` forces
+  SwiftShader on any system for measuring. `design.stills.size` is 1024 in the
+  script and the template, and `stills` joined the keys the hosted runner
+  refreshes from the release, since a hosted seller's config.json is frozen
+  at seeding and would have kept 2048. Measured on the laptop with
+  `--software` (SwiftShader, 4 cores), four Benchy stills: 2048 px with
+  antialiasing and a 2048 shadow map 147.5 s; 1024 px with both 64.3 s; 1024
+  px with neither 36.2 s; 2048 px with neither 132.2 s. At 2048 the pixels
+  dominate, at 1024 the antialiasing and the shadow pass are nearly half, so
+  the three together are the 4x. The Coolify host measured about 2.5x slower
+  than this path, so four stills there should take about 90 s, against the
+  shark's 378 and the Benchy's never. The same run showed the page's
+  heartbeat never fired during a frame: reading a frame back blocks the main
+  thread for the whole draw, so the timer waited with it. The heartbeat now
+  runs in a Web Worker told the current frame before each one; two 2048 px
+  frames passed a 20 s stall guard with lines at 29 s and 59 s.
+- **Hosted Etsy with the seller's own app; integrator accounts are sellers
+  (2026-10-26, 3dapi).** dapilot's Integrate button now opens the plugin's
+  own Etsy steps and two fields in a modal; the platform verifies the
+  keystring and shared secret with openapi-ping as `integrate.py` does, saves
+  them on the seller's Etsy row, authorizes the shop against that app and
+  serves the runner the seller's values over the platform's. The dapilot
+  routes admit integrator accounts (`anyAccountAuth`), `GET /dapilot/me` says
+  which kind holds the session, and the account menu links to that account's
+  pages; an integrator still has no Etsy row. Both in `docs/hosting.md`.
+- **What a run cost the platform stays on the platform (2026-10-26, 3dapi,
+  same evening).** The run row's `money_spent` was already hidden from the
+  seller; the outcome and the events still carried every stage's `usd`,
+  `spend`, the run's `cost` and the director's budget to the browser.
+  `publicOutcome` and `publicEvent` in `utils/dapilot-runs.ts` strip those
+  keys on every seller route (the run, the list, the timeline, the SSE
+  stream and its event messages); the row keeps them whole for admins. The
+  dashboard's types and event folding drop the fields. One test scans the
+  three responses for any money key. Two skills wrote figures into text the
+  seller reads: the designer's summary ("6 photos, lifestyle clip, 1.11
+  USD") and log paragraph, and the supervisor's `why` and `wait_for`; both
+  now say so without the figure (`design.json` keeps the spend for the
+  ledger). The supervisor fixtures were not rerun for this wording change.
+- **Etsy connects in two steps on the dashboard (2026-10-26, 3dapi, same
+  evening).** Verify and save in the Integrate modal now only saves the
+  seller's app keys and closes; the card says "App keys saved" and offers
+  Authorize shop, which opens Etsy's consent in a new tab. The callback,
+  which already stored the access token, the refresh token and `expiresAt`,
+  lands that tab on a new page, `/integrations/etsy`, with one heading: "Etsy
+  is now integrated, you can close this tab." The page tells the Integrations
+  tab over a BroadcastChannel (localStorage as the fallback) and the card
+  turns to Connected without a reload; a blocked popup falls back to the old
+  same-tab round trip. Reconnect is now Authorize shop again. Backend
+  unchanged: the return path was already allowed by origin.
+- **The capture page reports progress; slow is no longer dead (2026-10-26).**
+  The Benchy's design stage blocked three times on staging with "no frame for
+  120s; the page stopped sending" and one of four 2048 px stills on disk. The
+  page had not stopped: the Coolify host is a shared t3a.large with no GPU, so
+  Chromium draws through SwiftShader on about one core, the eight 512 px
+  drafts took 217 s there against 3 s on the laptop, and one 2048 px Benchy
+  still takes longer than the driver's 120 s stall guard, which killed
+  Chromium mid-frame (the first frame was exempt, hence exactly one). The
+  shark's four stills had passed at 94 s each on 2026-10-23. Now
+  `capture.ts` posts a progress report to the collector: a word before every
+  frame, a heartbeat every 5 s while one is drawn, the failure reason, done.
+  `capture_turntable.py` takes `/progress`, prints `capture: frame i/n pass
+  yaw: drawing, N s` to stderr on every change and every 30 s, gives the page
+  up after `--stall` seconds of silence (60) and never for a long frame, turns
+  the page's own failure into the reason (before, it lived only in the tab
+  title), keeps the old 120 s rule for a page that never reports, writes
+  Chromium's stderr to `OUT/.chrome.log` and puts its tail in a failure.
+  Studio page rebuilt into `plugins/dapilot/studio`. Still to do: the stills
+  run without `--resume`, so a produce deadline mid-stills restarts at frame
+  0; the frame itself should be cheaper on a CPU (antialias and the 2048
+  shadow map), and the host needs a core of its own.
+- **The gate opens on a rejected price too, and shows the market
+  (2026-10-26).** `ledger.py outcome` opens an item's gate on `price.json` or
+  `price.rejected.json` without an approval; with no proposal the person sets
+  a price at or above the floor, which `approve_price.py` already took. The
+  gate carries a `market` block (`gate_market`): the band, 3DAPI's unit cost,
+  the floor, research's verdict and reason, the candidates the script
+  rejected and why, and up to six comparable listings with links. Schema
+  1.1, vendored into 3dapi. The dashboard shows them, hides the price stage's
+  own question when the gate is open, labels the state "set a price" when
+  there is nothing to approve, and refuses a typed price under the floor.
+  `check_outputs.py` accepts the verdict `unreliable`, which `market_stats.py`
+  emits and the checker refused, costing the Benchy run a second research
+  attempt and a blocked marker (run edee9790, 2026-10-25). `load_stages`
+  falls back to the plugin's table when a state names a path from another
+  machine. Dashboard: a green breathing dot before every running state and
+  stage, "This might take a minute" with moving dots under it (the sentence
+  names the stage), and a turning ring instead of "Reading <file>" wherever
+  a model is fetched or read.
+
+- **The contract: one schema each for events, markers and outcomes; the
+  director writes events; the ledger is the only reader (2026-10-25).**
+  `plugins/dapilot/schema/` holds `event.schema.json`, `marker.schema.json`,
+  `outcome.schema.json`, `VERSION` (1.0) and examples; `scripts/contract.py`
+  validates and `selftest` runs the examples, wired into `test_phase0.sh`
+  and the runner's `doctor.sh`. `run_intake.py` writes one validated event
+  per line to `runs/<id>/events.jsonl` and every early exit is a
+  `run.refused` event with an error code. `ledger.py` validates the markers
+  it writes and gains `outcome --run <id>`: the run as one document (items,
+  stages, gates, markers, media), valid even for a run with no state. The
+  hosted runner no longer parses the stderr log with regexes nor walks
+  `state.json`, markers and `design.json` itself: it follows the events file
+  and asks the ledger. In 3dapi the backend vendors the schemas
+  (`backend/api/schemas/dapilot`, `scripts/vendor-dapilot-schemas.sh`,
+  ajv), validates every versioned event and outcome the runner posts (422
+  with the problems named), and tests that the vendored examples validate.
+  `docs/state-machine.md` is the one page of states, transitions, owners
+  and files, with seven proposals not done. Still reading work dirs
+  directly: `approve_price.py pending`, `server/app.py`, `watch_run.py`.
+
+- **An output file is whole or absent; the platform's credentials are
+  checked at deploy; runs can be deleted (2026-10-25).** `analyze_mesh.py
+  --out` writes `analysis.json` itself, to a temporary file renamed into
+  place and only on success; the skill no longer redirects stdout into the
+  file. A worker that died mid-step had left a 0-byte `analysis.json` on the
+  shark (2026-10-22), the ledger's glob took it for a done stage, research
+  failed on it in every later run and the supervisor had no rule for the
+  reason. `run_intake.py --preflight all|seller|none`: the hosted runner
+  passes `seller` (the 3DAPI key, the Etsy shop token when publish is live)
+  and tests the platform's own values once at container start,
+  `consumer.py preflight` in `doctor.sh --serve`, from the backend's new
+  `GET /internal/dapilot/platform/credentials`; a failure stops the
+  container and fails the deploy instead of refusing every seller's run.
+  The dashboard's run panel gets Delete (`DELETE /api/dapilot/runs/:id` in
+  3dapi): the row and the uploads go, the seller's store stays, queued and
+  running are refused.
+
+- **Etsy keystring is the API key, written down (2026-10-25).** Two hosted
+  runs on staging exited 2 at preflight with `etsy: missing values`. The
+  backend had the keystring under its old name `ETSY_API_KEY` and no
+  `ETSY_SHARED_SECRET`, because `docs/dapilot-platform.md` in 3dapi called
+  the secret optional. The plugin's `test_etsy` needs both. The platform
+  doc, the runner and plugin READMEs, the env template and CLAUDE.md now
+  say that keystring, `ETSY_API_KEY` and `ETSY_KEYSTRING` are one value and
+  that the pair is required. Found while reading why a director exits 2:
+  the reason is in the run row's `error` column and its `run.preflight`
+  event, never in the runner log.
+
+- **Preflight, output checks with a review marker, per-attempt cost, a clean
+  stop, and a bucket sync that deletes (2026-10-23).** `run_intake.py`
+  checks every connection the enabled stages need through `integrate.py
+  test` before it starts, and refuses with the integration named (`exit 2`,
+  `reason`, `error` code); the consumer posts it as `run.preflight` and the
+  platform shows it as the run's error. `check_outputs.py` is new: at
+  `record`, a hard problem in a stage's file fails the attempt (the file set
+  aside under `.redo/`), a soft one leaves the stage done with
+  `<stage>.review.json` and `review` on the record; `ledger.py retry` redoes
+  a done stage that holds a review marker (or `--redo`) while nothing later
+  used its outputs. The ledger keeps `attempts` per stage (cost, seconds,
+  model, worker log) and `--interrupted` queues a stage again without
+  counting the attempt; failed markers carry `worker_log` and `error`; the
+  result line may carry `error`. The director handles SIGTERM and SIGINT:
+  workers' process groups get the signal (they were in their own sessions
+  and outlived the director before), results are recorded interrupted, the
+  summary says `stopped`. Runner: `push` compares content (MD5 against the
+  ETag) and deletes what the last sync saw on both sides and the root no
+  longer holds (`.sync.json` manifest); refusals post the outcome as well as
+  the event; `stage.review`, `run.preflight` and `run.stopped` events;
+  review markers in the outcome. Supervisor: `Review` kind in triage, one
+  redo for a plain defect, a note otherwise. 3dapi: review stops are sent to
+  the supervisor and shown with Redo, the item card shows what each stage
+  cost and how often it ran, events say "run 2" instead of a hidden turn,
+  and a gate or retry claim the runner never acknowledged expires after 20
+  minutes with a compare-and-swap on the stale mark.
+- **The clip comes from FLUX 3 Max; the designer runs on Opus
+  (2026-10-23).** `lifestyle_video.i2v.endpoint` is
+  `blackforestlabs/flux-3-max/image-to-video` in the defaults, the template
+  and the dev store: 5 to 20 s, 720p or 1080p, a 10 s clip in about 11 s,
+  no audio when `generate_audio` is false (the ffmpeg strip stays as a
+  guard). `generate_video.py` builds the request per endpoint family in
+  `i2v_payload`, so the MiniMax engine of 2026-09-21 still runs through
+  `--endpoint`. Price at 1080p: 0.29 USD/s at list (1.74 a clip, against
+  0.96 on MiniMax), 0.0725/s until 2026-11-07; 720p is 0.17/s. The
+  standard item is 2.34 USD at list, so `design_product.py`'s own default
+  cap is 3.0 like the template's (it said 2.0). `product-designer.md` is
+  `model: opus`; the catalogue worker stays on Sonnet. The hosted runner
+  now writes the template's design endpoint blocks under the plan limits
+  every job (`template_release`, was `template_budget`), so the switch
+  reaches sellers whose config was seeded with MiniMax.
+- **The seller's description reaches research; the platform shows an
+  item's media (2026-10-23).** The dapilot web app already collected a
+  description under the drop zone and the backend carried it on the `run`
+  message; the consumer dropped it. Now `run_intake.py --description` hands
+  it to `ledger.py init`, which writes it to each item's `meta.json` once,
+  and the research-comparables skill reads it as the strongest witness for
+  what the object is and which aisle it sells in, without letting it
+  override the renders or the bounding box. Optional everywhere; the local
+  console does not collect one yet. The consumer's outcome now carries
+  `media` per item (the 3MF thumbnail, the preview drafts, the design
+  photos in listing order, the clip, as keys under the seller's prefix) and
+  pushes the root before posting it; the 3dapi backend presigns those keys
+  at `GET /dapilot/runs/:id/media` for a quarter of an hour and the run
+  card shows them: the drafts as a turntable, then the photos and the clip.
+  `preview_model.py`'s capture deadline is 600 s, from 240: a hosted
+  attempt timed out at 240 and the next took 223 on the server's CPU
+  Chrome, which is the thing to look at.
+- **Design refused its own paid step; retries locked; consumer idempotent
+  (2026-10-23).** A hosted run's design worker wrote the brief, passed
+  `check`, then blocked with "planned 1.56 USD exceeds remaining 1.4": it
+  read Claude Code's `USD budget: $0.10/$1.50` reminder, its own token cap
+  from `budget.usd_per_stage.design`, as the fal cap, although the
+  guardrails skill says it is not. The template's design budget is now 5.0
+  (the dev store's value) so the line never reads below a plan, the
+  design-product skill says it again at the `produce` step, and the runner
+  writes the template's `budget` block under the plan limits on every job
+  so the figure reaches sellers seeded earlier. The same log showed one
+  approval and nine retry clicks: the queue's content deduplication
+  swallowed the repeats and also the one retry that was meant, sent inside
+  five minutes of the first. Messages now carry their own deduplication id;
+  the 3dapi backend locks a retry per marker as it locks the gate
+  (`retryStage`, `stopsOf` skips a marker with a retry on its way); and
+  `runner/consumer.py` starts nothing for an approval already on disk,
+  waits for a live director on the root instead of starting a second, and
+  leaves a message for redelivery if that wait runs out.
+- **The gate is answered once (2026-10-23).** On the platform the approve
+  button stayed live for the whole design-to-publish run, because the stored
+  outcome kept the open gate until the runner posted the next one, and every
+  further click sent another `approve` that `approve_price.py` answered with
+  the first price. Now the 3dapi backend (`answerGate` in
+  `backend/api/utils/dapilot-actions.ts`) writes `gate.answered` on the item
+  in the stored outcome in one conditional update before it sends the
+  message, refuses a second answer with 409, releases the mark when the queue
+  refuses or when the runner's `gate.answered` event says the price was
+  refused, and the dashboard card shows the sent price in place of the
+  buttons. Nothing in the plugin or the runner changed. Found while looking
+  into a hosted run that stopped at 1.50 USD: that figure is the design
+  worker's `budget.usd_per_stage.design` from the plugin template, seeded
+  into each seller's `config.json` on first run and persisted in S3, not the
+  15 USD run ceiling the backend's limits route sets.
+- **User documentation (2026-10-23).** `docs/documentation.md`, two parts:
+  the Claude plugin (requirements, install, quickstart, the Integrations
+  page, the eight stages, the price gate, the store, updates, limits) and
+  the platform integration at dapilot.dapi.digital (pages, sign-in, upload,
+  run states, the gate and retries on the dashboard, the supervisor, what
+  the platform holds per seller, the runner and queue underneath, routes,
+  operating it, open decisions). Written from the plugin README,
+  `docs/hosting.md`, `runner/README.md` and the 3dapi repository's
+  `frontend/dapilot`, backend dapilot routes and `docs/dapilot-platform.md`.
+- **The runner image installs the CLI as a binary (2026-10-22).**
+  `runner/Dockerfile` downloads the pinned Claude Code release straight
+  from Anthropic's release bucket (`ARG CLAUDE_DOWNLOADS`), verifies the
+  sha256 from that version's `manifest.json`, and places it root-owned at
+  `/usr/local/bin/claude` before the runtime user exists. The installer
+  script at claude.ai/install.sh is no longer piped into bash: it always
+  downloaded the newest CLI first and had that one install the pinned
+  version, two 280 MB downloads for one, and a build that depended on a
+  script changing under it. `DISABLE_AUTOUPDATER=1` keeps the CLI from
+  trying to replace a binary it cannot write. The download and checksum
+  steps were run by hand on the dev Mac against 2.1.304; the image itself
+  builds at the next release tag.
 - **Intake is the first slice** (model file -> listed, priced, photographed
   product). Geometry analysis and rendering exist as scripts. Quoting is
   available through 3DAPI's public API. Listing creation needs a new public
@@ -735,3 +1138,88 @@ each carries its own date.
   Typechecked and synthesised on this Mac (the stack is 19 resources: three
   roles, two queues, two secrets, the registry, the bucket, the log group,
   the task definition, the security group, the service); not deployed.
+- **The runner moves to Coolify** (2026-10-21). The hosted runner is a Coolify
+  resource on the EC2 host, built from this repository at a release tag, not
+  an ECS Fargate service. `runner/Dockerfile`'s default command is now
+  `doctor.sh --serve`: every check, the WebGL render, then the queue
+  consumer, so a broken image exits before taking a message. The 3dapi stack
+  `Dapilot-<env>` keeps only the FIFO queue, its dead-letter queue, the
+  sellers bucket, an IAM user for the runner and grants for the backend's
+  user; it imports nothing from the slicer's stack and is deployed with
+  `--exclusively`. The reason is in `docs/hosting.md`: the Fargate deploy of
+  2026-10-20, run from a stale branch, also rewrote the slicer's stack and
+  deleted resources the branch did not know about. `runner/README.md` has
+  the Coolify settings and the environment table. The `runner-image`
+  workflow still pushes to ECR and is now unused.
+- **First cold run through the staging queue** (2026-10-21). The consumer
+  loop (`runner/consumer.py serve`) ran on the dev Mac against the real
+  `staging-dapilot-runs.fifo` queue and the staging sellers bucket, with a
+  directory standing in for the backend, whose routes are not deployed. A
+  dry run took 6 s end to end. The Happy Shark then went through all eight
+  stages by messages alone: `run` to the price gate in 5 min, `approve` at
+  the worker's 9.99 USD proposal, `retry` for design, and a sandbox
+  `published.json`; the heartbeat held a 19-minute design job, no secret
+  reached the bucket, nothing reached the dead-letter queue. Found on the
+  way, none of it in the queue code: the design worker reads Claude Code's
+  own "USD budget" reminder as the fal cap and refuses a plan `check`
+  passed (a guardrails bullet now says the two are different); a `retry`
+  under the same run id is a no-op because the ledger never re-checks a
+  stage it recorded as blocked (the console's Try again starts a fresh run
+  id, the consumer should too); `push` never deletes, so a marker cleared
+  locally returns from S3 on the next pull; and a dev machine with several
+  copies of the plugin sends headless workers to whichever one they find
+  (a clean `CLAUDE_CONFIG_DIR` for the workers fixed it here; the container
+  has one copy).
+- **A retry is a ledger verb** (2026-10-22). The hosted Try again did
+  nothing: the consumer removed the failed marker and resumed the same run,
+  whose `state.json` still said failed, and the ledger only re-read markers
+  for stages it had as queued. `ledger.py retry --run --item --stage
+  [--reason --by]` now clears the marker, failed or blocked alike, and
+  queues the stage in that run with fresh attempts, keeping what it ended
+  with as `previous` and counting `retries` on the record, so a supervisor
+  that sees the same `previous` behind a growing count knows the retry
+  changed nothing. A failed or blocked record whose marker is gone is
+  queued again on the next refresh, so `rm` works as the marker's own text
+  says. The consumer calls the verb for a `retry` message (new optional
+  `reason` and `by`), deletes the cleared marker from the bucket too, since
+  `push` never deletes and a marker cleared only locally came back on the
+  next pull, and posts the ledger's verdict in `stage.retried`. Tested by
+  hand through failed, blocked, rm and the refusals, and end to end with
+  the consumer against local directories and a dry-run director.
+- **Triage for the supervisor** (2026-10-22). `runner/triage.py`: one class
+  per kind of stop, each with the code a script may put in its result line,
+  the text patterns for results without one, and its policy, answering the
+  only question the supervisor asks: could the next attempt end differently.
+  Config stops wait for the seller's configuration to change, transient
+  ones retry on a growing delay and then stop, content stops never retry,
+  worker stops get the one retry the hierarchy allows, blocked questions
+  wait for a person, and anything unmatched is left and logged. Twenty-six
+  real reasons from the staging runs of these two days are the fixture
+  table; `selftest` runs them. The supervise queue is in the 3dapi CDK
+  stack; the consumer that reads it and sends retries is next.
+- **The supervisor** (2026-10-22). `runner/supervisor.py`, the image's
+  second command (`doctor.sh --supervise`): one message per stage that
+  stopped failed, sent by the 3dapi backend after it stored the outcome on
+  a standard queue of its own; the supervisor asks the backend for the run
+  first (`GET /internal/dapilot/runs/<id>`), so a cancelled run or a stage
+  that moved on is left alone, then triage decides: a retry through the
+  backend's `POST .../retry` (the same message and event as a seller's Try
+  again, `by: supervisor`), a delayed copy of the message back on its queue
+  for a transient stop, or a `supervisor.left` event with the code and what
+  the stop waits for. The receive, heartbeat, delete loop moved out of
+  `consumer.serve` into `consumer.poll`, shared by both commands. Tested by
+  hand against a directory: left, retried on change, scheduled and waited
+  out, cancelled, moved on.
+- **The supervisor lives in the runner's container** (2026-10-22, same
+  day). No second Coolify resource: `consumer.serve` starts the supervisor's
+  loop in a second thread of its own process when
+  `DAPILOT_SUPERVISE_QUEUE_URL` is set, both loops sharing one SIGTERM, so
+  the setup is that one variable on the runner. `poll` takes the shared
+  stop event; `doctor.sh --serve` runs the triage self-test first and says
+  so, or warns that nothing supervises. `supervisor.py serve` and
+  `doctor.sh --supervise` stay as the standalone form.
+- **The image copies the supervisor** (2026-10-22, same evening). The
+  runner Dockerfile names the files it takes from `runner/`, and
+  `supervisor.py` and `triage.py` were not on the list, so the first
+  staging start with `DAPILOT_SUPERVISE_QUEUE_URL` set died in the doctor
+  on "can't open file triage.py". Both are copied now.

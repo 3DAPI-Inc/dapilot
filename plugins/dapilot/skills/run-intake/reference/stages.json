@@ -35,7 +35,8 @@
         "analysis.json"
       ],
       "produces": [
-        "renders/draft_00.png"
+        "renders/draft_00.png",
+        "renders/render.json"
       ],
       "gate": "auto",
       "enabled": true,

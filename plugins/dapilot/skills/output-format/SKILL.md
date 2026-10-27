@@ -29,6 +29,10 @@ Every field is required. `null` is allowed only where shown.
   or one value. When set, `ok` is true and the stage will be marked blocked.
 - `summary` is one line, at most 200 characters, and goes into the report
   verbatim. Numbers and facts, not narration.
+- `error` is optional: the code a script printed for its failure
+  (`config.env_missing`, `upstream.transient`, `content.file`), copied from
+  the script's own `error` field when it gave one. Leave it out otherwise;
+  never invent one.
 
 Check it before printing:
 

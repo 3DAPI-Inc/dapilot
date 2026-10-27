@@ -30,7 +30,10 @@ A brief with `stage: copy`. The work dir has `design.json`,
      pattern or style, what it is made by ("3D printed"), one use or gift
      phrase, and the count when `offer.units` is more than one ("Set of 6").
      No keyword pile, at most 140 characters
-   - `description`: what it is in two sentences, then DETAILS (how many the
+   - `description`: what it is in two sentences, in the seller's terms when
+     `context.seller_says` says what the object is and is for (their word
+     outranks research's identity and the comparables, 2026-10-26), then
+     DETAILS (how many the
      buyer receives, from `offer.units`; the size from `size_mm` in cm and
      inches, material, colours as the photos show them), then CARE, then
      MADE TO ORDER. Every number comes from the context. If

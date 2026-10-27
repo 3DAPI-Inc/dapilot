@@ -1,0 +1,183 @@
+{
+  "schema_version": "1.2",
+  "run": "edee9790-ad19-4b40-bfd9-6977d63aae35",
+  "at": "2026-10-25T23:21:40+00:00",
+  "started": true,
+  "counts": {
+    "done": 5,
+    "queued": 3
+  },
+  "cost": {
+    "tokens": 583295,
+    "usd": 0.3924,
+    "by_agent": {},
+    "assets_usd": 0.0,
+    "fees_usd": 0.0,
+    "total_usd": 0.3924
+  },
+  "gates_open": 1,
+  "notes": [],
+  "items": [
+    {
+      "item": "74ec6ee3dba54a4973bad319c13e4d7df20a860ef82209912adceedeb8e8e643",
+      "file": "0-1791463244000-3DBenchy__2_.3mf",
+      "stages": {
+        "analyze": {
+          "status": "done",
+          "attempt": 1,
+          "summary": "5 bodies, 5 watertight, 15.6 cm3, bbox 60x31x48 mm",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "quote": {
+          "status": "done",
+          "attempt": 1,
+          "summary": "Quote dapi_4620d75c0e DONE: unit price 3.87, 1 plate",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "preview": {
+          "status": "done",
+          "attempt": 1,
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "research": {
+          "status": "done",
+          "attempt": 2,
+          "summary": "Benchy: median 4.00 vs break-even 6.10, verdict unreliable",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          },
+          "report": {
+            "product": "benchy",
+            "verdict": "unreliable",
+            "verdict_reason": "one shop holds 60% of the weight",
+            "market": {
+              "currency": "USD",
+              "n": 12,
+              "median": 4.0
+            },
+            "similar": []
+          },
+          "account": "Named it a Benchy tugboat; 12 comparables in the 3D printed toys aisle; the band is not evidence."
+        },
+        "price": {
+          "status": "done",
+          "attempt": 1,
+          "summary": "price 6.99 USD, cost-anchored margin candidate",
+          "spend": {
+            "workers": 0.0,
+            "assets": 0.0,
+            "fees": 0.0,
+            "total": 0.0
+          }
+        },
+        "design": {
+          "status": "queued",
+          "attempt": 0
+        },
+        "copy": {
+          "status": "queued",
+          "attempt": 0
+        },
+        "publish": {
+          "status": "queued",
+          "attempt": 0
+        }
+      },
+      "gate": {
+        "proposal": {
+          "price": 6.99,
+          "currency": "USD",
+          "candidate": "margin",
+          "rationale": "The band is not evidence: total demand is 0.064 units a day and only 3 of 15 listings have any review.",
+          "floor": 6.99,
+          "verdict": "unreliable"
+        },
+        "candidates": {
+          "floor": 6.99,
+          "candidates": [
+            {
+              "label": "margin",
+              "price": 6.99,
+              "margin_pct": 0.111
+            }
+          ]
+        },
+        "market": {
+          "currency": "USD",
+          "n": 15,
+          "min": 1.5,
+          "p25": 2.02,
+          "median": 4.0,
+          "p75": 5.0,
+          "max": 11.5,
+          "thin": true,
+          "unit_cost": 3.87,
+          "offer_cost": 3.87,
+          "units": 1,
+          "floor": 6.99,
+          "verdict": "unreliable",
+          "verdict_reason": "total demand 0.064 units a day, 3 of 15 listings with any review",
+          "rejected_candidates": [
+            {
+              "label": "markup",
+              "price": 5.99,
+              "because": "below_floor"
+            },
+            {
+              "label": "median",
+              "price": 3.99,
+              "because": "below_floor"
+            }
+          ],
+          "similar": [
+            {
+              "title": "Benchy 3D Printed Boat Model: Green Tugboat Figure",
+              "price": 5.0,
+              "currency": "USD",
+              "url": "https://www.etsy.com/listing/4588689526/benchy-model",
+              "shop": "40FourLabs",
+              "sold": 1,
+              "reviews": 0
+            }
+          ]
+        },
+        "rejected": null
+      },
+      "markers": [],
+      "media": {
+        "name": null,
+        "thumbnail": "work/74ec6ee3dba54a4973bad319c13e4d7df20a860ef82209912adceedeb8e8e643/thumbnails/plate_1.png",
+        "drafts": [],
+        "photos": [],
+        "video": null
+      },
+      "spend": {
+        "workers": 0.3,
+        "assets": 0.0,
+        "fees": 0.0,
+        "total": 0.3
+      }
+    }
+  ],
+  "director": {
+    "exit": 0
+  }
+}

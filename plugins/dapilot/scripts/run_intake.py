@@ -37,16 +37,42 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from store_path import store_dir as _store_dir  # noqa: E402  one rule for every script
+from contract import check as contract_check  # noqa: E402  the event schema (schema/event.schema.json)
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["name"]
 LEDGER = PLUGIN_ROOT / "scripts" / "ledger.py"
 LAUNCH_RETRIES = 3          # for API errors before any work (529 and friends)
 LAUNCH_PAUSE_S = 60
+INTEGRATE = PLUGIN_ROOT / "scripts" / "integrate.py"
+STOPPING = threading.Event()            # set by SIGTERM or SIGINT: finish the pass, record, exit
+RUNNING: dict[int, subprocess.Popen] = {}   # pid -> every worker process alive now, so a stop reaches them
 
 
 def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
+
+
+def emit(root: Path, run: str, kind: str, **data) -> None:
+    """One line of runs/<run>/events.jsonl (2026-10-25): what happened, as a document a machine reads.
+    The hosted runner forwards each line to the backend as it appears; the dashboard renders it. The
+    stderr log above says the same things in words for a person and is not a contract. Every event is
+    checked against schema/event.schema.json before it is written: a bad one is a bug in this file and
+    raises here, where a test finds it."""
+    doc = contract_check({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "run": run, "kind": kind,
+                          "data": {k: v for k, v in data.items() if v is not None}}, "event")
+    p = root / "runs" / run / "events.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc) + "\n")
+
+
+def refuse(root: Path, run: str, reason: str, error: str | None = None, **more) -> int:
+    """The director will not start: one run.refused event, the JSON summary on stdout, exit 2. Before this
+    the reason lived only on stdout, which the hosted runner kept and the runner's log did not show."""
+    emit(root, run, "run.refused", reason=reason, error=error)
+    print(json.dumps({"ok": False, "reason": reason, **({"error": error} if error else {}), **more}))
+    return 2
 
 
 def project_root() -> Path:
@@ -127,6 +153,87 @@ def worker_minutes(brief: dict, cfg: dict) -> int:
     return int((cfg.get("minutes_per_stage") or {}).get(brief["stage"], cfg.get("max_worker_minutes", 15)))
 
 
+def agent_model(agent: str) -> str:
+    """The `model:` line of the agent file, for the ledger's record: what the stage was billed on."""
+    try:
+        head = (PLUGIN_ROOT / "agents" / f"{agent}.md").read_text().split("---", 2)[1]
+    except (OSError, IndexError):
+        return "worker"
+    m = re.search(r"^model:\s*(\S+)", head, re.MULTILINE)
+    return m.group(1) if m else "worker"
+
+
+def preflight(cfg: dict, stages_file: str | None, scope: str = "all") -> dict:
+    """Every credential the enabled stages will need, checked against its platform before the run spends a
+    cent (2026-10-23). `integrate.py test` does the checking, one free request each: 3DAPI for the quote,
+    the Etsy app key for research, the Etsy shop token when publish is live, fal when design is enabled,
+    the Anthropic key when the run bills to it. A dead Etsy token used to be found at publish, after fal
+    had been paid. Returns {"ok", "checked": [...], "failed": [...]} and decides nothing else.
+
+    `scope` is `all`, or `seller` (2026-10-25): only what belongs to the seller, the 3DAPI key and the
+    Etsy shop token when publish is live. The hosted runner passes `seller`, having tested the platform's
+    own values (the Etsy app key, fal, the Anthropic key) once when its container started; a problem with
+    those fails the deploy, where a person is watching, and not a seller's run."""
+    stages_p = Path(stages_file) if stages_file else PLUGIN_ROOT / "skills" / "run-intake" / "reference" / "stages.json"
+    try:
+        enabled = {s["stage"] for s in json.loads(stages_p.read_text())["stages"] if s.get("enabled", True)}
+    except (OSError, ValueError, KeyError):
+        enabled = {"quote", "research", "design", "publish"}
+    live = (cfg.get("publish") or {}).get("mode", "live") != "sandbox"
+    needed: list[tuple[str, bool]] = [("dapi", True)]                 # (integration, the shop token must be there too)
+    if "research" in enabled or "publish" in enabled:
+        needed.append(("etsy", "publish" in enabled and live))
+    if "design" in enabled:
+        needed.append(("fal", False))
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        needed.append(("claude", False))
+    if scope == "seller":
+        # The 3DAPI key is the seller's; so is the Etsy shop. The app key, fal and Anthropic are not.
+        needed = [(iid, tok) for iid, tok in needed if iid == "dapi" or (iid == "etsy" and tok)]
+    checked, failed = [], []
+    for iid, want_token in needed:
+        p = subprocess.run([sys.executable, str(INTEGRATE), "test", "--integration", iid],
+                           capture_output=True, text=True, env=os.environ)
+        res = last_json_line(p.stdout) or {"ok": False, "summary": (p.stderr or p.stdout)[-200:] or "no answer"}
+        ok = bool(res.get("ok"))
+        # Etsy answers "app key verified; shop not authorized yet" with ok false and action authorize: research
+        # needs only the app key, so that is fine unless publish is live and needs the shop.
+        if iid == "etsy" and not ok and res.get("action") == "authorize" and not want_token:
+            ok = True
+        checked.append({"integration": iid, "ok": ok, "summary": res.get("summary")})
+        if not ok:
+            failed.append(f"{iid}: {res.get('summary') or 'not ok'}")
+    return {"ok": not failed, "checked": checked, "failed": failed}
+
+
+def install_stop_handler() -> None:
+    """SIGTERM (a deploy, a container stop) and SIGINT end the run cleanly: every live worker's process group
+    gets the same signal, their results are recorded as interrupted (attempt not counted), the heartbeat file
+    goes, the summary says `stopped`. Before this (2026-10-23) workers were in their own sessions, so a
+    SIGTERM to the director left them running and spending with nobody to record them."""
+    def on_signal(signum, _frame):
+        if STOPPING.is_set():
+            return
+        STOPPING.set()
+        log(f"stopping: signal {signum}; ending {len(RUNNING)} worker(s) and recording them as interrupted")
+        for pid in list(RUNNING):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+        def hard_stop():
+            time.sleep(15)
+            for pid in list(RUNNING):
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        threading.Thread(target=hard_stop, daemon=True).start()
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+
+
 def worker_cmd(brief: dict, a, cfg: dict) -> list[str]:
     # A stage may name its own worker (design runs product-designer); else the department's.
     agent = brief.get("agent") or cfg["departments"][brief["department"]]["worker"]
@@ -160,6 +267,7 @@ def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None,
     env.setdefault("BASH_MAX_TIMEOUT_MS", "600000")
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          start_new_session=True, env=env)
+    RUNNING[p.pid] = p
     try:
         out, err = p.communicate(timeout=timeout_s)
         return p.returncode, out, err, False
@@ -173,15 +281,50 @@ def run_headless(cmd: list[str], cwd: Path, timeout_s: int) -> tuple[int | None,
         except subprocess.TimeoutExpired:
             out, err = "", ""
         return None, out or "", err or "", True
+    finally:
+        RUNNING.pop(p.pid, None)
 
 
-def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, err: str, meta: dict) -> None:
-    """Every worker's raw output goes to runs/<run>/workers/, so a run can be read back later."""
+def keep_worker_output(root: Path, brief: dict, cmd: list[str], rc, out: str, err: str, meta: dict) -> str:
+    """Every worker's raw output goes to runs/<run>/workers/, so a run can be read back later. Returns the
+    root-relative path, which the ledger keeps on the record and in any marker (`worker_log`)."""
     d = root / "runs" / brief["run"] / "workers"
     d.mkdir(parents=True, exist_ok=True)
     f = d / f"{brief['item'][:8]}-{brief['stage']}-{brief['attempt']}.json"
     f.write_text(json.dumps({"brief": brief, "cmd": cmd, "returncode": rc, "meta": meta,
                              "stdout": out[-200000:], "stderr": err[-20000:]}, indent=2))
+    meta["worker_log"] = str(f.relative_to(root))
+    return meta["worker_log"]
+
+
+def script_summary(stage: str, out: dict) -> str:
+    """One sentence a person can read about what a script stage did (2026-10-26; before, the publish
+    stage's summary was the script's JSON, and the dashboard showed it raw)."""
+    if out.get("cached"):
+        return "already done for this file; reused"
+    if stage == "publish":
+        etsy = out.get("etsy") if isinstance(out.get("etsy"), dict) else {}
+        posted, failed, skipped = out.get("posted") or [], out.get("failed") or [], out.get("skipped") or []
+        if out.get("sandbox") or etsy.get("state") == "sandbox":
+            return "sandbox: nothing created on Etsy and nothing posted" + (f"; skipped {', '.join(map(str, skipped))}" if skipped else "")
+        parts = []
+        if etsy.get("state") == "active":
+            parts.append(f"listed on Etsy and live (listing {etsy.get('listing_id')})" if etsy.get("listing_id") else "listed on Etsy and live")
+        elif etsy.get("state"):
+            parts.append(f"Etsy listing {etsy.get('listing_id') or ''} left as {etsy['state']}".replace("  ", " "))
+        if posted:
+            parts.append("posted " + ", ".join(map(str, posted)))
+        if failed:
+            parts.append("failed " + ", ".join(map(str, failed)))
+        if skipped:
+            parts.append("skipped " + ", ".join(map(str, skipped)))
+        return "; ".join(parts) or "published"
+    if stage == "preview":
+        frames, res, wall = out.get("frames"), out.get("res"), out.get("wall_s")
+        if frames:
+            return f"{frames} draft frames at {res} px" + (f" in {wall:.0f} s" if isinstance(wall, (int, float)) else "")
+        return "draft frames rendered"
+    return str(out.get("summary") or "done")
 
 
 def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dict]:
@@ -197,18 +340,21 @@ def run_script_stage(brief: dict, root: Path, timeout_s: int) -> tuple[dict, dic
     cmd = [os.environ.get("DAPILOT_PYTHON") or sys.executable, str(PLUGIN_ROOT / "scripts" / brief["script"]), "--workdir", str(wd)]
     t0 = time.time()
     rc, stdout, stderr, timed_out = run_headless(cmd, root, timeout_s)
-    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": round(time.time() - t0, 1), "launch_attempts": 1}
+    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": round(time.time() - t0, 1), "launch_attempts": 1,
+            "model": "script", "interrupted": STOPPING.is_set() and rc != 0}
     keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
     lock.unlink(missing_ok=True)
     out = last_json_line(stdout) or last_json_line(stderr) or {}
     ok = rc == 0 and out.get("ok") is not False and all(list(wd.glob(g)) for g in brief["produces"])
-    reason = "" if ok else (f"{brief['script']} exceeded {timeout_s}s" if timed_out else
+    reason = "" if ok else ("director stopped while the script ran" if meta["interrupted"] else
+                            f"{brief['script']} exceeded {timeout_s}s" if timed_out else
                             str(out.get("reason") or out.get("error") or (stderr or stdout)[-200:] or f"exit {rc}"))
-    summary = json.dumps({k: v for k, v in out.items() if k in ("etsy", "posted", "failed", "skipped", "cached")}) if ok else reason
+    summary = script_summary(brief["stage"], out) if ok else reason
     log(f"{tag}: script {'ok' if ok else 'failed: ' + reason[:120]}")
     return {"ok": ok, "cached": bool(out.get("cached")), "run": brief["run"], "item": brief["item"], "stage": brief["stage"],
             "agent": "run_intake", "department": brief["department"], "outputs": brief["produces"] if ok else [],
-            "needs_human": None, "reason": reason, "summary": summary[:300]}, meta
+            "needs_human": None, "reason": reason, "summary": summary[:300],
+            **({"error": out["error"]} if isinstance(out.get("error"), str) and out["error"] else {})}, meta
 
 
 def heartbeat(root: Path, run: str, items: int) -> threading.Event:
@@ -245,7 +391,8 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
         "agent": "run_intake", "department": brief["department"], "outputs": [], "needs_human": None,
         "reason": "", "summary": "worker produced no result line",
     }
-    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": 0.0, "launch_attempts": 0}
+    meta = {"usd": 0.0, "tokens": 0, "turns": 0, "seconds": 0.0, "launch_attempts": 0, "interrupted": False,
+            "model": agent_model(brief.get("agent") or cfg["departments"][brief["department"]]["worker"])}
     cmd = worker_cmd(brief, a, cfg)
     # The .lock is the worker's: the work-ledger skill has it refuse a work dir that already holds one, so a
     # lock written here made every worker return "not started" (kumiko run, 2026-10-14, reverted the same
@@ -255,6 +402,12 @@ def run_worker(brief: dict, a, cfg: dict, root: Path, timeout_s: int) -> tuple[d
         t0 = time.time()
         rc, stdout, stderr, timed_out = run_headless(cmd, root, timeout_s)
         meta["seconds"] = round(time.time() - t0, 1)
+        if STOPPING.is_set() and rc != 0:
+            meta["interrupted"] = True
+            synthetic["reason"] = "director stopped while the worker ran; attempt not counted"
+            log(f"{tag}: interrupted")
+            keep_worker_output(root, brief, cmd, rc, stdout, stderr, meta)
+            return synthetic, meta
         if timed_out:
             synthetic["reason"] = f"worker exceeded {timeout_s}s wall clock; process group killed"
             log(f"{tag}: timeout after {timeout_s}s")
@@ -299,19 +452,26 @@ def main() -> int:
     ap.add_argument("--max-turns", type=int, default=20)
     ap.add_argument("--budget-per-worker", type=float)
     ap.add_argument("--stages")
+    ap.add_argument("--description", help="what the seller wrote about the upload, optional; the ledger keeps it on each item for research")
     ap.add_argument("--dry-run", action="store_true", help="init and show the first pass of worker commands; launch nothing")
+    ap.add_argument("--no-preflight", action="store_true", help="skip the credential checks before the run (they cost a few free requests)")
+    ap.add_argument("--preflight", choices=["all", "seller", "none"], default="all",
+                    help="which credentials to check first: all (default); seller, only the 3DAPI key and the Etsy shop token, "
+                         "for a host that checked the platform's own values at start; none, the same as --no-preflight")
     ap.add_argument("--billing", choices=["auto", "api", "subscription"], default=os.environ.get("DAPILOT_BILLING", "auto"),
                     help="api: require ANTHROPIC_API_KEY; subscription: hide the key from workers so they use the logged-in account; auto: whatever is set")
     a = ap.parse_args()
 
     root = project_root()
+    run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
     os.environ["DAPILOT_PROJECT_DIR"] = str(root)
+    os.environ["DAPILOT_WORKER"] = "1"   # the plugin's prompt hook stays quiet for a worker's brief (on_prompt.py)
     load_env(root)
     os.environ.setdefault("DAPILOT_PYTHON", sys.executable)
     cfg = load_config(root)
     dept = cfg["departments"].get(a.department)
     if not dept:
-        print(json.dumps({"ok": False, "reason": f"unknown department {a.department}"})); return 2
+        return refuse(root, run, f"unknown department {a.department}", "config.department")
     if not shutil.which("claude"):
         # Claude's installer puts it in ~/.local/bin, which a service or a fresh tmux shell may not have on PATH;
         # workers inherit whatever this finds
@@ -320,19 +480,31 @@ def main() -> int:
                 os.environ["PATH"] = f"{d}{os.pathsep}{os.environ.get('PATH', '')}"
                 break
     if not shutil.which("claude"):
-        print(json.dumps({"ok": False, "reason": f"claude CLI not on PATH ({os.environ.get('PATH')}) nor in ~/.local/bin"})); return 2
+        return refuse(root, run, f"claude CLI not on PATH ({os.environ.get('PATH')}) nor in ~/.local/bin", "runtime.tool_missing")
     if a.billing == "subscription":
         os.environ.pop("ANTHROPIC_API_KEY", None)
     if a.billing == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
-        print(json.dumps({"ok": False, "reason": "--billing api but ANTHROPIC_API_KEY is not set"})); return 2
+        return refuse(root, run, "--billing api but ANTHROPIC_API_KEY is not set", "config.env_missing")
     billing = "API key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription (logged-in account)"
     a.max_workers = a.max_workers or dept.get("max_workers") or cfg.get("max_workers_per_lead", 3)
     a.budget_per_worker = a.budget_per_worker or cfg.get("budget", {}).get("usd_per_item", 0.5)
     ceiling = cfg.get("budget", {}).get("usd_per_run")
-    run = a.run or f"intake-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
 
     if not (a.folder or a.items or a.resume):
-        print(json.dumps({"ok": False, "reason": "give a folder, --items or --resume"})); return 2
+        return refuse(root, run, "give a folder, --items or --resume", "usage")
+    scope = "none" if a.no_preflight else a.preflight
+    if scope != "none" and not a.dry_run:
+        pf = preflight(cfg, a.stages, scope)
+        if not pf["ok"]:
+            text = "; ".join(pf["failed"])
+            error = "config.key_rejected" if any("rejected" in f or "refused" in f for f in pf["failed"]) else "config.env_missing"
+            log("preflight failed: " + text)
+            emit(root, run, "run.preflight", ok=False, text=text, checked=pf["checked"], failed=pf["failed"], error=error)
+            print(json.dumps({"ok": False, "reason": "preflight failed: " + text, "preflight": pf, "error": error}))
+            return 2
+        text = ", ".join(c["integration"] for c in pf["checked"])
+        log("preflight ok: " + text)
+        emit(root, run, "run.preflight", ok=True, text=text, checked=pf["checked"], failed=[])
     init_args = ["init", "--run", run, "--department", a.department]
     if a.folder:
         init_args += ["--folder", a.folder]
@@ -342,10 +514,14 @@ def main() -> int:
         init_args += ["--resume"]
     if a.stages:
         init_args += ["--stages", a.stages]
+    if a.description:
+        init_args += ["--description", a.description]
     init = ledger(*init_args)
     if not init.get("ok"):
-        print(json.dumps(init)); return 2
+        return refuse(root, run, str(init.get("reason") or "the ledger refused to register the run"), "ledger.init", init=init)
     log(f"run {run}: {init['items']} items, workers<= {a.max_workers}, budget/worker {a.budget_per_worker} USD, ceiling {ceiling}, billing: {billing}")
+    emit(root, run, "run.started", items=int(init["items"]), workers=int(a.max_workers),
+         budget_per_worker=float(a.budget_per_worker), ceiling=ceiling, billing=billing)
 
     t_start = time.time()
     spent = 0.0
@@ -353,6 +529,7 @@ def main() -> int:
     stalls = 0
     dispatched_total = 0
     alive = heartbeat(root, run, init["items"]) if not a.dry_run else None
+    install_stop_handler()
     try:
         return main_loop(a, cfg, root, run, ceiling, billing, t_start, spent, passes, stalls, dispatched_total)
     finally:
@@ -381,13 +558,17 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
                 break
             stalls += 1
             log(f"pass {passes}: nothing ready, work_left={st['work_left']} counts={st['counts']}")
+            emit(root, run, "log", line=f"pass {passes}: nothing ready, work_left={st['work_left']} counts={st['counts']}")
             if stalls >= 2:
                 log("two passes changed nothing; stopping")
+                emit(root, run, "run.stopped", cause="stall", text="two passes changed nothing")
                 break
             time.sleep(5)
             continue
         stalls = 0
         log(f"pass {passes}: dispatching {len(briefs)} worker(s): " + ", ".join(f"{b['item'][:8]}/{b['stage']}#{b['attempt']}" for b in briefs))
+        emit(root, run, "pass.dispatched", **{"pass": passes}, workers=len(briefs),
+             briefs=[{"item": b["item"], "stage": b["stage"], "attempt": int(b["attempt"]), "script": bool(b.get("script"))} for b in briefs])
         with ThreadPoolExecutor(max_workers=a.max_workers) as pool:
             # per worker, not per run: one stuck worker must not hold an item for the run's whole budget
             futures = {pool.submit(run_worker, b, a, cfg, root, worker_minutes(b, cfg) * 60): b for b in briefs}
@@ -397,12 +578,30 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
                 dispatched_total += 1
                 spent += meta["usd"]
                 rec = ledger("record", "--run", run, "--result", "-", "--tokens", str(meta["tokens"]),
-                             "--usd", str(meta["usd"]), "--model", "worker", stdin=json.dumps(result))
+                             "--usd", str(meta["usd"]), "--model", str(meta.get("model") or "worker"),
+                             "--seconds", str(meta["seconds"]),
+                             *(["--worker-log", meta["worker_log"]] if meta.get("worker_log") else []),
+                             *(["--interrupted"] if meta.get("interrupted") else []), stdin=json.dumps(result))
                 log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} -> {rec.get('status') or rec.get('reason')}"
                     f" | {meta['seconds']}s, {meta['turns']} turns, {meta['usd']:.4f} USD | {result.get('summary', '')[:90]}")
+                emit(root, run, "stage.result", item=b["item"], stage=b["stage"], attempt=int(b["attempt"]),
+                     status=rec.get("status") or "rejected", seconds=float(meta["seconds"]), turns=int(meta.get("turns") or 0),
+                     usd=round(float(meta["usd"]), 4), summary=str(result.get("summary") or "")[:300],
+                     reason=(str(result.get("reason") or rec.get("reason") or "") or None),
+                     cached=bool(result.get("cached")), interrupted=bool(meta.get("interrupted")),
+                     **({"spend": rec["spend"]} if isinstance(rec.get("spend"), dict) else {}))
+                if rec.get("review"):
+                    log(f"{b['item'][:8]} {b['stage']}#{b['attempt']} for review: " + "; ".join(rec["review"])[:300])
+                    emit(root, run, "stage.review", item=b["item"], stage=b["stage"], attempt=int(b["attempt"]),
+                         problems=[str(p) for p in rec["review"]])
+        if STOPPING.is_set():
+            log("stopped: signal received; the pass was recorded and the run can be resumed")
+            emit(root, run, "run.stopped", cause="signal", text="signal received; the pass was recorded and the run can be resumed")
+            break
         st = ledger("status", "--run", run)
         if st.get("over_budget"):
             log(f"spend {st['cost']['usd']} USD over ceiling {ceiling}; stopping")
+            emit(root, run, "run.stopped", cause="budget", text=f"spend {st['cost']['usd']} USD over ceiling {ceiling}")
             break
         if not st.get("work_left"):
             break
@@ -414,8 +613,16 @@ def main_loop(a, cfg: dict, root: Path, run: str, ceiling, billing: str, t_start
         "workers_dispatched": dispatched_total, "passes": passes,
         "usd_workers": round(spent, 4), "usd_ledger": rep["cost"]["usd"],
         "seconds": round(time.time() - t_start, 1), "billing": billing,
+        **({"stopped": "signal"} if STOPPING.is_set() else {}),
     }
     log(f"done: {counts}, {dispatched_total} workers, {spent:.4f} USD, {summary['seconds']}s -> {rep['report']}")
+    cost = rep.get("cost") or {}
+    spend = {"workers": round(float(cost.get("usd") or spent), 4), "assets": round(float(cost.get("assets_usd") or 0.0), 4),
+             "fees": round(float(cost.get("fees_usd") or 0.0), 4)}
+    spend["total"] = round(sum(spend.values()), 4)
+    emit(root, run, "run.ended", ok=bool(summary["ok"]), counts={k: int(v) for k, v in counts.items()}, workers=int(dispatched_total),
+         usd=round(float(spent), 4), seconds=float(summary["seconds"]), report=str(rep["report"]), stopped=STOPPING.is_set() or None,
+         spend=spend)
     print(json.dumps(summary, indent=2))
     return 0 if summary["ok"] else 1
 

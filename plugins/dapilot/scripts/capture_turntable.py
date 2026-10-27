@@ -30,6 +30,18 @@ studio page headless with capture=1 pointing at it, and writes every frame the
 page posts. The page owns the stepping because only it knows when a frame is
 truly on the canvas; this script owns the disk and the encode.
 
+The page also reports progress to the collector (2026-10-26): a word before
+every frame, a heartbeat every few seconds while one is drawn, its reason when
+it fails, done at the end. One progress line per change goes to stderr, so the
+worker's log says which frame is being drawn and for how long. The page is
+given up only when it has said nothing for --stall seconds (60), never for
+being slow: a software renderer on a two-core server took 95 to 160 s per
+2048 px frame, and the old rule (no frame for 120 s) killed Chromium mid-frame
+and reported "the page stopped sending" for the Benchy three runs running.
+A page without progress reports (an older console on --studio) keeps the old
+rule. Chromium's own stderr goes to OUT/.chrome.log and its tail into a
+failure, so a crash can be told from a stall.
+
 The studio page: --studio (DAPILOT_STUDIO_URL, default the console's dev
 server) is used when it answers. When nothing does, this script serves the
 page itself from --studio-dir, the built copy the plugin ships at
@@ -127,6 +139,11 @@ class Collector(ThreadingHTTPServer):
         self.counts: dict[str, int] = {p: 0 for p in PASSES}
         self.errors: list[str] = []
         self.last = time.time()
+        # what the page last said about itself: the report, when it came, and whether it ever reported
+        self.progress: dict = {}
+        self.heard: float | None = None
+        self.failure: str | None = None
+        self.finished = False
 
     @property
     def port(self) -> int:
@@ -140,7 +157,11 @@ class Collector(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler's spelling)
         server: Collector = self.server  # type: ignore[assignment]
-        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        url = urllib.parse.urlparse(self.path)
+        if url.path == "/progress":
+            self.progress(server)
+            return
+        query = urllib.parse.parse_qs(url.query)
         name = (query.get("pass") or [""])[0]
         index = (query.get("index") or [""])[0]
         if name not in PASSES or not index.isdigit():
@@ -158,6 +179,27 @@ class Handler(BaseHTTPRequestHandler):
             server.errors.append(f"{name} {index}: {exc}")
             self.send_error(500, "could not write the frame")
             return
+        self.send_response(204)
+        self.send_header("access-control-allow-origin", "*")
+        self.end_headers()
+
+    def progress(self, server: "Collector") -> None:
+        """The page's word about what it is doing (capture.ts ProgressReport). Anything unreadable is ignored."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
+        except (ValueError, TypeError):
+            body = {}
+        if isinstance(body, dict) and isinstance(body.get("state"), str):
+            server.heard = time.time()
+            state = body["state"]
+            if state == "failed":
+                server.failure = str(body.get("reason") or "the page gave no reason")
+            elif state == "done":
+                server.finished = True
+            if state != "alive" or not server.progress:
+                server.progress = body
+            else:
+                server.progress = {**server.progress, **body, "state": server.progress.get("state", "alive")}
         self.send_response(204)
         self.send_header("access-control-allow-origin", "*")
         self.end_headers()
@@ -239,6 +281,18 @@ def main() -> int:
                     help="the built studio page to serve; default DAPILOT_STUDIO_DIR, else the plugin's studio/")
     ap.add_argument("--no-video", action="store_true", help="frames only, skip ffmpeg")
     ap.add_argument("--timeout", type=float, default=900.0)
+    ap.add_argument("--antialias", action="store_true",
+                    help="multisample the frame as the console does. Off by default since 2026-10-26: on a machine "
+                         "with no GPU the four samples per pixel were most of the cost of a still")
+    ap.add_argument("--shadow-map", type=int, default=1024,
+                    help="side of the contact shadow's depth map in px (1024; the console uses 2048)")
+    ap.add_argument("--software", action="store_true",
+                    help="render on the CPU (SwiftShader) on any system, as a Linux server with no GPU does; "
+                         "for measuring what the hosted runner will take")
+    ap.add_argument("--stall", type=float, default=60.0,
+                    help="seconds without a word from the page before it is given up; a frame may take longer than "
+                         "this, the page reports while it draws. A page that never reports is given up 120 s after "
+                         "its last frame")
     ap.add_argument("--resume", action="store_true",
                     help="keep frames already captured with the same settings, capture only the missing ones, "
                          "and exit 3 (partial) instead of failing when --timeout runs out")
@@ -340,21 +394,54 @@ def main() -> int:
         **({"rotate": a.rotate} if a.rotate else {}),
         **({"elevation": a.elevation} if a.elevation is not None else {}),
         **({"color": a.color} if a.color else {}),
+        **({} if a.antialias else {"aa": "0"}),
+        "shadowMap": a.shadow_map,
         "post": f"http://127.0.0.1:{server.port}/frame",
+        "progress": f"http://127.0.0.1:{server.port}/progress",
     })
 
     profile = out / ".chrome-capture"
     linux = []
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") or a.software:
         # A server has no GPU: WebGL falls back to SwiftShader, which Chrome only allows when asked.
         linux = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
-        if os.geteuid() == 0:
+        if sys.platform.startswith("linux") and os.geteuid() == 0:
             linux.append("--no-sandbox")   # Chrome refuses to start as root otherwise
+    # Chromium's own words, kept: a GPU process crash or an out-of-memory tab shows up here and nowhere else.
+    chrome_log = out / ".chrome.log"
+    chrome_err = open(chrome_log, "w") if todo else None
     proc = None if not todo else subprocess.Popen(
         [browser, "--headless=new", "--disable-gpu-sandbox", "--hide-scrollbars", *linux,
          "--window-size=1400,1400", f"--user-data-dir={profile}", page],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=chrome_err,
     )
+
+    def browser_said() -> list[str]:
+        """The last lines of Chromium's stderr, for a failure record."""
+        try:
+            if chrome_err is not None:
+                chrome_err.flush()
+            return chrome_log.read_text(errors="replace").splitlines()[-12:]
+        except OSError:
+            return []
+
+    last_line, last_said = "", 0.0
+
+    def progress_line() -> str:
+        """One sentence about where the page is, from its last report."""
+        p = server.progress
+        if not p:
+            return ""
+        if p.get("state") in ("done", "failed"):
+            return ""
+        i, total = p.get("index"), p.get("total") or expected
+        if i is None:
+            return f"frame 1/{total}: waiting for the page"
+        secs = (p.get("frame_ms") or 0) / 1000
+        phase = {"render": "drawing", "post": "sending", "encode": "encoding"}.get(p.get("phase") or "", "working")
+        yaw = p.get("yaw")
+        at = f" yaw {yaw:g}" if isinstance(yaw, (int, float)) else ""
+        return f"frame {i + 1}/{total} {p.get('pass') or ''}{at}: {phase}, {secs:.0f} s"
 
     expected = len(todo) * len(passes)
     t0 = time.time()
@@ -370,19 +457,35 @@ def main() -> int:
         while server.total < expected:
             if proc.poll() is not None:
                 return fail("the browser exited before the run finished",
-                            captured=server.counts, errors=server.errors)
+                            captured=server.counts, errors=server.errors, browser=browser_said())
             if server.errors:
                 return fail(f"a frame could not be written: {server.errors[0]}", captured=server.counts)
+            if server.failure:
+                return fail(f"the page failed: {server.failure}", captured=server.counts,
+                            progress=server.progress, browser=browser_said())
             waited = time.time() - t0
             if not server.model_served and waited > 45:
-                return fail("the page never fetched the model; is /studio built and reachable?")
-            # Two clocks: a hard cap, and a stall guard once frames start arriving.
+                return fail("the page never fetched the model; is /studio built and reachable?",
+                            browser=browser_said())
+            # Three clocks: a hard cap; the page's own word, which must come every few seconds while it
+            # draws (--stall); and, for a page that never reports, the old rule of a frame every 120 s.
             if waited > a.timeout:
                 if a.resume:
                     return partial(f"timed out after {waited:.0f}s")
-                return fail(f"timed out after {waited:.0f}s", captured=server.counts)
-            if server.total and time.time() - server.last > 120:
-                return fail("no frame for 120s; the page stopped sending", captured=server.counts)
+                return fail(f"timed out after {waited:.0f}s", captured=server.counts, progress=server.progress)
+            if server.heard is not None:
+                if time.time() - server.heard > a.stall:
+                    return fail(f"the page said nothing for {a.stall:g}s", captured=server.counts,
+                                progress=server.progress, browser=browser_said())
+            elif server.total and time.time() - server.last > 120:
+                return fail("no frame for 120s; the page stopped sending (and reports no progress: an old studio page?)",
+                            captured=server.counts, browser=browser_said())
+            # one line when the page moves to another frame or phase, and one every 30 s while it draws
+            line = progress_line()
+            key = line.split(",")[0]
+            if line and (key != last_line or time.time() - last_said > 30):
+                print(f"capture: {line}", file=sys.stderr, flush=True)
+                last_line, last_said = key, time.time()
             time.sleep(0.25)
     finally:
         if proc is not None:
@@ -391,6 +494,8 @@ def main() -> int:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
+        if chrome_err is not None:
+            chrome_err.close()
         server.shutdown()
         if static is not None:
             static.shutdown()
@@ -418,7 +523,8 @@ def main() -> int:
     record = {
         "ok": True, "frames": a.frames, "size": a.size, "fps": a.fps, "passes": passes,
         "start_yaw": a.start_yaw, "arc": a.arc, "yaws": yaws or None, "rotate": a.rotate or "0,0,0",
-        "elevation": a.elevation, "color": a.color,
+        "elevation": a.elevation, "color": a.color, "antialias": a.antialias, "shadow_map": a.shadow_map,
+        "software": bool(linux),
         "captured": server.counts, "capture_s": wall, "resumed_from": a.frames - len(todo) if resumed else 0,
         "seconds": round(a.frames / a.fps, 2), "renderer": "webgl", "studio": studio_used,
     }

@@ -6,11 +6,21 @@ triangle soup with no units, names or hierarchy, and no amount of context
 window makes 80k float triples readable. Everything downstream that needs to
 reason about the model reasons about this summary instead.
 
-Usage: analyze_mesh.py model.stl
+Usage: analyze_mesh.py model.stl [--out analysis.json]
+
+With --out the result is written to that path only when the analysis
+succeeded, and atomically: to a temporary file beside it, then renamed into
+place. A failure writes nothing, so a reader that finds the file can trust
+it. Before this (2026-10-25) the skill redirected stdout into analysis.json,
+and a worker that died mid-step left a 0-byte file the ledger took for a
+finished stage; research then failed on the same item in every later run.
+The JSON is printed to stdout either way.
 """
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import sys
 
 import trimesh
@@ -77,15 +87,38 @@ def analyze(path: str) -> dict:
     }
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: analyze_mesh.py model.stl", file=sys.stderr)
-        return 2
+def write_atomic(path: str, text: str) -> None:
+    """The whole file or no file: written beside the target, fsynced, then renamed over it."""
+    target = os.path.abspath(path)
+    tmp = f"{target}.tmp-{os.getpid()}"
     try:
-        result = analyze(sys.argv[1])
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Deterministic geometry facts for one model file.")
+    ap.add_argument("model", help="model.stl, .3mf or .obj")
+    ap.add_argument("--out", help="write the result here, atomically, and only on success")
+    a = ap.parse_args()
+    try:
+        result = analyze(a.model)
     except Exception as exc:  # noqa: BLE001 - any loader failure is just a gap
         result = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
-    print(json.dumps(result, indent=2))
+    text = json.dumps(result, indent=2)
+    if a.out and result.get("ok"):
+        try:
+            write_atomic(a.out, text)
+        except OSError as exc:
+            result = {"ok": False, "reason": f"could not write {a.out}: {exc}"}
+            text = json.dumps(result, indent=2)
+    print(text)
     return 0 if result.get("ok") else 1
 
 

@@ -7,12 +7,17 @@ dapilot:quickstart command with exactly that path, now, instead of talking about
 file is otherwise a judgement call for the model, and on 2026-10-14 the judgement went the other way:
 the person dropped a .3mf and got a conversation. This makes it a rule.
 
-Says nothing when the message holds no model file, or already is a /dapilot command. Never blocks the
-prompt (exit 0 always). Standard library only; must finish well inside the 30 s hook budget.
+Says nothing when the message holds no model file, or already is a /dapilot command, or is a worker's
+brief: the director's headless workers (`claude -p --agent dapilot:...`) get a JSON brief naming the
+model file, and this hook told every one of them to start quickstart (2026-10-26, the duck's designer
+and the Benchy's both wrote a line refusing it); a brief is recognised by its keys, and the director
+also sets DAPILOT_WORKER=1 in the workers' environment. Never blocks the prompt (exit 0 always).
+Standard library only; must finish well inside the 30 s hook budget.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 
@@ -20,6 +25,18 @@ EXTS = r"(?:stl|3mf|obj|step|stp)"
 # a quoted path, or a run of non-space characters, ending in a model extension; case-insensitive
 # quoted first (a path with spaces), then a bare run of non-space characters; the boundary belongs to the bare form only
 PATH = re.compile(r'"([^"\n]+\.' + EXTS + r')"|\'([^\'\n]+\.' + EXTS + r')\'|(\S+\.' + EXTS + r')\b', re.IGNORECASE)
+
+
+def is_brief(text: str) -> bool:
+    """A director's brief to a worker: one JSON object with run, item and stage. Not a person's message."""
+    t = text.strip()
+    if not t.startswith("{"):
+        return False
+    try:
+        d = json.loads(t)
+    except ValueError:
+        return False
+    return isinstance(d, dict) and all(k in d for k in ("run", "item", "stage"))
 
 
 def main() -> int:
@@ -41,6 +58,8 @@ def main() -> int:
     if not text:
         text = raw
     if not text or text.lstrip().startswith("/dapilot:"):
+        return 0
+    if os.environ.get("DAPILOT_WORKER") == "1" or is_brief(text):
         return 0
     found = []
     for m in PATH.finditer(text):

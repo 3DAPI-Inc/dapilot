@@ -12,8 +12,9 @@ A brief with `stage: design`. The work dir has `source.<ext>`, `analysis.json`,
 and no `design.json`. Only items with a sale price get here.
 
 ## Inputs
-- `design/context.json`, written by step 2: product noun and query with
-  research's `identity` (the object and how sure it was), the top
+- `design/context.json`, written by step 2: `seller_says`, what the seller
+  wrote about the object when they uploaded it, word for word (null when they
+  wrote nothing); product noun and query with
   comparable titles, size and scale word, the drafts and their yaws, the
   3MF's own `thumbnails` when the project carried them (colour renders,
   worth a Read before naming), the
@@ -36,10 +37,38 @@ for captures. The script fails with a one-line reason when one is missing.
    captured. Rewrite it only when `check` fails or `previous` names the
    brief itself as the problem.
 3. Judge: write the brief. Read `design/context.json` and drafts 00, 02, 04
-   and 06 (the others only if those leave the front unclear). Decide, with
-   `reference/art-direction.md`:
-   - `name`: what a buyer calls it, 2 to 5 words; the count is the copy's
-     job, so no "set of" here
+   and 06 (the others only if those leave the front unclear).
+
+   **The seller's description is the authority on what the product is and
+   what it is for.** `seller_says` outranks research's `identity`, the
+   comparables and your own reading of the geometry. A "light switch cover"
+   is photographed on a wall over a light switch, a "plant pot" with a plant
+   in it, a "cable holder" holding a cable, whatever the drafts seem to show
+   and however sure research was. Your task is a good product picture, and a
+   good product picture shows the thing doing its job in the place it lives;
+   the file's shape tells you how it sits there, not what it is. When the
+   geometry seems to contradict the seller (no cutout, no hole, the wrong
+   size), stage the stated use anyway and write the doubt in `reason` and
+   in your log paragraph, so a person sees it; do not resolve it by
+   quietly making the product something else (the squirrel light switch
+   cover became "Lounging Squirrel" on a bookshelf, 2026-10-26). Only when
+   `seller_says` is null do research's identity and the comparables decide.
+
+   **The seller's gate choices come first.** `context.approved.color` is the
+   filament colour the seller chose when they approved the price: when it is
+   set, `color` is that and nothing else. `context.grid`, when present, is
+   the set of stills the seller's own browser drew at that moment, in that
+   colour, from the item's display model (a painted or assembled 3MF in its
+   real colours): pick `hero_yaw` and `angles` from `grid.yaws` and
+   `elevation` from `grid.elevations`, and keep `rotate` at `0,0,0`. `check`
+   snaps a brief onto the grid and records what moved in `plan.json`; the
+   stills are then copied from the grid and no renderer runs on this machine
+   (2026-10-26). Without a grid the stills are drawn here, as before.
+
+   Decide, with `reference/art-direction.md`:
+   - `name`: what a buyer calls it, 2 to 5 words, in the seller's terms when
+     `seller_says` names the thing; the count is the copy's job, so no "set
+     of" here
    - `rotate` and `hero_yaw`: stand it the way a buyer expects, pick the side
      that reads best; yaw is the draft's yaw
    - `angles`: the other stills, each showing something the hero does not
@@ -72,6 +101,13 @@ for captures. The script fails with a one-line reason when one is missing.
    config; `ok:false` with the error.
 5. Run, with a Bash timeout of 600000 ms:
    `$PY ${CLAUDE_PLUGIN_ROOT}/scripts/design_product.py produce --workdir $WORKDIR`
+   Run it as soon as `check` passed. The `USD budget: $x/$y` line in your
+   reminders is your own token spend, not the asset cap: fal spend never
+   counts against it, `check` has already held the plan against
+   `design.usd_cap_per_item`, and the script refuses anything over the cap
+   itself. Never skip `produce`, block, or answer "budget too low" because
+   the plan's cost is near or above that line (a 2026-10-23 run did, at
+   0.10 USD spent).
    - Exit 0: continue.
    - Exit 3: the deadline passed with a capture or a fal request still
      running. Run the same command again, at most 5 runs in all. Nothing is
@@ -104,9 +140,12 @@ for captures. The script fails with a one-line reason when one is missing.
    Non-zero exit: `ok:false`, reason from its JSON.
 9. Append the log paragraph: name, rotate, hero yaw, angles, colour, scenes
    in a few words each, produce runs and steps, what was rejected, redone and
-   why, photo count, listing video, whether the standard was met, spend. Remove `.lock`. Print the result line
-   with outputs `["design.json"]` and a summary like
-   `"Cat Fidget Clicker: 6 photos, lifestyle clip, 1.11 USD"`.
+   why, photo count, listing video, whether the standard was met. No money
+   figure in the paragraph or the summary: `design.json` carries the spend
+   and the ledger counts it from there, and the paragraph and the summary
+   reach the seller, who pays in credits (2026-10-26). Remove `.lock`. Print
+   the result line with outputs `["design.json"]` and a summary like
+   `"Cat Fidget Clicker: 6 photos, lifestyle clip"`.
 
 ## Outputs
 - `design/brief.json`, the one file this skill writes by hand:

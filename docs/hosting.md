@@ -16,8 +16,8 @@ the same plugin for sellers who do not, at dapilot.dapi.digital.
 | Piece | Repository | Why |
 |---|---|---|
 | The plugin | this one, `plugins/dapilot` | the thing that ships; unchanged by hosting |
-| The runner image and its consumer | this one, `runner/` | released with the plugin, byte for byte; deployed on ECS Fargate, not Coolify, so it does not belong in the 3dapi workers directory |
-| The AWS stack: queue, bucket, registry, task, service | 3dapi, `infrastructure/cdk` | it shares the slicer's cluster and VPC, and the backend that sends the messages is deployed from there |
+| The runner image and its consumer | this one, `runner/` | released with the plugin, byte for byte: Coolify builds it from this repository at a release tag, which the 3dapi workers directory could not promise |
+| The AWS stack: queue, bucket, identities | 3dapi, `infrastructure/cdk` | the backend that sends the messages is deployed from there; the stack stands alone and touches nothing of the slicer's |
 | The web app, the backend routes, accounts | 3dapi | dapi.digital's own frontend, backend and Supabase project |
 
 The image is built from this repository at a release tag and pushed to the
@@ -101,7 +101,7 @@ backend (3dapi)           one row per run; mints the dapilot API key; holds cred
 SQS FIFO queue  (message group id = seller id)       |
    |  ReceiveMessage                                 |
    v                                                 |
-runner (runner/, one Fargate task)  -----------------+
+runner (runner/, one Coolify container)  -----------+
    |  pull s3://<bucket>/<seller>/ -> /data/dapilot/<seller>
    |  DAPILOT_STORE_DIR=/data/dapilot/<seller>  run_intake.py <intake> --run <id> --billing api
    |  push /data/dapilot/<seller> -> s3://<bucket>/<seller>/   (env file and tokens excluded)
@@ -116,49 +116,71 @@ that knows S3, SQS, other sellers or the backend exist.
 
 - `python:3.12-slim-bookworm`, with ffmpeg, Chromium and fonts from apt, the
   plugin's packages in a venv (`DAPILOT_PYTHON`), and the Claude Code CLI
-  through its own installer, pinned by `ARG CLAUDE_CODE_VERSION`.
+  as one native binary at `/usr/local/bin/claude`, pinned by
+  `ARG CLAUDE_CODE_VERSION`: the Dockerfile downloads it from Anthropic's
+  release bucket and checks it against the sha256 in that version's
+  manifest. The installer script is not used (it fetches the newest CLI
+  first, then installs the pinned one). Auto-update is off in the image.
 - The plugin is `COPY`'d from the checkout the image is built from, so the
   image for tag `vX.Y.Z` runs exactly that release. `ARG DAPILOT_RELEASE`
   records which, for doctor and the run events.
 - Root-owned and world-readable only. Workers run with permissions skipped;
   a read-only plugin is what stops one from "fixing" a script mid-run.
 - `CHROME` points at a wrapper that adds `--no-sandbox` and
-  `--disable-dev-shm-usage`: a container has no user namespaces, and
-  Fargate's `/dev/shm` is small.
+  `--disable-dev-shm-usage`: a container has no user namespaces, and a
+  container's `/dev/shm` is small.
 - Runs as `runner`, uid 1000. Claude Code refuses the unattended permission
   mode as root and the director starts every worker in that mode.
-- `/data/dapilot` is one subdirectory per seller during a run. On Fargate it
-  is the task's ephemeral disk (raise it from the 20 GB default); S3 is the
-  durable copy.
-- Default command is `doctor.sh`: every tool, the plugin read-only, the data
-  directory writable, and two frames of a cube rendered through the bundled
-  studio page. `--hold` keeps the task up. The consumer replaces this
-  command when it exists.
+- `/data/dapilot` is one subdirectory per seller during a run, a persistent
+  volume of the Coolify resource; S3 is the durable copy.
+- Default command is `doctor.sh --serve`: every tool, the plugin read-only,
+  the data directory writable, two frames of a cube rendered through the
+  bundled studio page, and then the queue consumer. A failed check exits
+  before any message is taken.
 
-## The AWS stack (written: 3dapi `infrastructure/cdk/lib/dapilot-stack.ts`; not deployed)
+## Where it runs (decided 2026-10-21: Coolify, not Fargate)
 
-A second stack in the 3dapi CDK app, `Dapilot-<env>`, next to the public
-API's, taking its cluster and VPC through props (public subnets, no NAT,
-tasks get a public IP as the slicer does). Written 2026-10-20, typechecks
-and synthesises (`cdk synth Dapilot-staging --context env=staging`), not
-deployed. Context flags: `dapilotImageTag` (default the env
-name), `dapilotCommand` (`doctor` first, `serve` once the backend routes
-exist), `dapilotBackendUrl`. The image is built and pushed by this
-repository's `runner-image` workflow on a release tag; the deploy order is
-in `runner/README.md`.
+The runner is a Coolify resource on the EC2 host, next to 3dapi's other
+workers, built by Coolify from this repository at a release tag. The first
+design put it on ECS Fargate in the slicer's cluster; that stack was deployed
+to production once with zero tasks (2026-10-20), and the deploy, run from a
+feature branch, also rewrote the slicer's stack and deleted resources the
+branch did not know about. Two lessons went into what follows: the AWS stack
+for dapilot imports nothing from any other stack, and it is deployed with
+`--exclusively` after reading `cdk diff`. The host already pays for itself,
+so the runner's marginal cost is zero until it needs its own instance.
+
+**Throughput (2026-10-26).** A run is ten to fifteen minutes of wall clock,
+most of it waiting on Claude and fal, two to four minutes of it drawing on
+the CPU. The consumer took one message at a time, so a fifth seller waited
+an hour. `DAPILOT_JOBS` runs that many job loops in the one container; the
+FIFO queue's group id is the seller, so a seller's own runs stay in order on
+their own root while other sellers proceed, and nothing in a job is shared
+beyond the process. Each job needs about 1.5 GB (up to three `claude -p`
+workers and a Chromium) and a core while it draws, so the shared t3a.large
+carries two at most, and only with the resource's memory limit raised to
+about 5 GB. Beyond that the answer is more consumers on the same queue: the
+runner on its own instance with more jobs, or the Fargate service the stack
+still defines, scaled on the queue's depth and consuming alongside the
+Coolify runner. That is the elastic path, and the reason the design kept a
+queue between the backend and the runner.
+
+## The AWS stack (3dapi `infrastructure/cdk/lib/dapilot-stack.ts`)
+
+A second stack in the 3dapi CDK app, `Dapilot-<env>`, standing alone. The
+deploy order and the Coolify settings are in `runner/README.md`.
 
 | Piece | Notes |
 |---|---|
-| ECR repository | the runner image, pushed by this repository's release workflow |
-| SQS FIFO queue plus dead-letter queue | copy of the slicer queue definitions; group id is the seller id |
-| S3 bucket | one prefix per seller; a lifecycle rule for work dirs that never reached an approved price |
-| Secrets Manager | our Anthropic key, the backend service token; injected as task secrets |
-| Task role | consume the queue, read and write the bucket, read those secrets, nothing else |
-| Task definition | 2 vCPU, 8 GB, ephemeral storage raised; `CMD` is the consumer |
-| Fargate service | one task, On-Demand first; Spot once the SIGTERM handler is tested; scale to zero from queue depth later, the way the slicer's design workers do |
+| SQS FIFO queue plus dead-letter queue | copy of the slicer queue definitions; group id is the seller id; visibility 5 min, DLQ after 3 |
+| S3 bucket | `intake/` expires after 30 days, `sellers/<id>/` kept; private, CORS for the dashboard origin |
+| IAM user `<env>-dapilot-runner` | the container's identity: consume the queue, read and write the bucket, nothing else; the access key is made in the console and lives only in Coolify |
+| Grants on the backend's existing user | send on the queue, read and write on the bucket, so the Hono backend can queue runs and presign uploads |
 
-Approximate cost of one always-on task at that size: about 85 USD a month
-On-Demand, about a third of that on Spot, pennies when scaled to zero.
+No ECR registry (Coolify builds the image), no Secrets Manager (the
+Anthropic key and the backend token are Coolify environment variables), no
+task or service. Staging and production are the same stack with the
+environment name; staging's bucket and queues are destroyable.
 
 ## Storage
 
@@ -172,8 +194,8 @@ relies on. So:
   the local layout. Pulled before the director starts, pushed after it exits.
   The exit is the only moment the root is consistent (no worker mid-write,
   no lock held, ledger written last), which is why the sync is at job
-  boundaries and never continuous. On Fargate the local copy is deleted
-  after the push.
+  boundaries and never continuous. The local copy on the volume is a cache
+  the next job overwrites from S3.
 - **Never synced:** the store's env file and the Etsy token. The runner
   writes them fresh per job from the backend's per-seller credentials.
 - **The browser reads S3 through the backend** with short-lived presigned
@@ -202,7 +224,8 @@ Message body, ids and keys only, never files:
 
 ```json
 { "kind": "run" | "approve" | "retry", "seller": "<uuid>", "run": "<id>",
-  "keys": ["<s3 key of each uploaded model>"], "item": "<hash>", "stage": "<stage>" }
+  "keys": ["<s3 key of each uploaded model>"], "item": "<hash>", "stage": "<stage>",
+  "reason": "<retry only, optional: why it could end differently>", "by": "<optional: who asked>" }
 ```
 
 ## The consumer (built: `runner/consumer.py`; run on a laptop, never against AWS)
@@ -211,8 +234,21 @@ Python with boto3, the same language as everything else in this repository.
 `serve` polls the queue; `once --message FILE --local-bucket DIR
 --local-backend DIR` handles one message with directories standing in for
 S3 and the backend, which is how it was tested on 2026-10-20 with a dry-run
-director (`runner/README.md` has the commands). The approve and retry paths
-are written and untested: they need a run that reached the gate. Per message:
+director (`runner/README.md` has the commands). The approve path ran against
+the staging queue on 2026-10-21. The retry path is `ledger.py retry` since
+2026-10-22: it clears the stage's marker, failed or blocked, queues the stage
+in the same run with fresh attempts and the message's reason on the record;
+since 2026-10-23 it also redoes a done stage that holds a review marker.
+The sync compares content since 2026-10-23 (a file of the same size is
+compared by MD5 against the object's ETag; a multipart ETag falls back to
+the size), and `push` deletes within one rule: only a path the last sync
+saw on both sides (the root's `.sync.json` manifest) that the root no longer
+holds, so a marker a retry cleared or outputs a redo set aside do not come
+back from S3, and a path the manifest never saw is never deleted. A refused
+approve or retry posts the outcome as well as its event, so the backend's
+claim is released either way. The director's `preflight`, `for review` and
+`stopped` log lines become `run.preflight`, `stage.review` and
+`run.stopped` events. Per message: Since 2026-10-26 `pull` applies the same rule the other way: a path the manifest saw on both sides that the bucket no longer holds is removed from the root, so a work dir the backend deleted with its run does not come back from the volume on the next push.
 
 1. **Receive** by long poll, one message at a time.
 2. **Heartbeat.** Extend the message's visibility every minute while the job
@@ -237,43 +273,133 @@ are written and untested: they need a run that reached the gate. Per message:
 Poison messages land in the dead-letter queue and the backend marks the run
 as needing someone, with the last error attached.
 
-An approval is a message: the backend writes `price.approved.json` into the
-seller's S3 prefix and enqueues `approve`; the runner pulls and runs the
-director again, which continues from design.
+An approval is a message: the backend enqueues `approve`, the runner pulls
+the seller's root and runs the plugin's `approve_price.py` on the item (the
+floor check and `price.approved.json` are the plugin's), then the director
+again, which continues from design. The gate is answered once: the backend
+marks the item's gate answered on the run row before it sends the message,
+in one conditional update, so a second click or a changed price is refused
+until the runner has refused the first (2026-10-23; before that the buttons
+stayed live for the whole design-to-publish run and a second approve was
+sent, which the plugin answered with the first price). A retry is locked the
+same way, per marker. The consumer is idempotent on what reaches it
+(2026-10-23): an approval already on disk starts nothing, a retry the ledger
+refuses starts nothing, and no director is started while
+`runs/<id>/director.alive` is fresh on the root; a job waits for the live one
+to end. The runner also writes the plugin template's `budget` block and its
+`design.lifestyle_images` and `design.lifestyle_video` blocks (the fal
+endpoints and their prices) under the plan limits on every job
+(`template_release`), so a stage budget or a model a release changed reaches
+sellers whose config was seeded earlier (the design worker's 1.50 USD of
+2026-10-23 was the old template value, frozen in S3; the clip engine switch
+of the same day would have frozen the same way). The seller's palette,
+stills and caps are not touched.
 
-## Retry agent (not built)
+## Supervisor (built 2026-10-22; a model since 2026-10-26: `runner/supervisor.py`, `agents/supervisor.md`, `skills/supervise-run`)
 
-Between reading the outcome and pushing, for each item that ended failed, the
-runner spawns one bounded `claude -p` with the failed marker, that worker's
-transcript file and the stage's expected outputs, and one question: is this
-transient, a wrong-shaped output, or something a person must answer. It
-returns one JSON line.
+A second queue, `<env>-dapilot-supervise` in the 3dapi CDK stack (standard,
+not FIFO, so one message can carry its own delay), wakes the supervisor: the
+backend sends one message per stage that stopped failed after it has stored
+the outcome, so the row is written first and a supervisor that is down loses
+nothing a person cannot still see. Blocked stages, a question for a person,
+are never sent. A review marker (a done stage whose output
+`check_outputs.py` flagged) is sent with `marker: review`. The supervisor
+runs inside the runner's container: when `DAPILOT_SUPERVISE_QUEUE_URL` is
+set, `consumer.serve` starts its loop in a second thread, so the one Coolify
+resource does both and the only setup is that variable. It is read-only on
+the store and never sends to the runs queue itself. Before every decision it
+asks the backend for the run (`GET /internal/dapilot/runs/<id>`: status, the
+stopped stages, and since 2026-10-26 the whole outcome), so a cancelled run
+and a stage that moved on are left alone whatever the message says.
 
-- transient or wrong output: the runner deletes the marker (what the
-  console's "Try again" does) and enqueues `retry`, at most once per item per
-  stage.
-- person: the marker stays and the dashboard shows the question.
+**Who decides.** A model. The question is interpretation ("what would make
+the next attempt end differently, and is it mine to do"), and until
+2026-10-26 it was answered by `runner/triage.py`, 29 regular expressions over
+the failure text with a fixed policy per class and an `Unknown` class whose
+log was, by design, the backlog of patterns to add. That is the patch cycle
+this project wants to avoid, and it held the shark's item for three days on a
+marker that said in plain English what was wrong. Now the runner hands the
+stop, the item's record from the outcome (every stage's status and attempts,
+the worker's account, the stage's report, the other markers, the spend) and
+the run's status to `claude -p --agent dapilot:supervisor`, the plugin's
+`supervise-run` skill, with no tools and a two-turn, forty-cent cap (a call
+costs about ten cents, most of it the context the CLI loads), and reads one
+JSON line back: `action`, `stage`, `delay_s`, `why`, `wait_for`,
+`confidence`.
 
-Turn cap, dollar cap, no Agent tool, plugin read-only, so it cannot loop and
-cannot edit anything but the marker. It lives in the runner, outside the
-director's loop. An agent orchestrator in place of the Python director was
-considered and dropped on 2026-10-16, and so was LangGraph on 2026-10-20:
-both would re-express the ledger's semantics and the second would need every
-skill ported out of Claude Code.
+**Three answers.** `retry`, through `POST /internal/dapilot/runs/<id>/retry`,
+the same message and event a seller's Try again sends, with `by: supervisor`
+and the sentence as the ledger's reason; a transient waits first, re-queued
+on the supervise queue with `act: "retry"` and `not_before` in hops of 900 s.
+`redo` (new): the stopped stage is fine and an earlier stage's output is the
+problem; the retry route is sent with `redo` and `cascade` for that earlier
+stage, and `ledger.py retry --redo --cascade` sets its outputs and every later
+stage's aside, clears every downstream marker and queues them afresh, refusing
+past a stage that cost fal assets unless a person passes `--force`. `leave`:
+a `supervisor.left` event with the sentence and what the stop waits for.
+Every event says `decided_by` (model or rules) and the call's `usd`.
 
-## Plugin work hosting needs first
+**What stays code.** The caps: no more than two retries per stage, whatever
+the model says; a redo only of an earlier, done stage; never a blocked
+marker; the ledger's refusal to set a paid stage aside. And the fallback:
+when the model cannot be asked (no CLI, no key, a malformed line) `triage.py`
+decides as before, and the event says so. `triage.py`'s codes stay the facts
+a script puts in its result line; its patterns are the fallback only.
 
-These go into the plugin, so local users get them too, and the consumer
+**Testing it.** `plugins/dapilot/skills/supervise-run/eval/stops.jsonl` holds
+real and representative stops with the expected action, and
+`scripts/dev/test_supervisor.sh` runs each through the model against a
+directory standing in for the backend: three passes of ten on 2026-10-26, 30
+of 30 right, about 0.02 USD a decision once the context is cached. It is not
+in `test_phase0.sh` because it spends; run it after a change to the skill or
+the agent. The runner's hard cap and the rules fallback are exercised by hand
+the same way (`supervisor.py once --local-backend`).
+
+## Plugin work hosting needs first (built 2026-10-23)
+
+These went into the plugin, so local users get them too, and the consumer
 reads what they write:
 
-- **Schema checks on produced files** in `ledger.py`, so a wrong-shaped
-  output fails at the stage that wrote it with a reason that names the field.
-- **A SIGTERM handler in the director**, exiting cleanly after the current
-  pass so a reclaimed task pushes a consistent root.
-- **The transcript path in every failed marker**, so the triage agent and the
-  dashboard find the worker's output without searching.
+- **Checks on produced files** (`check_outputs.py`, run by `ledger.py
+  record`): a hard problem fails the attempt with the field named; a soft
+  one leaves the stage done with `<stage>.review.json`, which the outcome
+  carries and the backend sends to the supervisor as a `review` stop.
+- **A SIGTERM handler in the director**: workers' process groups get the
+  signal, their stages are recorded interrupted (attempt not counted), the
+  summary says `stopped`, and the next job on the same root resumes.
+- **The transcript path in every failed marker** (`worker_log`) and the
+  script's `error` code, so triage and the dashboard find the worker's output
+  without searching.
+- **Preflight**: the director checks every connection the enabled stages need
+  before it starts and refuses with the integration named. On the hosted tier
+  it is split (2026-10-25): the runner tests the platform's own credentials
+  once when its container starts (`consumer.py preflight` from `doctor.sh`,
+  values from `GET /internal/dapilot/platform/credentials`) and exits on a
+  failure, which fails the deploy; the director then runs with `--preflight
+  seller` and checks only the seller's 3DAPI key and, when publish is live,
+  their Etsy shop token.
 
 ## Accounts and keys
+
+A seller is any signed-in dapi.digital account, designer or integrator
+(2026-10-26). The platform's session middleware refuses integrator accounts
+on every platform route; the dapilot routes use a variant that admits them,
+and `GET /api/dapilot/me` tells the web app which kind holds the session so
+the account menu links to that account's pages. The 3DAPI key is minted the
+same way for both. Etsy is the one difference: the platform's Etsy row hangs
+off a designer profile, which an integrator does not have, so an integrator's
+runs publish in sandbox until that row has a home for them.
+
+A seller connects Etsy with their own Seller App, as on the plugin's
+Integrations page (2026-10-26): the dashboard's Integrate button opens the
+same steps and the same two fields, the platform confirms the keystring and
+shared secret with Etsy's free ping and saves them beside the shop token;
+the card then offers Authorize shop, which runs the OAuth consent against
+that app in a new tab that ends on a page saying Etsy is integrated and can
+be closed, while the card turns to Connected; and the credentials route hands the
+runner those two values as `ETSY_KEYSTRING` and `ETSY_SHARED_SECRET` in
+place of the platform's. The platform's app stays the default for a seller
+who has not. Details in 3dapi `docs/dapilot-platform.md`.
 
 - **Login** is the same Supabase project as dapi.digital. A session is per
   origin (localStorage), so sharing it across the subdomain needs a cookie
@@ -292,7 +418,8 @@ reads what they write:
   writes per job.
 - **Secrets stay out of the model's reach** the way the plugin already
   guarantees: in the env file its hook fences, never in a prompt or a
-  message. S3 and SQS access is the task role's and never enters the store.
+  message. S3 and SQS access is the runner's own IAM user and never enters
+  the store.
 
 ## What self-hosting users keep
 
@@ -331,3 +458,14 @@ through the pipeline yet (one Etsy draft, never activated), the Instagram
 adapter is disabled, multicolour files are quoted as one filament, and there
 is no quantity variation on a listing. Before a seller pays, our own shop
 runs one model through the hosted path to a live listing and a sale.
+
+## The contract (2026-10-25)
+
+Three documents cross the plugin's boundary, each with one JSON Schema under
+`plugins/dapilot/schema/` and a `schema_version`: the director's events
+(`runs/<run>/events.jsonl`, one per line), the ledger's markers, and the
+outcome of a run (`ledger.py outcome`). The runner forwards the events file
+and posts the outcome; it reads no work dir and parses no log line. The 3dapi
+backend vendors the schemas (`backend/scripts/vendor-dapilot-schemas.sh`) and
+refuses a document that breaks them. `docs/state-machine.md` names every
+state behind the documents and who may move it.

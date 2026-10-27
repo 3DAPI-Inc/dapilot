@@ -101,8 +101,11 @@ Scripts are addressed through `${CLAUDE_PLUGIN_ROOT}` so the step works
 wherever the plugin is installed:
 
 ```
-3. Run `python ${CLAUDE_PLUGIN_ROOT}/scripts/analyze_mesh.py $SOURCE > $WORKDIR/analysis.json`.
-   Non-zero exit: stop, return ok:false with stderr as the reason.
+3. Run `python ${CLAUDE_PLUGIN_ROOT}/scripts/analyze_mesh.py $SOURCE --out $WORKDIR/analysis.json`.
+   Non-zero exit: stop, return ok:false with the script's reason. The
+   script writes its own output file, atomically; a step never redirects
+   a script's stdout into a stage output, because a worker that dies
+   mid-step would leave an empty file the ledger reads as done.
 ```
 
 **A judgement step** names the inputs, the question, and the output:
@@ -237,8 +240,8 @@ A work dir exists with source.<ext> in it and no analysis.json.
 
 ## Procedure
 1. If `analysis.json` exists, return `{"ok":true,"cached":true,...}` and stop.
-2. Run `python ${CLAUDE_PLUGIN_ROOT}/scripts/analyze_mesh.py $WORKDIR/source.* > $WORKDIR/analysis.json`.
-   Non-zero exit: return ok:false, reason = stderr, stop.
+2. Run `python ${CLAUDE_PLUGIN_ROOT}/scripts/analyze_mesh.py $WORKDIR/source.* --out $WORKDIR/analysis.json`.
+   Non-zero exit: no file was written; return ok:false with the script's reason, stop.
 3. Read analysis.json. If `bodies` > 1 and `largest_body_frac` < 0.9, note
    "multi-part, N bodies" in the summary. That is the only judgement here:
    flagging that downstream stages should expect an assembly.

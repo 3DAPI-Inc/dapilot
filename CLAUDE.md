@@ -16,9 +16,14 @@ addition has to fit it.
 
 Read before building anything:
 
+- `docs/documentation.md`  the user documentation, two parts: the Claude
+  plugin on a seller's own machine, and the platform integration at
+  dapilot.dapi.digital. Written for sellers and operators, not builders
 - `docs/agents.md`  the swarm hierarchy: roles, what each may and may not
   do, how work is handed over, and the rules that stop reruns and loops
 - `docs/skills.md`  how a skill is written, tested and judged
+- `docs/state-machine.md`  every state a run, an item and a stage can be in,
+  who moves it, which file holds it; the contract's schemas encode it
 - `docs/market-research.md`  how viability and price are decided, what the
   runs showed, and the open decisions
 - `docs/changelog.md`  the dated build log, moved out of this file on
@@ -91,7 +96,8 @@ anything the pipeline produced.
   that runs the released plugin unchanged on ECS Fargate, driven by an SQS
   queue and S3, with the stack and the web app in the 3dapi repository. It
   touches the plugin only through the surface every local user has: a store
-  directory, env, the director's command line and the files it writes.
+  directory, env, the director's command line, its `events.jsonl` and
+  `ledger.py outcome`.
   Nothing in `runner/` is a dependency of the plugin.
 - **The skills will be published.** They drive 3DAPI through its documented
   public API and are meant to be usable by anyone holding a 3DAPI API key.
@@ -116,19 +122,75 @@ sell, and nothing after the price runs until a person approves it.
 |---|---|---|---|---|
 | analyze | worker, `analyze-model` | `source.*` | `analysis.json` | `analyze_mesh.py`: bodies, watertightness, volume, bounding box. A cheap pre-check, not a source of truth |
 | quote | worker, `quote-model` | source, analysis | `quote.json` | `quote.py`: upload, create, poll 3DAPI's quote. Named by sha256, never sliced twice, resumable |
-| preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20) |
-| research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict |
+| preview | script, `preview_model.py` | source, analysis | `renders/draft_00.png` and 7 more, `renders/render.json` | `capture_turntable.py --mode draft`: 8 WebGL frames in headless Chrome, about 3 s. No judgement, no worker, no tokens (script stage since 2026-10-20). Since 2026-10-26 the seller's browser draws them first for a plain file (STL, OBJ, PLY) at upload and the script keeps a whole set from any renderer; a half set is drawn again |
+| research | worker, `research-comparables` | meta, analysis, quote, drafts | `comparables.json`, `viability.json` | `etsy_search.py` fetches the aisle, the model writes relevance rules, `market_stats.py` builds the per-unit band, the offer, fees, margins and the verdict. `meta.json` may carry the seller's `description` (`run_intake.py --description`, 2026-10-23), read as a witness beside the filename |
 | price | worker, `propose-price` | quote, comparables, viability, drafts | `price.json` | `price_candidates.py` computes the candidates and the break-even floor; the model picks one; `--check` refuses anything below the floor |
-| gate | a person | `price.json` | `price.approved.json` | The one approval. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
+| gate | a person | `price.json`, or `price.rejected.json` | `price.approved.json` | The one approval, also when the script rejected every candidate: the gate then has no proposal and the person sets a price at or above the floor (2026-10-26; before, a rejected item showed as a question with nothing to answer it). `ledger.py outcome` gives the gate a `market` block: the band, 3DAPI's cost, the floor, the verdict and the heaviest comparable listings. `/dapilot:review` asks per item with the computed candidates and a typed-price field, `approve_price.py approve` enforces the floor, writes the file, files the product record and starts the rest; the console's job page (`POST /jobs/{id}/price`) does the same |
 | design | `product-designer`, `design-product` | source, analysis, drafts, price, approval, comparables | `design.json`, `design/` | The model names the product and writes one brief; `design_product.py` captures stills and makes four lifestyle photos and one clip on fal; the model reviews the contact sheet and rejects what misrepresents the product |
 | copy | worker, `write-listing` | design, approval, comparables, quote | `listing.json`, `social/posts.json` | One draft of Etsy title, description, tags, materials and social captions; `listing_copy.py check` validates and splits it |
 | publish | script, no worker | listing, design, approval | `published.json`, `publish.json` | `publish_product.py`: Etsy draft, media upload, activate (0.20 USD), then every enabled social post |
 
 **Failure is a file.** A stage that ends failed or blocked gets
-`<stage>.failed.json` or `<stage>.blocked.json` in the work dir. The ledger
-will not dispatch it in any run until a person clears it (Try again on the job
-page, or `rm`). No stage asks a person a question mid-run; copy picks its own
-category when research found no comparables.
+`<stage>.failed.json` or `<stage>.blocked.json` in the work dir, carrying the
+worker's transcript path (`worker_log`, under `runs/<id>/workers/`) and the
+script's error code when it gave one. The ledger will not dispatch it in any
+run until a person clears it (Try again on the job page, or `rm`). No stage
+asks a person a question mid-run; copy picks its own category when research
+found no comparables.
+
+**A done stage can be for review (2026-10-23).** `check_outputs.py` reads
+every stage's output when the ledger records it done. A hard problem (the
+file does not parse, a field every reader needs is missing) is the attempt
+failed: the file is set aside under `.redo/` and the stage is queued again
+within its attempts. A soft problem (no comparables, a price under its own
+floor, fewer photos than the standard, three tags) leaves the stage done and
+the run going, writes `<stage>.review.json` with the problems and `review`
+on the record. Nothing waits for it. `ledger.py retry` on a done stage that
+holds a review marker (or with `--redo`) sets its outputs aside and runs it
+again, only while no later stage has used them. The checks are lax on
+purpose: review should be rare and a failed attempt rarer.
+
+**The contract is three schemas, and the ledger is the only reader
+(2026-10-25).** `plugins/dapilot/schema/` holds `event.schema.json`,
+`marker.schema.json` and `outcome.schema.json` with a `VERSION` (major.minor,
+a reader accepts any minor of its major) and example documents;
+`scripts/contract.py` validates against them and `contract.py selftest` runs
+the examples (in `test_phase0.sh` and the runner's `doctor.sh`). The director
+writes one validated event per line to `runs/<id>/events.jsonl` (run.refused,
+run.preflight, run.started, pass.dispatched, stage.result, stage.review,
+run.stopped, run.ended, log); the stderr log says the same in words and is not
+a contract. The ledger validates every marker it writes and `ledger.py outcome
+--run <id>` emits the one document everything else reads: items, stages,
+gates, markers, media; a run with no state is a valid outcome with `started`
+false. The hosted runner forwards the events file and posts that outcome, and
+reads no work dir itself; the 3dapi backend validates both against a vendored
+copy of the schemas. `approve_price.py pending`, `server/app.py` and
+`watch_run.py` still read work dirs and the stderr log; they follow in a later
+pass. `docs/state-machine.md` is the page behind all of this. **Since
+2026-10-26 the outcome carries what each stage made:** every stage that has
+run has a `report` (the ledger's `stage_report`, read from the stage's own
+files: measurements, the 3DAPI price and metrics, research's identity, word
+rules, search counts, verdict, band and every selected listing with its weight
+share and relevance, up to 40, plus the nearest rejects, the proposal and the approval, the design name,
+scenes and review, the listing text, the Etsy state and link) and an `account`
+(the worker's paragraph from the work dir's `log.md`), so the dashboard shows
+the words and figures instead of "this stays on the runner". A script stage's
+`summary` is a sentence (`script_summary`), not the script's JSON.
+
+**The director checks every connection first.** `run_intake.py` runs
+`integrate.py test` for what the enabled stages will need (3DAPI, the Etsy
+app key for research and the shop token when publish is live, fal for
+design, the Anthropic key when billing to it) and does not start on a
+failure, so a dead token is found before fal is paid. `--no-preflight`
+skips it. `--preflight seller` (2026-10-25) checks only what belongs to the
+seller, the 3DAPI key and the Etsy shop token when publish is live: the hosted
+runner passes it, having tested the platform's own values (the Etsy app key,
+fal, the Anthropic key, the public API's address) once at container start
+through `consumer.py preflight` in `doctor.sh --serve`, so a platform
+credential fails the deploy and never a seller's run. SIGTERM or SIGINT end the run cleanly: every worker's process
+group gets the signal, the ledger records them `--interrupted` (queued
+again, attempt not counted), the heartbeat file goes and the summary says
+`stopped`; a resume continues from there.
 
 **The session hears the run.** The plugin's monitor
 (`monitors/monitors.json`, `scripts/watch_run.py`) runs for the whole
@@ -202,13 +264,49 @@ Resume button picks up every work dir with a stage left and no live worker.
 
 ### Design
 
-- Config in `store/config.json` under `design`: four stills at 2048 px from
-  the browser studio (`/studio`, headless Chrome), four lifestyle photos
+- Config in `store/config.json` under `design`: four stills at 1024 px from
+  the browser studio (`/studio`, headless Chrome; 2048 until 2026-10-26, see
+  the studio bullet), four lifestyle photos
   (`fal-ai/nano-banana-pro/edit`, about 0.15 USD each) from the chosen still
-  plus two other sides, one 6 s clip (`minimax/h3-max/image-to-video`, about
-  0.96 USD) animated from the lifestyle photo the brief names. A standard
-  item is about 1.56 USD against `usd_cap_per_item`. A rejected or failed
-  paid asset is remade once with the rejection in its prompt.
+  plus two other sides, one 6 s silent clip at 1080p
+  (`blackforestlabs/flux-3-max/image-to-video` since 2026-10-23; 0.29 USD/s
+  at list, so 1.74 a clip, 0.0725/s until 2026-11-07; 720p is 0.17/s and a
+  config value) animated from the lifestyle photo the brief names. A
+  standard item is about 2.34 USD at list against `usd_cap_per_item` (3.0),
+  so a clip remade after a rejection does not fit at list price. A rejected
+  or failed paid asset is remade once with the rejection in its prompt.
+  `generate_video.py i2v_payload` knows the FLUX and the MiniMax request
+  shapes, so `--endpoint minimax/h3-max/image-to-video` still works.
+- **The seller's browser is the first renderer; the runner is the fallback
+  (2026-10-26).** The dashboard opens the plugin's own studio page, vendored
+  into the web app under `/studio`, in a hidden iframe (`post=parent`: frames
+  and reports come back as window messages) and PUTs the frames into the
+  item's work dir through presigned URLs, the record last. At upload, eight
+  drafts of a plain file (`renders/`, `render.json`). At the gate, a grid of
+  stills, twelve yaws at elevations 20 and 35 at 1024 px
+  (`design/frames/grid/`, `grid.json`), drawn from `display.ply` when the
+  item has one so a painted or assembled 3MF comes in its real colours, in
+  the filament colour the seller picks from the palette, which also rides on
+  the approval (`approve_price.py --color`, `price.approved.json.color`).
+  `design_product.py context` shows the designer `approved.color` and
+  `grid`; `check` snaps the brief onto the grid, forces the seller's colour
+  and `rotate 0,0,0`, and the stills step copies the frames and draws
+  nothing. Any set counts only whole, so a closed tab leaves nothing that
+  passes and the runner draws as before. Measured: 24 grid frames of the
+  duck's painted mesh in 15 s on a laptop GPU, against two minutes a still
+  on the runner.
+- **The seller's description reaches the designer and the writer verbatim
+  (2026-10-26)**, as `seller_says` in `design/context.json` and
+  `copy/context.json`, and both skills say it outranks research's identity
+  and the geometry on what the product is and is for: a scene shows the
+  stated use, and a doubt goes into the brief's `reason`, not into a quieter
+  product. Before, only research's reading reached design, and a squirrel
+  light switch cover was staged as a bookshelf ornament because no switch
+  cutout showed in the drafts.
+- **The designer runs on Opus (2026-10-23)**, `model: opus` in
+  `agents/product-designer.md`; the catalogue worker stays on Sonnet. Design
+  is the one stage with a vision review, and the stage whose reviewer passed
+  a detached tail fin and whose worker misread its token cap as the fal cap.
 - **The studio page ships with the plugin; Blender is gone (2026-10-20).**
   `plugins/dapilot/studio/` is the built console, committed, refreshed with
   `scripts/dev/build_studio.sh` after any change to the studio code.
@@ -216,13 +314,33 @@ Resume button picks up every work dir with a stage left and no live worker.
   unless `--studio` or `DAPILOT_STUDIO_URL` names a running console, so an
   installed plugin renders drafts and stills with headless Chrome and
   nothing else. Every render is WebGL: the preview drafts (`--mode draft`,
-  8 frames at 512 px, about 3 s), the four 2048 px stills (about 8 s) and
-  the turntable. `render_model.py`, `render_scene.py` and
+  8 frames at 512 px, about 3 s), the four product stills (1024 px since
+  2026-10-26; 2048 before) and the turntable. `render_model.py`, `render_scene.py` and
   `render_turntable.py` stay in the tree for reference and are run by
   nothing; the Blender fallback in `design_product.py` and the
   `design.stills.blender` config are removed. Measured against Blender on
   the sphere fixture: 3 s against 48 s for the eight drafts, softer
-  highlights, the same yaws.
+  highlights, the same yaws. **The page reports while it draws
+  (2026-10-26):** a word to the driver before every frame, a heartbeat every
+  5 s during one from a Web Worker (the main thread is blocked while a frame
+  is read back, so a timer there never fired), its reason when it fails, done
+  at the end; the driver prints
+  `capture: frame 2/4 beauty yaw 0: drawing, 95 s` to stderr on every change
+  and gives the page up only after `--stall` seconds of silence (60), never
+  for being slow. Chromium's stderr is kept in `OUT/.chrome.log` and its tail
+  goes into a failure. Before this, a hosted still that took longer than 120 s
+  on the two-core Coolify host (no GPU, SwiftShader on the CPU, about 70x the
+  laptop) was reported as "the page stopped sending" and the Benchy's design
+  blocked three runs running. **Captures are cheap by default (2026-10-26):**
+  1024 px stills (`design.stills.size`, a release-owned key the hosted runner
+  refreshes in every seller's config), no multisampling (`aa=0` in the page
+  URL; `--antialias` turns it back on) and a 1024 px shadow map
+  (`--shadow-map`), the console keeping its 2048 and antialiasing. The stills
+  are fal's input and the listing's extras, and Etsy shows them at 1000 px
+  or less. `--software` renders on SwiftShader on any system, to measure what
+  the hosted runner will take. Blender's Workbench was considered and
+  dropped: it needs an OpenGL context, which on a server means Mesa's
+  llvmpipe, another CPU renderer, with Blender in the image for nothing.
 - The 240-frame studio turntable is a fallback only (`turntable.when`):
   rendered when fal failed to make the clip. A clip the reviewer rejected
   gets no video at all. Nothing downstream may depend on the turntable.
@@ -245,7 +363,16 @@ Resume button picks up every work dir with a stage left and no live worker.
   runs every stage but creates nothing on Etsy and posts nothing, writing
   `published.json` marked `sandbox` so the run completes. The Settings tab of
   `/dapilot:config` switches it; the template seeds new stores as sandbox, a
-  store without the key is live. A sandbox `published.json` is not cached
+  store without the key is live. On the hosted tier the backend's
+  `DAPILOT_PUBLISH_MODE` sets it for every seller through the limits route
+  (2026-10-26); a live publish needs a shop token with `listings_w`, which
+  the platform asks for since the same day, so a shop connected earlier must
+  be authorized again (the Integrations card says so and offers Authorize
+  shop again). Connecting is two steps on that card since 2026-10-26:
+  Integrate takes the seller's own Seller App keystring and shared secret,
+  checked with Etsy and saved; Authorize shop opens Etsy's consent in a new
+  tab that ends on `/integrations/etsy` saying it is done, with the refresh
+  token stored on the platform. A sandbox `published.json` is not cached
   once the mode is live: running `publish_product.py` again publishes.
 - The person's approval of the price is the gate for all of it.
   `publish.auto_activate` and `publish.auto_post` in config hand either half
@@ -391,14 +518,18 @@ plugins/
       write-listing/              Etsy text and social captions as one draft
       render-model/               retired 2026-09-13, kept for reference
       run-intake/                 director skill; reference/stages.json is the stage table
+      supervise-run/              how the supervisor decides; eval/stops.jsonl are real stops with the expected action
     agents/
       catalogue-lead.md           spawns catalogue-worker and product-designer only
       catalogue-worker.md         no Agent tool; one stage on one item
       product-designer.md         worker for the design stage; loads only design-product
+      supervisor.md               the hosted supervisor's judgement: one stopped stage in, retry, redo or leave out (2026-10-26)
     scripts/
       run_intake.py               the headless director: one per upload, workers are claude -p
       ledger.py                   run state: init, next, record, status, report; the only writer
       validate_result.py          the result-line contract check
+      check_outputs.py            hard and soft problems in a stage's output files; the ledger runs it at record
+      contract.py                 validates events, markers and outcomes against schema/; `selftest` runs the examples
       dapi.py                     spec-driven client: spec, ops, describe, validate, call, upload
       analyze_mesh.py load_3mf.py make_fixtures.py quote.py strip_3mf.py assembly_3mf.py source_thumbnails.py
       preview_model.py            the preview stage script: eight WebGL drafts through capture_turntable
@@ -408,6 +539,7 @@ plugins/
       etsy_search.py etsy_auth.py market_stats.py pricing.py price_candidates.py product_record.py
       listing_copy.py etsy_listing.py publish_product.py
       social_post.py social/      Integration and Session contracts, instagram_api
+    schema/                       the contract: event, marker and outcome JSON Schemas, VERSION, examples/
 docs/
   agents.md skills.md store-plan.md market-research.md social-plan.md quickstart.md changelog.md
   hosting.md                      the hosted tier: runner, queue, storage, accounts, what is not built
@@ -475,7 +607,8 @@ cd frontend && npm run dev                               # :8081; starts the job
 Chrome is found at the default macOS path or via `CHROME` in `store/.env`;
 the preview and design stages need it and ffmpeg, nothing else. Measured on
 the reference laptop (4 cores): eight drafts about 3 s, four 2048 px stills
-about 8 s; slicer 18 to 40 s per file; studio-only design run 7 min and 37
+about 8 s on the GPU, four 1024 px stills 36 s on SwiftShader (`--software`;
+147 s at the old 2048 px with antialiasing); slicer 18 to 40 s per file; studio-only design run 7 min and 37
 turns.
 
 Environment every skill expects, in `store/.env` (gitignored), which
@@ -491,7 +624,8 @@ DAPILOT_STORE_DIR store-private files (keys, Etsy token, config, fee schedule, p
                   quickstart, the hook) uses that rule and exports the result to what it starts.
                   On the dev Mac, ~/.claude/settings.json `env` pins it and DAPILOT_PYTHON to the
                   checkout, so a Code-tab worktree never starts a fresh store or venv.
-ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app; the OAuth token is $DAPILOT_STORE_DIR/etsy_token.json
+ETSY_KEYSTRING, ETSY_SHARED_SECRET   Etsy Open API v3 app; the keystring is Etsy's name for the API key (the 3DAPI
+                  backend holds it as ETSY_API_KEY); both required by preflight. OAuth token: $DAPILOT_STORE_DIR/etsy_token.json
 FAL_KEY (or FAL_API_KEY)             fal.ai, design stage paid assets only
 ANTHROPIC_API_KEY                    makes headless runs bill to the API instead of a subscription
 ```
@@ -501,10 +635,24 @@ fall back to a default host. Use a key with only the scopes the run needs:
 PRICING for intake, ORDER for order triage, a separate print-farm key for
 fulfilment.
 
-Cost per item at current caps: research 1.2, price 0.6, design 1.5, copy 0.8
-USD of worker budget, about 1.56 USD of fal assets, 0.20 USD to activate on
-Etsy. Run ceiling 15 USD. Turns per worker, not routing, is where the money
-goes.
+Cost per item at current caps: research 1.2, price 0.6, design 5.0, copy 0.8
+USD of worker budget, about 2.34 USD of fal assets at list (1.04 during the
+FLUX promotion), 0.20 USD to activate on Etsy. Run ceiling 15 USD, on the
+workers' cost. **Spend is counted in three kinds (2026-10-26):** the ledger
+gives every stage a `spend` of `workers` (every attempt's Claude cost),
+`assets` (the design stage's fal spend, from `design.json`) and `fees`
+(Etsy's listing fee, counted only when `published.json` says the listing is
+live and active), each item their sum, and the run's `cost` carries
+`assets_usd`, `fees_usd` and `total_usd` beside the workers' `usd`; the
+`stage.result` and `run.ended` events carry the same `spend` (contract 1.2).
+Before this every figure was workers only. **On the hosted tier none of it
+reaches the seller (2026-10-26):** the backend stores the outcome and the
+events whole and sums the run's cost into a column for admins, and every
+seller-facing route and the live stream strip `usd`, `spend`, `cost` and
+the director's budget before answering; the seller pays in credits and the
+dashboard shows no money figure. Turns per
+worker, not routing, is where the money goes; the designer on Opus costs
+about twice the Sonnet rate per token.
 
 ## 3MF
 

@@ -166,6 +166,8 @@ def cmd_context(a) -> int:
     words = " ".join(str(x) for x in (design.get("name"), comps.get("product"), identity.get("object")) if x)
     ctx = {
         "ok": True, "name": design.get("name"), "identity": comps.get("identity"),
+        # the seller's own words about the object, verbatim (2026-10-26): what it is and what it is for
+        "seller_says": (read(wd / "meta.json") or {}).get("description") or None,
         # The unit of sale: `units` of the product per purchase at the approved price. The title and
         # description say the count when it is more than one; `check` refuses a draft that does not.
         "offer": offer_of(wd, approved),
