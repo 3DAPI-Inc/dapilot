@@ -29,7 +29,9 @@ An approval only stands for what it meant when it was given. `publish.auto_since
 automatic publishing was switched on; a price approved before it gets its draft and its media and
 then stops, failed with the reason, until a person approves the price again.
 
-Exit 0 done, 1 failed, 2 missing inputs, 3 a platform has not shown a post yet (run again).
+Exit 0 done, 1 failed, 2 missing inputs, 3 a platform has not shown a post yet (run again). A failure carries
+`error` when the script knows its kind: `config.etsy_unauthorized` when the store has no Etsy shop token, which
+the supervisor leaves for the seller and retries once the shop is connected (2026-11-02).
 """
 from __future__ import annotations
 
@@ -106,7 +108,16 @@ def main() -> int:
     if a.dry_run and sandbox:
         return emit({"ok": True, "dry_run": True, "sandbox": True,
                      "would": ["create nothing on Etsy and post nothing (publish.mode is sandbox)", "write published.json marked sandbox"]})
+    # The shop's OAuth token is the seller's own step (Authorize shop on the Integrations page). Without it every
+    # Etsy call below died on a missing file, a sentence the supervisor had no rule for; since 2026-11-02 the stage
+    # stops here with its own code, config.etsy_unauthorized, so a hosted run is taken up again when the shop is
+    # connected, and the director's preflight lets a run start without the shop (its warning says publish will wait).
+    token = Path(store) / "etsy_token.json"
+    unauthorized = {"ok": False, "error": "config.etsy_unauthorized",
+                    "reason": "the Etsy shop is not authorized: connect your shop on the Integrations page, then publish runs again"}
     if a.dry_run:
+        if not token.exists():
+            return emit({"ok": True, "dry_run": True, "would": [f"stop: {unauthorized['reason']}"]})
         pub = read(wd / "publish.json") or {}
         return emit({"ok": True, "dry_run": True, "would": [
             "use the existing draft" if pub.get("listing_id") else "create the Etsy draft",
@@ -140,6 +151,8 @@ def main() -> int:
         return emit({"ok": True, "sandbox": True, "published": "published.json", "etsy": done["etsy"], "posted": [], "failed": [],
                      "skipped": skipped, "note": "publish.mode is sandbox: nothing was created on Etsy and nothing was posted"})
 
+    if not token.exists():
+        return emit({**unauthorized, "steps": steps}, 1)
     env = ["--env", str(Path(store) / ".env")] if (Path(store) / ".env").exists() else []
     code, res = run("etsy_listing.py", *env, "draft", "--workdir", str(wd))
     if not step("etsy draft", code, res):

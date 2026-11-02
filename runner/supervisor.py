@@ -260,7 +260,10 @@ def handle(body: dict, backend: SupervisorBackend, queue: SelfQueue) -> dict:
         log(f"{tag}: the model could not decide ({meta.get('error')}); the rules do")
         d = decide(stop)
     d = guard(d, stop, item_rec)
-    common = {"item": item, "stage": stage, "code": d.code, "why": d.why, "retries": stop.retries,
+    # `error` is the script's own code for the stop (config.etsy_unauthorized, config.env_missing, ...), beside the
+    # decision's `code`, which is `model.<confidence>` when the model decided: the backend reads either to know a
+    # left stop is about configuration and sends it again when the seller's configuration changes (2026-11-02).
+    common = {"item": item, "stage": stage, "code": d.code, "why": d.why, "retries": stop.retries, "error": stop.error,
               "trigger": body.get("trigger"), "decided_by": d.decided_by, "usd": meta.get("usd", 0.0)}
     if d.action == "redo":
         backend.event(seller, run, "supervisor.redo", redo_stage=d.redo_stage, **common)

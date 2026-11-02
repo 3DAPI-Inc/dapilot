@@ -190,20 +190,30 @@ def preflight(cfg: dict, stages_file: str | None, scope: str = "all") -> dict:
     if scope == "seller":
         # The 3DAPI key is the seller's; so is the Etsy shop. The app key, fal and Anthropic are not.
         needed = [(iid, tok) for iid, tok in needed if iid == "dapi" or (iid == "etsy" and tok)]
-    checked, failed = [], []
+    checked, failed, warnings = [], [], []
     for iid, want_token in needed:
         p = subprocess.run([sys.executable, str(INTEGRATE), "test", "--integration", iid],
                            capture_output=True, text=True, env=os.environ)
         res = last_json_line(p.stdout) or {"ok": False, "summary": (p.stderr or p.stdout)[-200:] or "no answer"}
         ok = bool(res.get("ok"))
-        # Etsy answers "app key verified; shop not authorized yet" with ok false and action authorize: research
-        # needs only the app key, so that is fine unless publish is live and needs the shop.
-        if iid == "etsy" and not ok and res.get("action") == "authorize" and not want_token:
+        warning = None
+        # Etsy answers "app key verified; shop not authorized yet" with ok false and action authorize. Research
+        # needs only the app key, so that is fine. Publish needs the shop, but a shop the seller has not connected
+        # yet is their next step, not a reason to refuse the run (2026-11-02; until then a live run stopped here,
+        # exit 2, and the supervisor never saw it): the run goes through copy, the publish stage stops with
+        # config.etsy_unauthorized, and the supervisor takes it up again once the shop is connected. The app key
+        # itself missing or refused still fails here: that is the platform's, and no stage would work.
+        if iid == "etsy" and not ok and res.get("action") == "authorize":
             ok = True
-        checked.append({"integration": iid, "ok": ok, "summary": res.get("summary")})
+            if want_token:
+                warning = ("the Etsy shop is not authorized yet, so publish will stop until you connect "
+                           "your shop on the Integrations page")
+        checked.append({"integration": iid, "ok": ok, "summary": res.get("summary"), **({"warning": warning} if warning else {})})
         if not ok:
             failed.append(f"{iid}: {res.get('summary') or 'not ok'}")
-    return {"ok": not failed, "checked": checked, "failed": failed}
+        elif warning:
+            warnings.append(f"{iid}: {warning}")
+    return {"ok": not failed, "checked": checked, "failed": failed, "warnings": warnings}
 
 
 def install_stop_handler() -> None:
@@ -503,8 +513,10 @@ def main() -> int:
             print(json.dumps({"ok": False, "reason": "preflight failed: " + text, "preflight": pf, "error": error}))
             return 2
         text = ", ".join(c["integration"] for c in pf["checked"])
+        for w in pf["warnings"]:
+            log("preflight warning: " + w)
         log("preflight ok: " + text)
-        emit(root, run, "run.preflight", ok=True, text=text, checked=pf["checked"], failed=[])
+        emit(root, run, "run.preflight", ok=True, text=text, checked=pf["checked"], failed=[], warnings=pf["warnings"] or None)
     init_args = ["init", "--run", run, "--department", a.department]
     if a.folder:
         init_args += ["--folder", a.folder]
