@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.2",
+  "at": "2026-11-02T10:12:03+00:00",
+  "run": "6dc5267b-e0fa-4956-9519-20bd2c9ae229",
+  "kind": "run.preflight",
+  "data": {
+    "ok": true,
+    "text": "dapi, etsy",
+    "checked": [
+      {
+        "integration": "dapi",
+        "ok": true,
+        "summary": "key accepted"
+      },
+      {
+        "integration": "etsy",
+        "ok": true,
+        "summary": "app key verified (app 1514495627515); shop not authorized yet",
+        "warning": "the Etsy shop is not authorized yet, so publish will stop until you connect your shop on the Integrations page"
+      }
+    ],
+    "failed": [],
+    "warnings": [
+      "etsy: the Etsy shop is not authorized yet, so publish will stop until you connect your shop on the Integrations page"
+    ]
+  }
+}

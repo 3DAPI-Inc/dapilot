@@ -181,7 +181,11 @@ the words and figures instead of "this stays on the runner". A script stage's
 `integrate.py test` for what the enabled stages will need (3DAPI, the Etsy
 app key for research and the shop token when publish is live, fal for
 design, the Anthropic key when billing to it) and does not start on a
-failure, so a dead token is found before fal is paid. `--no-preflight`
+failure, so a dead token is found before fal is paid. One exception since
+2026-11-02: the seller's Etsy shop not authorized yet is a warning on the
+`run.preflight` event, not a refusal; the run goes through copy and the
+publish stage stops with `config.etsy_unauthorized`, which the supervisor
+leaves for the seller and retries once the shop is connected. `--no-preflight`
 skips it. `--preflight seller` (2026-10-25) checks only what belongs to the
 seller, the 3DAPI key and the Etsy shop token when publish is live: the hosted
 runner passes it, having tested the platform's own values (the Etsy app key,

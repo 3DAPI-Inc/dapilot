@@ -75,7 +75,7 @@ line is checked against the schema before it is written.
 | Phase | Event | Exit |
 |---|---|---|
 | Refused before registering anything: no department, no `claude`, no billing key, nothing to run, the ledger would not init | `run.refused` with `reason` and an `error` code | 2 |
-| Credentials checked (`--preflight all` or `seller`) | `run.preflight` with `ok`, `text`, `checked`, `failed` | 2 when not ok |
+| Credentials checked (`--preflight all` or `seller`) | `run.preflight` with `ok`, `text`, `checked`, `failed`, and `warnings` when a connection passed with a caveat (the Etsy shop not authorized yet: publish will stop, 2026-11-02) | 2 when not ok |
 | Items registered | `run.started` with `items`, `workers`, budgets | |
 | A pass dispatches | `pass.dispatched` with the briefs | |
 | A worker or script ends and the ledger records it | `stage.result` with the ledger's `status` (`done`, `queued`, `failed`, `blocked`, or `rejected` when the ledger refused the result) | |

@@ -27,7 +27,7 @@ whether that thing is yours to do. Three answers exist.
 ## How to decide
 
 1. **Read the reason and the code first.** A code from a script
-   (`config.env_missing`, `config.key_rejected`, `upstream.transient`,
+   (`config.etsy_unauthorized`, `config.env_missing`, `config.key_rejected`, `upstream.transient`,
    `upstream.quota`, `content.file`, `content.market`, `worker.timeout`,
    `worker.malformed`, `runtime.tool_missing`) is a fact; trust it over what
    the text looks like. Without a code, read the sentence.
@@ -52,6 +52,10 @@ whether that thing is yours to do. Three answers exist.
    `wait_for` saying exactly what must be set or installed. The one
    exception: `changed` is true, meaning the seller's configuration moved
    since the stop, and the stop was about configuration: then `retry`.
+   `config.etsy_unauthorized` is the seller's own Etsy shop not connected
+   yet (publish stops there since 2026-11-02; the run was let through on
+   purpose): `leave` with `wait_for` "the Etsy shop connected on the
+   Integrations page", and `retry` once `changed` is true.
 7. **Content is a person's.** A file the slicer refuses, a model over the
    plate, no geometry, a market with nothing in it: `leave` with a sentence
    the seller can act on. Do not retry a fact about the file.

@@ -150,6 +150,22 @@ class Review(Failure):
                           wait_for="the seller's judgement; Redo on the dashboard")
 
 
+class ShopUnauthorized(Failure):
+    """The seller's Etsy shop is not connected (no OAuth token in the store). publish_product.py says so with its
+    own code since 2026-11-02; the patterns cover the older runs where etsy_listing.py died on the missing file."""
+    code = "config.etsy_unauthorized"
+    meaning = "the seller's Etsy shop is not authorized yet; the Integrations page connects it"
+    patterns = (
+        r"shop is not authori[sz]ed", r"shop not authori[sz]ed", r"etsy_token\.json not found", r"run `?etsy_auth\.py login`? first",
+    )
+
+    def decide(self, stop: Stop) -> Decision:
+        if stop.changed:
+            return self.retry(stop, "the seller's configuration changed since the stop; the shop may be connected now")
+        return self.leave(stop, "the Etsy shop is not connected and a retry cannot connect it",
+                          wait_for="the Etsy shop connected on the Integrations page")
+
+
 class ConfigMissing(Failure):
     code = "config.env_missing"
     meaning = "a credential or variable the stage needs is not set for this seller or this runner"
@@ -285,7 +301,7 @@ class Unknown(Failure):
 
 # Order matters for the text tier only: specific before general, and Unknown last.
 KINDS: tuple[type[Failure], ...] = (
-    Blocked, ConfigMissing, KeyRejected, UpstreamQuota, ContentFile, ContentMarket,
+    Blocked, ShopUnauthorized, ConfigMissing, KeyRejected, UpstreamQuota, ContentFile, ContentMarket,
     WorkerTimeout, WorkerMalformed, RuntimeToolMissing, UpstreamTransient, Unknown,
 )
 BY_CODE = {k.code: k for k in KINDS}
@@ -318,6 +334,8 @@ FIXTURES: tuple[tuple[str, str], ...] = (
     ("ETSY_KEYSTRING and ETSY_SHARED_SECRET must be set (or pass --env store/.env)", "config.env_missing"),
     ("DAPI_API_KEY or DAPI_API_URL not set", "config.env_missing"),
     ("--billing api but ANTHROPIC_API_KEY is not set", "config.env_missing"),
+    ("the Etsy shop is not authorized: connect your shop on the Integrations page, then publish runs again", "config.etsy_unauthorized"),
+    ("etsy draft: /data/store/etsy_token.json not found; run `etsy_auth.py login` first", "config.etsy_unauthorized"),
     ("worker ended without a result line: Invalid API key · Fix external API key", "config.key_rejected"),
     ("rejected: the platform did not accept the key", "config.key_rejected"),
     ("{\"message\":\"Invalid or inactive API key.\",\"statusCode\":401}", "config.key_rejected"),

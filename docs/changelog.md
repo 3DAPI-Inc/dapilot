@@ -5,6 +5,24 @@ The dated build log that lived in CLAUDE.md under "Where this stands" until
 only. Entries are in the order they were written, which is not chronological;
 each carries its own date.
 
+- **An unauthorized Etsy shop no longer refuses the run (2026-11-02).** A
+  seller on staging dropped a model before authorizing their shop; the
+  director's preflight (publish live, so the shop token was wanted) exited 2
+  and the run was `failed` with nothing started, which the supervisor never
+  sees (it reads markers, and a refused director leaves none). Now
+  `preflight()` treats Etsy's "shop not authorized yet" as a warning whatever
+  the publish mode: `run.preflight` carries `warnings` (schema 1.2, a new
+  example), the run goes through copy, and `publish_product.py` stops before
+  its first Etsy call with its own code, `config.etsy_unauthorized`, when the
+  store has no shop token. `triage.py` has the kind (`ShopUnauthorized`,
+  before the general config kinds; two fixtures), the supervise-run skill
+  names it (leave with "the Etsy shop connected on the Integrations page",
+  retry when `changed`; two eval rows), and `supervisor.py` adds the stop's
+  `error` code to every event it posts, because a model-decided leave carries
+  `model.<confidence>` as its `code` and the backend's resend of open config
+  stops (on Etsy connect, on start) matched only `config.*` there, so no
+  model-decided config stop was ever resent. The app key missing or refused
+  still refuses the run: that is the platform's, and no stage would work.
 - **The supervisor is a model (2026-10-26).** It was `triage.py`: 29 regular
   expressions over the failure text, a fixed policy per class, and an
   `Unknown` whose log was the backlog of patterns to add, the patch cycle
