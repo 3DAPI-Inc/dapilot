@@ -111,6 +111,13 @@
                   "type": "string"
                 }
               },
+              "warnings": {
+                "description": "connections that passed with a caveat a stage will stop on later, e.g. the Etsy shop not authorized yet (2026-11-02); each a sentence for the seller",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "error": {
                 "type": [
                   "string",

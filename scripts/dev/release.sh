@@ -6,6 +6,11 @@
 #   scripts/dev/release.sh 0.3.0           an exact version
 #   scripts/dev/release.sh ... --no-push   commit and tag only
 #
+# Since 2026-10-27 CI runs this on every push to main that touches the plugin,
+# the runner or the marketplace manifest (.github/workflows/release.yml), so a
+# merge to main is a release; `release: minor` in a commit message makes it a
+# minor one. Running it by hand is for a release off another branch.
+#
 # Why the bump matters: plugin.json carries a `version`, and Claude Code only
 # delivers an update to installed copies when that string changes. Pushing
 # commits without a bump leaves every user on the old copy and
@@ -40,7 +45,8 @@ fi
 STUDIO="$ROOT/plugins/dapilot/studio/index.html"
 if [ ! -f "$STUDIO" ]; then
   echo "plugins/dapilot/studio is missing; run scripts/dev/build_studio.sh and commit it first" >&2; exit 1
-elif [ -n "$(find frontend/src/lib/model frontend/src/pages/Studio.tsx -newer "$STUDIO" 2>/dev/null)" ]; then
+elif [ -z "${CI:-}" ] && [ -n "$(find frontend/src/lib/model frontend/src/pages/Studio.tsx -newer "$STUDIO" 2>/dev/null)" ]; then
+  # file times mean nothing in a fresh CI checkout, so the check is for a working copy only
   echo "warning: frontend studio code is newer than plugins/dapilot/studio; run scripts/dev/build_studio.sh, commit, then release" >&2
 fi
 
@@ -89,6 +95,6 @@ else
 fi
 
 # Refresh a CLI install made from this checkout so the next session loads these files.
-if claude plugin list --json 2>/dev/null | grep -q '"id": *"dapilot@dapilot"'; then
+if [ -z "${CI:-}" ] && claude plugin list --json 2>/dev/null | grep -q '"id": *"dapilot@dapilot"'; then
   claude plugin update dapilot@dapilot 2>&1 | tail -1
 fi
