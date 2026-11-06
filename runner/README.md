@@ -184,7 +184,11 @@ production once with zero tasks; the Coolify host made them unnecessary.
 
 ## Updating the plugin in production
 
-Release the plugin (`scripts/dev/release.sh`), then point the Coolify
-resource at the new tag and redeploy; Coolify rebuilds the image from it.
-Read the changelog first: a release that changes what a stage writes changes
-what the dashboard reads.
+A push to main that touches `plugins/`, `runner/` or the marketplace manifest
+is a release: `.github/workflows/release.yml` runs `scripts/dev/release.sh`,
+which bumps `plugin.json`, validates, commits the bump and pushes the tag
+`v<version>` (patch, or `release: minor` / `release: major` in a commit
+message). The run's summary names the tag. Then point the Coolify resource
+at that tag and redeploy; Coolify rebuilds the image from it. Read the
+changelog first: a release that changes what a stage writes changes what the
+dashboard reads.

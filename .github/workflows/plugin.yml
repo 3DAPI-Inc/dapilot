@@ -1,8 +1,9 @@
 # The plugin is installed straight from this repository through
 # `claude plugin marketplace add 3DAPI-Inc/dapilot`, so a push is a release.
 # This checks what a user's install would read: both manifests validate under
-# --strict, and a pull request that changes the plugin also moves its version,
-# because Claude Code only delivers an update when plugin.json's version changes.
+# --strict. The version itself moves on main, by release.yml, the moment a
+# change to the plugin lands there (since 2026-10-27); a pull request no longer
+# has to carry the bump, and one that does is simply a release from that point.
 name: plugin
 
 on:
@@ -27,18 +28,3 @@ jobs:
         run: claude plugin validate --strict plugins/dapilot
       - name: Validate the marketplace manifest
         run: claude plugin validate --strict .
-      - name: Version moved with the plugin
-        if: github.event_name == 'pull_request'
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          manifest=plugins/dapilot/.claude-plugin/plugin.json
-          changed=$(git diff --name-only "$BASE" HEAD -- plugins/dapilot | grep -v -c "^$manifest$" || true)
-          if [ "$changed" = 0 ]; then echo "plugin unchanged"; exit 0; fi
-          old=$(git show "$BASE:$manifest" | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])')
-          new=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$manifest")
-          if [ "$old" = "$new" ]; then
-            echo "::error file=$manifest::$changed plugin file(s) changed but version is still $old; run scripts/dev/release.sh"
-            exit 1
-          fi
-          echo "version $old -> $new"
