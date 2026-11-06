@@ -1,0 +1,85 @@
+# A push to main is a release. This bumps plugin.json, validates, commits the
+# bump, tags v<version> and pushes, through scripts/dev/release.sh, so nobody
+# has to remember to run it: Claude Code only delivers an update to installed
+# copies when the version string changes, and Coolify rebuilds the runner from
+# a tag.
+#
+# What counts as a release: a push that touches the plugin, the runner or the
+# marketplace manifest. A docs-only push bumps nothing.
+#
+# How far it bumps: patch, unless a commit message in the push says
+# `release: minor` or `release: major` (`release: 0.3.0` for an exact version).
+#
+# No loop: the bump is pushed with the workflow's own token, and a push made
+# with that token starts no workflow. The commit is also recognisable
+# ("dapilot X.Y.Z" by github-actions[bot]) and skipped if it ever arrives
+# another way.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether and how far to bump
+        id: plan
+        env:
+          BEFORE: ${{ github.event.before }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+          HEAD_AUTHOR: ${{ github.event.head_commit.author.name }}
+        run: |
+          # the bump commit itself, should it ever trigger a run
+          if printf '%s' "$HEAD_MESSAGE" | grep -qE '^dapilot [0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "head is a release commit ($HEAD_MESSAGE); nothing to do"
+            echo "part=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git cat-file -e "$BEFORE" 2>/dev/null; then range="$BEFORE..HEAD"; else range="HEAD~1..HEAD"; fi
+          # a release only when something a release carries changed
+          changed=$(git diff --name-only $range -- plugins runner .claude-plugin | wc -l | tr -d ' ')
+          if [ "$changed" = 0 ]; then
+            echo "nothing under plugins/, runner/ or .claude-plugin/ changed in $range; no release"
+            echo "part=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          part=patch
+          asked=$(git log --format=%B $range | grep -oiE 'release: *(minor|major|[0-9]+\.[0-9]+\.[0-9]+)' | tail -1 | sed -E 's/release: *//I' | tr 'A-Z' 'a-z')
+          [ -n "$asked" ] && part="$asked"
+          echo "$changed file(s) changed in $range; bump: $part"
+          echo "part=$part" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.plan.outputs.part != ''
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        if: steps.plan.outputs.part != ''
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Bump, validate, tag, push
+        if: steps.plan.outputs.part != ''
+        env:
+          CI: 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          scripts/dev/release.sh "${{ steps.plan.outputs.part }}"
+
+      - name: What to do next
+        if: steps.plan.outputs.part != ''
+        run: |
+          tag=$(git describe --tags --abbrev=0)
+          echo "::notice title=dapilot $tag released::Point the Coolify runner resource at $tag and redeploy; installed copies update with: claude plugin update dapilot@dapilot"
